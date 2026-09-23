@@ -13,7 +13,17 @@ the Sparkle update description — a release without a section here fails CI.
   (grazr's `$grazr`), the model, context/cache, and 5h/7d usage. grazr's own
   `claude_*` tokens are preferred; herdr-agent-quota's `quota_*` tokens are the
   fallback, so a host running either plugin gets the same block the Herdr TUI
-  shows. Rows without tokens are unchanged.
+  shows. Rows without tokens are unchanged. (#96, thanks @senadaruc!)
+
+### Fixed
+- Terminals you are not looking at no longer render. Since kept-alive
+  attaches (0.6.2), every agent you had opened stayed on screen at zero
+  opacity and kept drawing full-window Metal frames whenever its output
+  changed, so busy agents in other workspaces — worst over SSH and in large
+  windows — made typing in the visible one lag. Hidden attaches, deselected
+  shells, and terminals behind the file manager now tell Ghostty they are
+  occluded: output is still parsed, only drawing pauses, and a pane is
+  current the moment it is shown again. (#95)
 
 ## [0.6.8] - 2026-09-22
 

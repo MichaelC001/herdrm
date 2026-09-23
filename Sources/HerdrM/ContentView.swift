@@ -473,6 +473,7 @@ struct DetailView: View {
                     lineSpacing: terminalLineSpacing,
                     dark: colorScheme == .dark,
                     mouseReporting: terminalMouseReporting,
+                    isVisible: model.selectedShellID == session.id && !model.isFileManagerActive,
                     onAttachmentError: { model.actionError = $0 },
                     onAttachmentUploadingChanged: { uploadingAttachment = $0 },
                     onExit: { _ in model.closeShellSession(session.id) }
@@ -522,6 +523,7 @@ struct DetailView: View {
                     lineSpacing: terminalLineSpacing,
                     dark: colorScheme == .dark,
                     mouseReporting: terminalMouseReporting,
+                    isVisible: model.selectedShellID == nil && !model.isFileManagerActive,
                     onExit: { _ in model.shellSplitAxis = nil },
                     onViewReady: {
                         splitTracker.shellView = $0
@@ -634,6 +636,8 @@ struct DetailView: View {
                 lineSpacing: terminalLineSpacing,
                 dark: colorScheme == .dark,
                 mouseReporting: terminalMouseReporting,
+                // A selected shell or the file manager covers the attach side.
+                isVisible: isSelected && model.selectedShellID == nil && !model.isFileManagerActive,
                 onAttachmentError: { model.actionError = $0 },
                 onAttachmentUploadingChanged: { uploadingAttachment = $0 },
                 onExit: { code in endedAttach[session.id] = code }

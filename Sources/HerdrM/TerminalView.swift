@@ -1147,6 +1147,10 @@ struct AttachTerminalView: NSViewRepresentable {
     /// When false, mouse drags always select text locally even if the TUI
     /// requested mouse reporting (Shift+drag bypasses it either way).
     var mouseReporting: Bool = true
+    /// False while kept alive behind another view: Ghostty then stops drawing
+    /// frames for it (output is still parsed), so busy background agents do
+    /// not cost full-window Metal renders.
+    var isVisible: Bool = true
     var onAttachmentError: (String) -> Void = { _ in }
     var onAttachmentUploadingChanged: (Bool) -> Void = { _ in }
     /// Called on the main queue when the attach process exits: the pane was taken
@@ -1176,6 +1180,7 @@ struct AttachTerminalView: NSViewRepresentable {
         view.controller = GhosttyRuntime.controller
         view.configuration = TerminalSurfaceOptions(backend: .inMemory(host.session))
         configureAppearance(view)
+        view.setSurfaceVisible(isVisible)
 
         let service = HerdrService(device: device)
         view.attachmentService = service
@@ -1203,6 +1208,7 @@ struct AttachTerminalView: NSViewRepresentable {
         configurePasteHandling(nsView)
         context.coordinator.onExit = onExit
         configureAppearance(nsView)
+        nsView.setSurfaceVisible(isVisible)
     }
 
     /// Re-applied on update because capabilities can arrive after the terminal
@@ -1389,6 +1395,8 @@ struct ShellTerminalView: NSViewRepresentable {
     var lineSpacing: Double = TerminalDefaults.defaultLineSpacing
     var dark: Bool = false
     var mouseReporting: Bool = true
+    /// See `AttachTerminalView.isVisible`.
+    var isVisible: Bool = true
     var onAttachmentError: (String) -> Void = { _ in }
     var onAttachmentUploadingChanged: (Bool) -> Void = { _ in }
     var onExit: ((Int32?) -> Void)? = nil
@@ -1453,6 +1461,7 @@ struct ShellTerminalView: NSViewRepresentable {
         context.coordinator.onExit = onExit
         nsView.onAttachmentError = onAttachmentError
         nsView.onAttachmentUploadingChanged = onAttachmentUploadingChanged
+        nsView.setSurfaceVisible(isVisible)
         applyTerminalAppearance(
             nsView,
             fontName: fontName,
