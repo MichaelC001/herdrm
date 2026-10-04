@@ -51,8 +51,31 @@ struct RootView: View {
                             .hidden()
                     )
             }
+
+            // Machine stats dropdown, hanging under the title-bar meters.
+            if model.showMachineStats, let device = model.statsDevice {
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .onTapGesture { model.showMachineStats = false }
+                MachineStatsPanel(
+                    model: model,
+                    stats: model.machineStats,
+                    device: device,
+                    isPresented: $model.showMachineStats
+                )
+                .padding(.top, TitlebarMetrics.height + 2)
+                .padding(.trailing, 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .transition(.scale(scale: 0.96, anchor: .topTrailing).combined(with: .opacity))
+                .background(
+                    Button("") { model.showMachineStats = false }
+                        .keyboardShortcut(.cancelAction)
+                        .hidden()
+                )
+            }
         }
         .animation(.spring(response: 0.25, dampingFraction: 0.85), value: model.showDevicePanel)
+        .animation(.spring(response: 0.25, dampingFraction: 0.85), value: model.showMachineStats)
         .background(
             Button("") { sidebarCollapsed.toggle() }
                 .keyboardShortcut("b", modifiers: .command)
@@ -406,6 +429,15 @@ struct DetailView: View {
                 }
             }
             .allowsHitTesting(false)
+            if let device = model.statsDevice {
+                MachineStatsIndicator(
+                    stats: model.machineStats,
+                    device: device,
+                    isOpen: model.showMachineStats
+                ) {
+                    model.showMachineStats.toggle()
+                }
+            }
         }
         .padding(.leading, sidebarCollapsed ? 10 : 14)
         .padding(.trailing, 12)

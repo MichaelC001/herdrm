@@ -7,6 +7,20 @@ the Sparkle update description — a release without a section here fails CI.
 
 ## [Unreleased]
 
+### Added
+- **Live machine stats in the title bar.** Next to the device chip, small CPU,
+  RAM and Disk meters show how the host behind the selected pane is doing,
+  Local or remote. They turn amber at 75% and red at 90%. Click them for a
+  dropdown with:
+  - load, uptime, a two-minute CPU history, and swap and per-disk usage
+  - the CPU and memory used by herdr, by each agent kind (Claude, Codex,
+    Gemini, …), and by each agent, named as in the sidebar
+  - the heaviest other processes
+
+  An agent's child processes (MCP servers, shells, builds) count toward that
+  agent. Each device needs just one long-lived ssh session, which closes when
+  you switch away or the window is hidden.
+
 ## [0.6.11] - 2026-10-03
 
 ### Added
