@@ -3408,6 +3408,54 @@
           }
         }
       }
+    },
+    "It is the last pane in the space \"%@\", so herdr closes the space too. Whatever is running inside it will be terminated." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It is the last pane in the space \"%@\", so herdr closes the space too. Whatever is running inside it will be terminated."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这是空间“%@”中的最后一个窗格，因此 herdr 也会关闭该空间。其中运行的所有内容都将被终止。"
+          }
+        }
+      }
+    },
+    "a new space in your home folder" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "a new space in your home folder"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主文件夹中的新空间"
+          }
+        }
+      }
+    },
+    "a new space" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "a new space"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新空间"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

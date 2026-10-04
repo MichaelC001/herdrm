@@ -1372,6 +1372,11 @@ struct NewAgentSheet: View {
     }
 
     private var spaceLabel: String {
+        if workspaceID.isEmpty, session.workspaces.isEmpty, case .connected = session.connection {
+            return chosenDevice.isLocal
+                ? String(localized: "a new space in your home folder")
+                : String(localized: "a new space")
+        }
         if workspaceID.isEmpty { return String(localized: "the focused space") }
         return session.workspaces.first { $0.workspaceID == workspaceID }?.label ?? workspaceID
     }

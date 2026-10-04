@@ -7,6 +7,14 @@ the Sparkle update description — a release without a section here fails CI.
 
 ## [Unreleased]
 
+### Fixed
+- New Agent works on a device that has no Space left. herdr closes a Space
+  together with its last pane, so closing the last terminal could leave a
+  device with none, and New Agent then failed with "workspace_not_found: no
+  active workspace". It now creates a Space (in your home folder on this Mac)
+  and starts the agent there, and the sheet says so beforehand.
+- Closing the last pane of a Space now warns that herdr closes the Space too.
+
 ## [0.6.11] - 2026-10-03
 
 ### Added

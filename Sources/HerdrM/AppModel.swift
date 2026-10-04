@@ -1297,6 +1297,29 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// A fresh pane for New Agent: a new tab in the chosen space, or in herdr's
+    /// focused one. herdr closes a space with its last pane, so a device can be
+    /// left with no space at all, and `tab.create` then fails with
+    /// `workspace_not_found`. In that case a space is created (in the home
+    /// folder on this Mac) and the agent starts in its first pane.
+    private func newAgentPane(
+        service: HerdrService,
+        device: Device,
+        workspaceID: String?,
+        kind: String
+    ) async throws -> String {
+        do {
+            return try await service.createTab(workspaceID: workspaceID, cwd: nil, label: kind)
+        } catch HerdrError.rpc(let code, _) where code == "workspace_not_found" && workspaceID == nil {
+            let created = try await service.createWorkspace(
+                label: nil,
+                cwd: device.isLocal ? NSHomeDirectory() : nil
+            )
+            if let rootPaneID = created.rootPaneID { return rootPaneID }
+            return try await service.createTab(workspaceID: created.workspaceID, cwd: nil, label: kind)
+        }
+    }
+
     // MARK: - Closing
 
     func requestCloseSpace(_ entry: SpaceEntry) {
@@ -1320,9 +1343,15 @@ final class AppModel: ObservableObject {
 
     func requestClosePane(_ ref: PaneRef, name: String) {
         guard let device = device(ref.deviceID) else { return }
+        let message: String
+        if let space = spaceClosedWithPane(ref) {
+            message = String(localized: "It is the last pane in the space \"\(space)\", so herdr closes the space too. Whatever is running inside it will be terminated.")
+        } else {
+            message = String(localized: "The pane and whatever is running inside it will be terminated.")
+        }
         closeRequest = CloseRequest(
             title: String(localized: "Close \"\(name)\"?"),
-            message: String(localized: "The pane and whatever is running inside it will be terminated.")
+            message: message
         ) { [weak self] in
             guard let self else { return }
             Task {
@@ -1335,6 +1364,19 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+    }
+
+    /// The label of the space that closing `ref` would empty, or nil when the
+    /// space keeps other panes. herdr removes a space together with its last pane.
+    private func spaceClosedWithPane(_ ref: PaneRef) -> String? {
+        let state = session(ref.deviceID)
+        let workspaceID = state.agents.first { $0.paneID == ref.paneID }?.workspaceID
+            ?? state.panes.first { $0.paneID == ref.paneID }?.workspaceID
+        guard let workspaceID else { return nil }
+        let paneCount = state.agents.filter { $0.workspaceID == workspaceID }.count
+            + state.panes.filter { $0.workspaceID == workspaceID }.count
+        guard paneCount <= 1 else { return nil }
+        return state.workspaces.first { $0.workspaceID == workspaceID }?.label
     }
 
     // MARK: - Actions
@@ -1623,7 +1665,9 @@ final class AppModel: ObservableObject {
             let service = service(for: device)
             var createdPane: String?
             do {
-                let pane = try await service.createTab(workspaceID: workspaceID, cwd: nil, label: kind)
+                let pane = try await newAgentPane(
+                    service: service, device: device, workspaceID: workspaceID, kind: kind
+                )
                 createdPane = pane
                 do {
                     try await service.startAgent(
