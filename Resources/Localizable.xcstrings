@@ -3681,22 +3681,6 @@
         }
       }
     },
-    "pid %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "pid %@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "pid %@"
-          }
-        }
-      }
-    },
     "Not running in a herdr pane on this device" : {
       "localizations" : {
         "en" : {
@@ -3757,6 +3741,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 个进程"
+          }
+        }
+      }
+    },
+    "Outside herdr · pid %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Outside herdr · pid %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "herdr 之外 · pid %@"
           }
         }
       }

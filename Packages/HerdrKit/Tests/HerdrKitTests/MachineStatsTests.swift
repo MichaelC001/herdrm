@@ -155,6 +155,18 @@ final class MachineStatsTests: XCTestCase {
         XCTAssertEqual(AgentProcessMatcher.kind(name: "python3.12", arguments: "python3.12 /usr/local/bin/aider"), "aider")
     }
 
+    func testMatcherKnowsClaudesVersionedBinary() {
+        // Teammates and resumed sessions exec `~/.local/share/claude/versions/<v>`.
+        XCTAssertEqual(AgentProcessMatcher.kind(
+            name: "2.1.289",
+            arguments: "/home/u/.local/share/claude/versions/2.1.289 --agent-id lane-A@session-e5 --agent-name lane-A"
+        ), "claude")
+        // bg-pty-host rewrites argv0 to "claude"; the sampler then sends no command line.
+        XCTAssertEqual(AgentProcessMatcher.kind(name: "2.1.288", arguments: nil), "claude")
+        XCTAssertNil(AgentProcessMatcher.kind(name: "1.4.2", arguments: "/opt/tool/1.4.2 --serve"))
+        XCTAssertNil(AgentProcessMatcher.kind(name: "v2.1", arguments: nil))
+    }
+
     func testMatcherIgnoresLookalikes() {
         // Component match, not substring: an MCP server named after Claude is not Claude.
         XCTAssertNil(AgentProcessMatcher.kind(
@@ -243,6 +255,42 @@ final class MachineStatsTests: XCTestCase {
         XCTAssertEqual(snapshot.other.processCount, 4) // systemd, zsh ×2, vim
         XCTAssertFalse(snapshot.topOther.contains { $0.name == "ps" || $0.name == "sh" })
         XCTAssertEqual(snapshot.topOther.first?.name, "vim")
+    }
+
+    func testSwarmTeammatesBelongToTheirLead() throws {
+        // herdr (100) → bash (200) → lead claude (300). Claude's agent-team tmux
+        // server (400) daemonized to pid 1; its teammates (410, 420) run under it.
+        // A detached session (500, ppid 1) keeps its own swarm (600 → 610).
+        let processes = [
+            proc(1, 0, "systemd", cpu: 0),
+            proc(100, 1, "herdr", cpu: 0),
+            proc(200, 100, "bash", cpu: 0),
+            proc(300, 200, "claude", cpu: 0, rss: 500),
+            proc(400, 1, "tmux: server", cpu: 0, rss: 10),
+            proc(410, 400, "2.1.289", cpu: 0, rss: 300),
+            proc(420, 400, "2.1.289", cpu: 0, rss: 400),
+            proc(500, 1, "2.1.288", cpu: 0, rss: 50),
+            proc(600, 1, "tmux: server", cpu: 0, rss: 10),
+            proc(610, 600, "2.1.288", cpu: 0, rss: 200),
+        ]
+        let arguments: [Int32: String] = [
+            400: "tmux -L claude-swarm-300 new-session -d -s claude-swarm -n swarm-view",
+            410: "/h/.local/share/claude/versions/2.1.289 --agent-id lane-A@s",
+            420: "/h/.local/share/claude/versions/2.1.289 --agent-id lane-B@s",
+            600: "tmux -L claude-swarm-500 new-session -d -s claude-swarm",
+            610: "/h/.local/share/claude/versions/2.1.288 --agent-id lane-H29@t",
+        ]
+        let snapshot = MachineStatsComputer.snapshot(
+            previous: nil, current: sample(clock: 1, processes, arguments: arguments)
+        )
+        let claude = try XCTUnwrap(snapshot.groups.first { $0.kind == .agent("claude") })
+        XCTAssertEqual(Set(claude.instances.map(\.rootPID)), [300, 500])
+        let lead = try XCTUnwrap(claude.instances.first { $0.rootPID == 300 })
+        XCTAssertEqual(lead.usage.rssBytes, 500 + 10 + 300 + 400)
+        XCTAssertEqual(lead.lineage, [300, 200, 100])
+        let detached = try XCTUnwrap(claude.instances.first { $0.rootPID == 500 })
+        XCTAssertEqual(detached.usage.rssBytes, 50 + 10 + 200)
+        XCTAssertEqual(snapshot.other.processCount, 2) // systemd, bash
     }
 
     func testReusedPIDCountsFromZero() throws {

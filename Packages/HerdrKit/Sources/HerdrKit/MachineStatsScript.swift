@@ -9,16 +9,18 @@ import Foundation
 /// Arguments: `$1` interval in seconds, `$2` frame count (0 = forever).
 /// Frame: `@@hm-begin`, `key value` header lines, then `@@procs` / `@@args` /
 /// `@@vm` / `@@df` sections, then `@@hm-end` — see `MachineStatsParser`.
-/// Only interpreter command lines (node, bun, deno, python) are sent: they are
-/// the processes whose script names the agent, and full `args` for every
-/// process would make each frame several times larger.
+/// Command lines are sent only where the executable name doesn't say enough:
+/// interpreters (node, bun, deno, python), whose script names the agent; Claude
+/// Code's versioned binary (`…/claude/versions/2.1.289`); and the tmux servers
+/// holding agent-team teammates (`tmux -L claude-swarm-<lead pid>`). Full `args`
+/// for every process would make each frame several times larger.
 enum MachineStatsScript {
     static let source = #"""
 PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH
 LC_ALL=C; export LC_ALL
 iv=${1:-2}; frames=${2:-0}
 os=$(uname -s); host=$(hostname 2>/dev/null); n=0
-interp='$2 ~ /(^|\/)(node|bun|deno|python[0-9.]*)$/'
+want='$2 ~ /(^|\/)(node|bun|deno|python[0-9.]*)$/ || $2 ~ /\/claude\/versions\// || /claude-swarm-[0-9]/'
 while :; do
   echo "@@hm-begin"
   echo "os $os"; echo "host $host"; echo "self $$"
@@ -32,7 +34,7 @@ while :; do
     done < /proc/meminfo
     echo "@@procs"
     cat /proc/[0-9]*/stat 2>/dev/null | awk '{c=$0; sub(/^[0-9]+ \(/,"",c); sub(/\) [^)]*$/,"",c); s=$0; sub(/.*\) /,"",s); split(s,a," "); print $1, a[2], a[12]+a[13], a[20], a[22], c}'
-    echo "@@args"; ps -eo pid=,args= | awk "$interp" | cut -c1-300
+    echo "@@args"; ps -eo pid=,args= | awk "$want" | cut -c1-300
   else
     echo "ncpu $(sysctl -n hw.ncpu)"; echo "memsize $(sysctl -n hw.memsize)"
     echo "now $(date +%s)"; echo "boottime $(sysctl -n kern.boottime)"
@@ -40,7 +42,7 @@ while :; do
     echo "@@vm"; vm_stat
     echo "@@procs"
     ps -Ao pid=,ppid=,rss=,time=,comm= | awk '{c=$0; sub(/^ *[0-9]+ +[0-9]+ +[0-9]+ +[0-9:.-]+ /,"",c); k=split(c,p,"/"); print $1, $2, $3, $4, p[k]}'
-    echo "@@args"; ps -Ao pid=,args= | awk "$interp" | cut -c1-300
+    echo "@@args"; ps -Ao pid=,args= | awk "$want" | cut -c1-300
   fi
   echo "@@df"; df -Pk / "$HOME" 2>/dev/null
   echo "@@hm-end"

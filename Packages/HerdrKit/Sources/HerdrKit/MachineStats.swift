@@ -371,6 +371,14 @@ public enum AgentProcessMatcher {
         // Codex's npm launcher execs a vendored `codex-<target-triple>` binary
         // (Linux truncates comm to 15 chars: "codex-x86_64-un").
         if base.hasPrefix("codex-") { return "codex" }
+        // Claude Code's native installer runs `~/.local/share/claude/versions/<version>`
+        // directly for teammates, resumed and background sessions, so the process is
+        // named after the version. The sampler sends the command line when argv0 is
+        // that path; without one (argv0 rewritten to "claude") the name alone decides.
+        if isVersionName(base) {
+            guard let arguments else { return "claude" }
+            return arguments.contains("/claude/") || arguments.hasPrefix("claude ") ? "claude" : nil
+        }
         guard isInterpreter(base), let arguments else { return nil }
         // The first non-flag argument after argv0 is the script being run.
         let script = arguments
@@ -390,6 +398,23 @@ public enum AgentProcessMatcher {
             if let kind = packages[String(component)] { return kind }
         }
         return nil
+    }
+
+    /// `2.1.289`, `2.1.290-beta.1`: three dot-separated numbers, then anything.
+    static func isVersionName(_ base: String) -> Bool {
+        let parts = base.split(separator: ".", maxSplits: 2, omittingEmptySubsequences: false)
+        guard parts.count == 3, !parts[0].isEmpty, !parts[1].isEmpty,
+              parts[0].allSatisfy(\.isNumber), parts[1].allSatisfy(\.isNumber)
+        else { return false }
+        return parts[2].prefix { $0.isNumber }.count > 0
+    }
+
+    /// Lead pid of a Claude agent-team tmux server (`tmux -L claude-swarm-48336 …`).
+    static func swarmLeadPID(name: String, arguments: String?) -> Int32? {
+        guard name.hasPrefix("tmux"), let arguments,
+              let range = arguments.range(of: "claude-swarm-")
+        else { return nil }
+        return Int32(arguments[range.upperBound...].prefix { $0.isNumber })
     }
 
     static func isInterpreter(_ base: String) -> Bool {
@@ -432,6 +457,15 @@ public enum MachineStatsComputer {
         let kinds = processes.compactMapValues { process in
             AgentProcessMatcher.kind(name: process.name, arguments: current.arguments[process.pid])
         }
+        // Agent-team teammates run in a tmux server that daemonizes (parent pid 1);
+        // hang the server back under the lead whose pid names its socket.
+        var parents: [Int32: Int32] = [:]
+        for (pid, process) in processes {
+            if let lead = AgentProcessMatcher.swarmLeadPID(name: process.name, arguments: current.arguments[pid]),
+               lead != pid, processes[lead] != nil {
+                parents[pid] = lead
+            }
+        }
 
         // Walk each process up its parents: the outermost agent above it owns it,
         // and anything under the sampler's own shell is left out.
@@ -451,7 +485,8 @@ public enum MachineStatsComputer {
                 chain.append(id)
                 if id == current.samplerPID { isSampler = true; break }
                 if kinds[id] != nil { owner = id }
-                cursor = node.ppid == id || node.ppid <= 0 ? nil : node.ppid
+                let parent = parents[id] ?? node.ppid
+                cursor = parent == id || parent <= 0 ? nil : parent
             }
             if isSampler { continue }
 

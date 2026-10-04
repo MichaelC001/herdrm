@@ -380,7 +380,7 @@ struct MachineStatsPanel: View {
         let paneID = stats.paneID(for: instance)
         let agent = paneID.flatMap { id in agents.first { $0.paneID == id } }
         let title = agent.map { model.agentEntry(device: device, agent: $0).title }
-            ?? String(localized: "pid \(String(instance.rootPID))")
+            ?? String(localized: "Outside herdr · pid \(String(instance.rootPID))")
         let isSelected = paneID != nil && model.selectedPane == PaneRef(deviceID: device.id, paneID: paneID!)
         return UsageRow(
             icon: nil,
