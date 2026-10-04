@@ -201,9 +201,11 @@ struct DeviceFilesView: View {
             targetDeviceID = preferredTargetDeviceID()
         }
         .onChange(of: model.deviceFilter) { _, deviceID in
-            if let deviceID { targetDeviceID = deviceID }
+            if let deviceID, transferDevices.contains(where: { $0.id == deviceID }) {
+                targetDeviceID = deviceID
+            }
         }
-        .onChange(of: model.devices.map(\.id)) { _, ids in
+        .onChange(of: transferDevices.map(\.id)) { _, ids in
             if !ids.contains(targetDeviceID) {
                 targetDeviceID = preferredTargetDeviceID()
             }
@@ -255,7 +257,7 @@ struct DeviceFilesView: View {
                 .font(.system(size: 11.5))
                 .foregroundStyle(Theme.textTertiary)
             Picker("", selection: $targetDeviceID) {
-                ForEach(model.devices) { device in
+                ForEach(transferDevices) { device in
                     Text(device.name).tag(device.id)
                 }
             }
@@ -344,10 +346,17 @@ struct DeviceFilesView: View {
         !transfer.isTransferring && target.selectedEntry?.kind == .regularFile
     }
 
+    /// Devices that can browse and transfer files. A tailcat tunnel carries
+    /// only the herdr socket — no file system access — so it's left out.
+    private var transferDevices: [Device] {
+        model.devices.filter { !$0.isTailcat }
+    }
+
     private func preferredTargetDeviceID() -> UUID {
-        if let filtered = model.deviceFilter, model.device(filtered) != nil { return filtered }
-        return model.devices.first(where: { !$0.isLocal })?.id
-            ?? model.devices.first?.id
+        let devices = transferDevices
+        if let filtered = model.deviceFilter, devices.contains(where: { $0.id == filtered }) { return filtered }
+        return devices.first(where: { !$0.isLocal })?.id
+            ?? devices.first?.id
             ?? Device.local.id
     }
 
