@@ -430,6 +430,11 @@ struct DetailView: View {
             }
             .allowsHitTesting(false)
             if let device = model.statsDevice {
+                // Keeps the meters reading as their own group, apart from the
+                // agent's title, kind, space, device and status.
+                Rectangle()
+                    .fill(Theme.textGhost)
+                    .frame(width: 1, height: 14)
                 MachineStatsIndicator(
                     stats: model.machineStats,
                     device: device,

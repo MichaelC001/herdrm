@@ -97,7 +97,9 @@ private struct MiniMeter: View {
             Text(value.map(MachineStatsFormat.percent) ?? "—")
                 .font(.system(size: 10.5).monospacedDigit())
                 .foregroundStyle(value.map { $0 >= 75 ? tint : Theme.textSecondary } ?? Theme.textGhost)
-                .frame(width: 29, alignment: .leading)
+                // Wide enough for "100%", so the meters don't shift as values change.
+                .frame(width: 34, alignment: .leading)
+                .lineLimit(1)
         }
     }
 }
@@ -591,6 +593,7 @@ private struct UsageRow: View {
                 .foregroundStyle(indent && !selected ? Theme.textSecondary : Theme.text)
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .layoutPriority(1)
             if let count {
                 Text(countIsProcesses ? String(localized: "\(count) proc") : "×\(count)")
                     .font(.system(size: 10.5).monospacedDigit())
