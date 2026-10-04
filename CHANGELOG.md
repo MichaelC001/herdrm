@@ -7,6 +7,14 @@ the Sparkle update description — a release without a section here fails CI.
 
 ## [Unreleased]
 
+### Added
+- Agent and terminal panes tell herdr that HerdrM's terminal draws Kitty
+  graphics (`HERDR_ATTACH_GRAPHICS=1` on the attach command, set on the far
+  side for remote devices). With a herdr that sends pane images to attach
+  clients, pictures an agent shows, such as Claude Code's pasted-image
+  thumbnails, appear in HerdrM, including on SSH devices. herdr versions
+  without that support ignore the variable.
+
 ## [0.6.11] - 2026-10-03
 
 ### Added

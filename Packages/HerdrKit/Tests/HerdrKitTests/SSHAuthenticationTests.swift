@@ -178,6 +178,24 @@ final class AttachBinarySelectionTests: XCTestCase {
         }
     }
 
+    func testAttachCommandsTellHerdrTheTerminalDrawsKittyGraphics() {
+        let local = HerdrService(device: Device(name: "L", kind: .local), localServer: nil)
+            .attachCommand(paneID: "w1:p1", serverVersion: "0.8.2")
+        XCTAssertEqual(local.environment["HERDR_ATTACH_GRAPHICS"], "1")
+
+        // ssh drops the local environment, so the remote script exports it
+        // before exec'ing the remote herdr attach client.
+        let remote = HerdrService(device: Device(name: "R", kind: .ssh(target: "u@h")), localServer: nil)
+            .attachCommand(paneID: "w1:p1", serverVersion: "0.8.2")
+        let script = remote.args.last ?? ""
+        let export = try? XCTUnwrap(script.range(of: "export HERDR_ATTACH_GRAPHICS=1;"))
+        let exec = try? XCTUnwrap(script.range(of: "exec \"$hb\""))
+        XCTAssertNotNil(export)
+        if let export, let exec {
+            XCTAssertLessThan(export.lowerBound, exec.lowerBound)
+        }
+    }
+
     func testOrdinaryTerminalAttachCommandsUseTerminalIDLocallyAndRemotely() {
         let local = HerdrService(device: Device(name: "L", kind: .local), localServer: nil)
             .attachCommand(target: .terminal(terminalID: "term_abc123"), serverVersion: "0.8.2")

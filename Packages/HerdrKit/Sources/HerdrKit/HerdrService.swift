@@ -716,6 +716,12 @@ public actor HerdrService {
             + "done; IFS=$oldifs; [ -n \"$hb\" ] || hb=herdr"
     }
 
+    /// Tells `herdr … attach` that HerdrM's terminal draws Kitty graphics. The
+    /// embedded Ghostty does, but HerdrM reports `TERM=xterm-256color`, so herdr
+    /// can't detect it. A herdr that carries pane images to attach clients then
+    /// sends them in-band (also over SSH); other herdr versions ignore it.
+    static let attachGraphicsEnvironmentKey = "HERDR_ATTACH_GRAPHICS"
+
     /// The command the embedded terminal should spawn to attach to a pane.
     /// `serverVersion` (from the device's last successful ping) lets the attach
     /// pick a herdr binary whose protocol matches the server's — see
@@ -755,6 +761,7 @@ public actor HerdrService {
                 // attach would run against the default session instead.
                 environment["HERDR_SOCKET_PATH"] = socketPath
             }
+            environment[Self.attachGraphicsEnvironmentKey] = "1"
             let script = "\(Self.attachBinarySelection(serverVersion: serverVersion)); "
                 + "exec \"$hb\" \(attachArguments)"
             return TerminalCommand(
@@ -774,6 +781,7 @@ public actor HerdrService {
                 environment.removeValue(forKey: "COLUMNS")
                 environment.removeValue(forKey: "LINES")
                 environment["HERDR_SOCKET_PATH"] = SSHTunnel.localSocketPath(for: target)
+                environment[Self.attachGraphicsEnvironmentKey] = "1"
                 let script = "\(Self.attachBinarySelection(serverVersion: serverVersion)); "
                     + "exec \"$hb\" \(attachArguments)"
                 return TerminalCommand(
@@ -787,7 +795,10 @@ public actor HerdrService {
             // on the far side. Wrapped in sh explicitly: the ssh remote command
             // runs in the user's login shell, and the script's sh syntax must
             // not depend on it.
-            let script = "\(SSHTunnel.remotePathExport); \(Self.attachBinarySelection(serverVersion: serverVersion)); "
+            // ssh doesn't forward the local environment, so the flag is set on
+            // the far side, for the remote herdr attach client.
+            let script = "\(SSHTunnel.remotePathExport); export \(Self.attachGraphicsEnvironmentKey)=1; "
+                + "\(Self.attachBinarySelection(serverVersion: serverVersion)); "
                 + "exec \"$hb\" \(attachArguments)"
             let remote = "exec /bin/sh -c \(Self.shellQuoted(script))"
             let authentication = SSHTunnel.authenticationConfiguration(for: device.id)
