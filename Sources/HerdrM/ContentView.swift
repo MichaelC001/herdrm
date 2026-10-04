@@ -1717,13 +1717,22 @@ struct EditDeviceSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var target = ""
+    @State private var token = ""
+
+    private var canSave: Bool {
+        device.isTailcat
+            ? !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            : !target.trimmingCharacters(in: .whitespaces).isEmpty
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SheetHeader(
                 systemImage: "pencil",
                 title: String(localized: "Edit Device"),
-                subtitle: String(localized: "Changing the SSH target reconnects the device")
+                subtitle: device.isTailcat
+                    ? String(localized: "Changing the tailcat token reconnects the device")
+                    : String(localized: "Changing the SSH target reconnects the device")
             )
             Rectangle().fill(Theme.hairline).frame(height: 1)
 
@@ -1732,9 +1741,16 @@ struct EditDeviceSheet: View {
                 TextField("Name", text: $name)
                     .textFieldStyle(.roundedBorder)
                 Spacer().frame(height: 8)
-                SheetSectionLabel("SSH TARGET")
-                TextField("SSH target", text: $target)
-                    .textFieldStyle(.roundedBorder)
+                if device.isTailcat {
+                    SheetSectionLabel("TAILCAT TOKEN")
+                    TextField("tcpGFwWCD…", text: $token)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 11, design: .monospaced))
+                } else {
+                    SheetSectionLabel("SSH TARGET")
+                    TextField("SSH target", text: $target)
+                        .textFieldStyle(.roundedBorder)
+                }
             }
             .padding(16)
 
@@ -1746,18 +1762,26 @@ struct EditDeviceSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button("Save") {
                     let trimmedName = name.trimmingCharacters(in: .whitespaces)
-                    let trimmedTarget = target.trimmingCharacters(in: .whitespaces)
-                    model.updateDevice(
-                        device.id,
-                        name: trimmedName.isEmpty ? trimmedTarget : trimmedName,
-                        sshTarget: trimmedTarget
-                    )
+                    if device.isTailcat {
+                        model.updateTailcatDevice(
+                            device.id,
+                            name: trimmedName.isEmpty ? device.name : trimmedName,
+                            token: token.trimmingCharacters(in: .whitespacesAndNewlines)
+                        )
+                    } else {
+                        let trimmedTarget = target.trimmingCharacters(in: .whitespaces)
+                        model.updateDevice(
+                            device.id,
+                            name: trimmedName.isEmpty ? trimmedTarget : trimmedName,
+                            sshTarget: trimmedTarget
+                        )
+                    }
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(target.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(!canSave)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -1766,6 +1790,9 @@ struct EditDeviceSheet: View {
         .onAppear {
             name = device.name
             target = device.sshTarget ?? ""
+            if device.isTailcat {
+                token = ((try? TailcatCredentialStore.token(for: device.id)) ?? nil) ?? ""
+            }
         }
     }
 }
