@@ -1793,6 +1793,38 @@
         }
       }
     },
+    "Full path on %@, e.g. /Users/me/project or C:\\project; folder browsing and ~ aren't available over a tailcat tunnel" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Full path on %@, e.g. /Users/me/project or C:\\project; folder browsing and ~ aren't available over a tailcat tunnel"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 上的完整路径，例如 /Users/me/project 或 C:\\project；tailcat 隧道不支持浏览文件夹和 ~"
+          }
+        }
+      }
+    },
+    "%@ has no spaces yet. Terminals over a tailcat tunnel need a space; create one first." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ has no spaces yet. Terminals over a tailcat tunnel need a space; create one first."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 还没有空间。tailcat 隧道上的终端需要空间，请先创建一个。"
+          }
+        }
+      }
+    },
     "Defaults to the folder name" : {
       "localizations" : {
         "en" : {
