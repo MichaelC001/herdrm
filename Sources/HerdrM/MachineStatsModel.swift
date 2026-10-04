@@ -1,7 +1,7 @@
 import Foundation
 import HerdrKit
 
-/// Live health of the host behind the selected pane, for the title-bar meters.
+/// Live health of the host behind the selected pane, for the meters under the terminal.
 /// Kept apart from `AppModel` so a sample every two seconds re-renders only
 /// the meters and their panel, not the sidebar.
 @MainActor

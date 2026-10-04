@@ -9,9 +9,10 @@ private func levelColor(_ percent: Double) -> Color {
     return Theme.textSecondary
 }
 
-// MARK: - Title-bar indicator
+// MARK: - Status-strip indicator
 
-/// CPU / RAM / DISK mini meters for the selected pane's host. Clicking opens
+/// CPU / RAM / DISK mini meters for the selected pane's host, at the right end
+/// of the strip under the terminal. Clicking opens
 /// `MachineStatsPanel`. Runs the sampler while it is on screen and the window
 /// is visible.
 struct MachineStatsIndicator: View {
@@ -155,7 +156,7 @@ private struct WindowVisibilityReader: NSViewRepresentable {
 
 // MARK: - Dropdown panel
 
-/// In-window dropdown under the meters (NSPopover crashes in ViewBridge on
+/// In-window panel above the meters (NSPopover crashes in ViewBridge on
 /// macOS 26+): machine totals, then CPU/RAM by herdr, agent, and the rest.
 struct MachineStatsPanel: View {
     @ObservedObject var model: AppModel

@@ -3,7 +3,7 @@ import Foundation
 // Host health for the device a pane runs on: totals plus who uses them.
 // `MachineStatsScript` prints one frame per tick, `MachineStatsParser` turns a
 // frame into a cumulative `MachineSample`, and `MachineStatsComputer` diffs two
-// samples into the `MachineSnapshot` the title bar renders. Pure, no I/O.
+// samples into the `MachineSnapshot` the status strip renders. Pure, no I/O.
 
 /// One process as the sampler saw it; `cpuTime` is cumulative seconds.
 public struct MachineProcess: Sendable, Equatable {

@@ -1,7 +1,7 @@
 #if os(macOS)
 import Foundation
 
-/// The POSIX sh sampler behind the title-bar machine stats. It runs once per
+/// The POSIX sh sampler behind the machine stats under the terminal. It runs once per
 /// watched device (locally, or as one long-lived `ssh` command) and prints a
 /// frame per tick, so polling never opens a new connection. When HerdrM goes
 /// away the pipe closes and the next write's SIGPIPE ends the remote loop.

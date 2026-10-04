@@ -8,10 +8,10 @@ the Sparkle update description — a release without a section here fails CI.
 ## [Unreleased]
 
 ### Added
-- **Live machine stats in the title bar.** Next to the device chip, small CPU,
-  RAM and Disk meters show how the host behind the selected pane is doing,
-  Local or remote. They turn amber at 75% and red at 90%. Click them for a
-  dropdown with:
+- **Live machine stats.** A strip under the terminal shows small CPU, RAM and
+  Disk meters at its right end, lined up with the sidebar's device footer. They
+  show how the host behind the selected pane is doing, Local or remote, and
+  turn amber at 75% and red at 90%. Click them for a panel with:
   - load, uptime, a two-minute CPU history, and swap and per-disk usage
   - the CPU and memory used by herdr, by each agent kind (Claude, Codex,
     Gemini, …), and by each agent, named as in the sidebar
