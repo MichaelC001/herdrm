@@ -63,6 +63,20 @@ final class GrazrAccountsTests: XCTestCase {
         XCTAssertEqual(refused.block(for: account, now: now)?.reason, "billing_error")
     }
 
+    func testSwitchTargetsAreEveryUnblockedAccountButTheActiveOne() {
+        let report = GrazrReport(
+            active: "a",
+            accounts: [GrazrAccount(id: "a", name: "a"), GrazrAccount(id: "b", name: "b"), GrazrAccount(id: "c", name: "c")],
+            blocked: ["c": GrazrBlock(reason: "authentication_failed")]
+        )
+        XCTAssertEqual(report.accounts.filter { report.canSwitch(to: $0, now: now) }.map(\.id), ["b"])
+    }
+
+    func testASwitchSummaryIsGrazrsLastLine() {
+        XCTAssertEqual(GrazrSwitchResult(ok: true, output: "notice\nRotated a -> b\n\n").summary, "Rotated a -> b")
+        XCTAssertNil(GrazrSwitchResult(ok: false, output: " \n").summary)
+    }
+
     #if os(macOS)
     /// The reader script itself, against grazr's real file layout in a
     /// throwaway home: what it reports, and that nothing else leaves.
@@ -116,6 +130,76 @@ final class GrazrAccountsTests: XCTestCase {
         XCTAssertEqual(work.windows.map(\.label), ["5h", "Fable week"])
         XCTAssertEqual(work.windows[0].resetsAt, ISO8601DateFormatter().date(from: "2026-10-01T21:50:00Z"))
         XCTAssertEqual(report.sortedAccounts[1].windows, [])
+    }
+
+    /// The switch script, against a stand-in herdr and grazr in a throwaway
+    /// home: it finds grazr through `herdr plugin list`, runs its swap in
+    /// herdr's plugin environment, and pins the pick to the chosen account,
+    /// listed in ACCOUNTS or not.
+    func testTheSwitchRunsGrazrsSwapPinnedToTheChosenAccount() async throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("grazr-switch-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let root = home.appendingPathComponent("plugins/wazum.grazr")
+        let bin = home.appendingPathComponent(".local/bin")
+        let accounts = home.appendingPathComponent(".local/state/herdr/plugins/wazum.grazr/accounts")
+        for directory in [root, bin, accounts] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+
+        func write(_ text: String, to url: URL) throws {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        }
+        try write("""
+        #!/bin/sh
+        printf '{"result":{"plugins":[{"plugin_id":"other","plugin_root":"/nowhere"},{"plugin_id":"wazum.grazr","plugin_root":"%s"}]}}' '\(root.path)'
+        """, to: bin.appendingPathComponent("herdr"))
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin.appendingPathComponent("herdr").path)
+        for id in ["uuid-work", "uuid-spare"] {
+            try write("{}", to: accounts.appendingPathComponent("\(id).json"))
+        }
+        try write("""
+        def load(paths, names):
+            everyone = ["uuid-work", "uuid-home", "uuid-spare"]
+            return [type("Account", (), {"id": id}) for id in (everyone if not names else everyone[:2])]
+        """, to: root.appendingPathComponent("accounts.py"))
+        try write("""
+        def next_account(active, accounts, now, thresholds):
+            return "unpatched"
+        """, to: root.appendingPathComponent("core.py"))
+        try write("""
+        import os, accounts, core
+        def main(argv):
+            try:
+                picked = core.next_account("uuid-work", accounts.load(None, ["work@x", "home@x"]), None, {})
+            except RuntimeError as error:
+                print("grazr: %s" % error)
+                return 1
+            if picked is None:
+                print("grazr: Nothing to swap to")
+                return 1
+            same = lambda a, b: os.path.realpath(a) == os.path.realpath(b)
+            print("%s %s %s" % (argv[1], same(os.getcwd(), os.environ["HERDR_PLUGIN_ROOT"]), os.environ["HERDR_PLUGIN_STATE_DIR"].endswith("/wazum.grazr")))
+            print("Rotated uuid-work -> %s" % picked)
+            return 0
+        """, to: root.appendingPathComponent("grazr.py"))
+
+        func switching(to id: String) async throws -> GrazrSwitchResult {
+            let environment = "export HOME='\(home.path)' XDG_STATE_HOME= XDG_CONFIG_HOME=; "
+            let output = try await DeviceFileService(device: .local).run(environment + Grazr.switchCommand(to: id))
+            return try JSONDecoder().decode(GrazrSwitchResult.self, from: output)
+        }
+
+        let moved = try await switching(to: "uuid-spare")
+        XCTAssertTrue(moved.ok)
+        XCTAssertEqual(moved.output, "swap True True\nRotated uuid-work -> uuid-spare\n")
+
+        let stayed = try await switching(to: "uuid-work")
+        XCTAssertFalse(stayed.ok)
+        XCTAssertEqual(stayed.summary, "grazr: Already on that account")
+
+        let gone = try await switching(to: "it's-gone")
+        XCTAssertEqual(gone, GrazrSwitchResult(ok: false, output: "That account is no longer enrolled"))
     }
     #endif
 }

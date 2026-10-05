@@ -50,6 +50,9 @@ struct DeviceSessionState {
     /// The agent row's context menu, grouped per plugin. Empty until loaded,
     /// or when the device runs no plugin with actions.
     var pluginActions: [PluginActionGroup] = []
+    /// grazr's accounts, for the menu's Switch to Account list. Nil until
+    /// read, or when the device runs no grazr.
+    var grazrReport: GrazrReport?
 }
 
 struct SSHAuthenticationRequest: Identifiable {
@@ -820,6 +823,48 @@ final class AppModel: ObservableObject {
         // An older server without plugin RPCs keeps an empty menu section.
         guard let actions = try? await service.pluginActions() else { return }
         sessions[deviceID]?.pluginActions = PluginActionGroup.menu(actions)
+        if actions.contains(where: { $0.pluginID == Grazr.pluginID }) {
+            // Not awaited: an SSH round trip must not hold up the connect.
+            Task { await loadGrazrReport(deviceID: deviceID) }
+        } else {
+            sessions[deviceID]?.grazrReport = nil
+        }
+    }
+
+    /// A failed read keeps the last list; the menu only offers what it shows.
+    func loadGrazrReport(deviceID: UUID) async {
+        guard let device = device(deviceID),
+              let output = try? await DeviceFileService(device: device).run(Grazr.readerCommand),
+              let report = try? JSONDecoder().decode(GrazrReport.self, from: output)
+        else { return }
+        sessions[deviceID]?.grazrReport = report
+    }
+
+    /// Moves Claude on `device` to `account` with grazr, like its swap action
+    /// but to the account picked rather than the next one with headroom.
+    func switchGrazrAccount(_ account: GrazrAccount, on device: Device, onFinish: (() -> Void)? = nil) {
+        let title = String(localized: "grazr: switch to \(account.name)")
+        Task {
+            defer { onFinish?() }
+            do {
+                let output = try await DeviceFileService(device: device).run(Grazr.switchCommand(to: account.id))
+                let result = try JSONDecoder().decode(GrazrSwitchResult.self, from: output)
+                if result.ok {
+                    NotificationManager.shared.postPluginResult(
+                        title: title,
+                        body: result.summary ?? String(localized: "Done"),
+                        deviceName: device.name
+                    )
+                } else {
+                    actionError = result.summary.map { "\(title): \($0)" }
+                        ?? String(localized: "\(title) failed")
+                }
+            } catch {
+                actionError = actionErrorMessage(error, device: device)
+            }
+            await loadGrazrReport(deviceID: device.id)
+            await refresh(device.id)
+        }
     }
 
     private func loadAgentCatalog(deviceID: UUID, using service: HerdrService) async {

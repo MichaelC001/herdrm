@@ -89,7 +89,13 @@ struct GrazrAccountsSheet: View {
                 ScrollView {
                     VStack(spacing: 10) {
                         ForEach(report.sortedAccounts) { account in
-                            GrazrAccountCard(report: report, account: account, now: Date())
+                            GrazrAccountCard(
+                                report: report,
+                                account: account,
+                                now: Date(),
+                                switching: swapping,
+                                onSwitch: { switchTo(account) }
+                            )
                         }
                     }
                     .padding(16)
@@ -114,6 +120,14 @@ struct GrazrAccountsSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private func switchTo(_ account: GrazrAccount) {
+        swapping = true
+        model.switchGrazrAccount(account, on: device) {
+            swapping = false
+            Task { await load() }
+        }
+    }
+
     private func load() async {
         loading = true
         defer { loading = false }
@@ -131,6 +145,8 @@ private struct GrazrAccountCard: View {
     let report: GrazrReport
     let account: GrazrAccount
     let now: Date
+    let switching: Bool
+    let onSwitch: () -> Void
 
     private var isActive: Bool { account.id == report.active }
 
@@ -150,6 +166,11 @@ private struct GrazrAccountCard: View {
                     badge(String(localized: "Not in ACCOUNTS"), color: Theme.textTertiary)
                 }
                 Spacer(minLength: 0)
+                if report.canSwitch(to: account, now: now) {
+                    Button("Switch", action: onSwitch)
+                        .controlSize(.small)
+                        .disabled(switching)
+                }
             }
             if let organization = account.organization, organization != "\(account.name)'s Organization" {
                 Text(organization)

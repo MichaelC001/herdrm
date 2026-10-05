@@ -7,6 +7,13 @@ the Sparkle update description — a release without a section here fails CI.
 
 ## [Unreleased]
 
+### Added
+- Switch Claude to the grazr account you pick. An agent's grazr menu has a
+  Switch to Account list (the active account ticked, a blocked one greyed out
+  with its reason), and each card in the Accounts window has a Switch button.
+  grazr's own swap only goes to the next account with headroom; this runs that
+  same swap, with its lock, pane tags and log, pinned to the chosen account.
+
 ## [0.6.11] - 2026-10-03
 
 ### Added

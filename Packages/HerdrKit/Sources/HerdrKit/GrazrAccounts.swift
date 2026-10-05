@@ -78,6 +78,89 @@ public enum Grazr {
     print(json.dumps(report))
     GRAZR_EOF
     """#
+
+    #if os(macOS)
+    /// Moves Claude to one chosen account and prints a `GrazrSwitchResult`.
+    /// grazr's own `swap` only knows "the next account with headroom", so this
+    /// runs that same swap -- rotation lock, credential park, pane tags, log --
+    /// with its pick pinned to `accountID`, from any enrolled account rather
+    /// than only those in ACCOUNTS. The environment is the one herdr gives a
+    /// plugin action; grazr's refusals land in `output`, not in a failed exit.
+    public static func switchCommand(to accountID: String) -> String {
+        SSHTunnel.remotePathExport + "\n"
+            + "python3 - \(HerdrService.shellQuoted(accountID)) <<'GRAZR_EOF'\n"
+            + #"""
+            import contextlib, io, json, os, shutil, subprocess, sys
+
+            target = sys.argv[1]
+            home = os.path.expanduser("~")
+
+            def finish(ok, output):
+                print(json.dumps({"ok": ok, "output": output}))
+                sys.exit(0)
+
+            herdr = shutil.which("herdr")
+            if not herdr:
+                finish(False, "herdr is not on this device's PATH")
+            try:
+                listed = subprocess.run([herdr, "plugin", "list", "--json"], capture_output=True, text=True, timeout=10)
+                plugins = json.loads(listed.stdout)["result"]["plugins"]
+                root = next(plugin["plugin_root"] for plugin in plugins if plugin.get("plugin_id") == "wazum.grazr")
+            except Exception:
+                finish(False, "grazr is not installed")
+
+            state = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(home, ".local/state"), "herdr/plugins/wazum.grazr")
+            config = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config"), "herdr/plugins/config/wazum.grazr")
+            if not os.path.isfile(os.path.join(state, "accounts", target + ".json")):
+                finish(False, "That account is no longer enrolled")
+
+            os.environ.update({
+                "HERDR_BIN_PATH": herdr,
+                "HERDR_PLUGIN_ROOT": root,
+                "HERDR_PLUGIN_CONFIG_DIR": config,
+                "HERDR_PLUGIN_STATE_DIR": state,
+            })
+            os.chdir(root)
+            sys.path.insert(0, root)
+            import accounts, core, grazr
+
+            load = accounts.load
+            accounts.load = lambda paths, names: load(paths, [])
+
+            def pinned(active, enrolled, now, thresholds):
+                # grazr prints a RuntimeError as its refusal.
+                if active == target:
+                    raise RuntimeError("Already on that account")
+                return next((entry.id for entry in enrolled if entry.id == target), None)
+
+            core.next_account = pinned
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = grazr.main(["grazr.py", "swap"])
+            finish(code == 0, output.getvalue())
+            GRAZR_EOF
+            """#
+    }
+    #endif
+}
+
+/// What `Grazr.switchCommand` printed: whether Claude moved, and grazr's say.
+public struct GrazrSwitchResult: Decodable, Sendable, Equatable {
+    public let ok: Bool
+    public let output: String
+
+    public init(ok: Bool, output: String) {
+        self.ok = ok
+        self.output = output
+    }
+
+    /// grazr's verdict ("Rotated a -> b", "grazr: Busy rotating already, …")
+    /// is its last line.
+    public var summary: String? {
+        output.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { !$0.isEmpty }
+    }
 }
 
 public struct GrazrReport: Decodable, Sendable, Equatable {
@@ -130,6 +213,12 @@ public struct GrazrReport: Decodable, Sendable, Equatable {
         guard let block = blocked[account.id] else { return nil }
         if let until = block.until, until <= now.timeIntervalSince1970 { return nil }
         return block
+    }
+
+    /// Any enrolled account but the active one, unless grazr has blocked it:
+    /// a failed login or a hard limit would leave Claude unable to answer.
+    public func canSwitch(to account: GrazrAccount, now: Date) -> Bool {
+        account.id != active && block(for: account, now: now) == nil
     }
 
     public func threshold(for window: GrazrWindow) -> Int? {
