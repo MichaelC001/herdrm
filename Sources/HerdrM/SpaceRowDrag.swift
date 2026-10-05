@@ -99,6 +99,7 @@ struct AgentRowDragHost: View {
     let onPluginAction: (PluginAction) -> Void
     let onGrazrAccounts: () -> Void
     let onSwitchGrazrAccount: (GrazrAccount) -> Void
+    let onReauthenticateGrazrAccount: (GrazrAccount) -> Void
     let onMenuOpen: () -> Void
     let onClose: () -> Void
     let onDragStart: (String) -> Void
@@ -142,6 +143,7 @@ struct AgentRowDragHost: View {
                     if let switchMenu = grazrSwitchMenu {
                         accounts.append(switchMenu)
                     }
+                    accounts += grazrSignInItems
                     actions.insert(contentsOf: accounts + [.separator], at: 0)
                 }
                 items.append(.submenu(title: group.name, items: actions))
@@ -169,6 +171,20 @@ struct AgentRowDragHost: View {
             )
         }
         return .submenu(title: String(localized: "Switch to Account"), items: accounts)
+    }
+
+    /// One per account whose login grazr found refused.
+    private var grazrSignInItems: [SidebarContextMenuItem] {
+        guard let report = grazrReport else { return [] }
+        let now = Date()
+        return report.sortedAccounts
+            .filter { report.needsSignIn($0, now: now) }
+            .map { account in
+                .item(
+                    title: String(localized: "Re-authenticate \(account.name)…"),
+                    action: { onReauthenticateGrazrAccount(account) }
+                )
+            }
     }
 }
 

@@ -72,6 +72,17 @@ final class GrazrAccountsTests: XCTestCase {
         XCTAssertEqual(report.accounts.filter { report.canSwitch(to: $0, now: now) }.map(\.id), ["b"])
     }
 
+    func testOnlyABlockWithoutAnEndNeedsASignIn() {
+        let report = GrazrReport(
+            accounts: [GrazrAccount(id: "a", name: "a"), GrazrAccount(id: "b", name: "b"), GrazrAccount(id: "c", name: "c")],
+            blocked: [
+                "a": GrazrBlock(reason: "authentication_failed"),
+                "b": GrazrBlock(reason: "rate_limit", until: now.timeIntervalSince1970 + 600),
+            ]
+        )
+        XCTAssertEqual(report.accounts.filter { report.needsSignIn($0, now: now) }.map(\.id), ["a"])
+    }
+
     func testASwitchSummaryIsGrazrsLastLine() {
         XCTAssertEqual(GrazrSwitchResult(ok: true, output: "notice\nRotated a -> b\n\n").summary, "Rotated a -> b")
         XCTAssertNil(GrazrSwitchResult(ok: false, output: " \n").summary)
@@ -132,11 +143,11 @@ final class GrazrAccountsTests: XCTestCase {
         XCTAssertEqual(report.sortedAccounts[1].windows, [])
     }
 
-    /// The switch script, against a stand-in herdr and grazr in a throwaway
-    /// home: it finds grazr through `herdr plugin list`, runs its swap in
-    /// herdr's plugin environment, and pins the pick to the chosen account,
-    /// listed in ACCOUNTS or not.
-    func testTheSwitchRunsGrazrsSwapPinnedToTheChosenAccount() async throws {
+    /// The switch and sign-in scripts, against a stand-in herdr and grazr in a
+    /// throwaway home: they find grazr through `herdr plugin list` and run it in
+    /// herdr's plugin environment. A switch pins the pick to the chosen
+    /// account, listed in ACCOUNTS or not.
+    func testSwitchAndSignInRunGrazrPinnedToTheChosenAccount() async throws {
         let home = FileManager.default.temporaryDirectory
             .appendingPathComponent("grazr-switch-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: home) }
@@ -168,8 +179,22 @@ final class GrazrAccountsTests: XCTestCase {
             return "unpatched"
         """, to: root.appendingPathComponent("core.py"))
         try write("""
-        import os, accounts, core
+        import json, os, accounts, core
+        def read_key():
+            return "q"
+        def _enrol_from(runtime, source):
+            name = input("account name: ")
+            print("Enrolled %s from %s" % (name, os.path.basename(source)))
+            return 0
         def main(argv):
+            if argv[1] == "enrol":
+                if read_key() != "l":
+                    return 0
+                source = os.path.join(os.environ["HERDR_PLUGIN_STATE_DIR"], "enrol-1")
+                os.makedirs(source, exist_ok=True)
+                with open(os.path.join(source, ".claude.json"), "w") as handle:
+                    json.dump({"oauthAccount": {"accountUuid": os.environ["LOGIN"], "emailAddress": os.environ["LOGIN"] + "@x"}}, handle)
+                return _enrol_from(None, source)
             try:
                 picked = core.next_account("uuid-work", accounts.load(None, ["work@x", "home@x"]), None, {})
             except RuntimeError as error:
@@ -184,8 +209,8 @@ final class GrazrAccountsTests: XCTestCase {
             return 0
         """, to: root.appendingPathComponent("grazr.py"))
 
+        let environment = "export HOME='\(home.path)' XDG_STATE_HOME= XDG_CONFIG_HOME=; "
         func switching(to id: String) async throws -> GrazrSwitchResult {
-            let environment = "export HOME='\(home.path)' XDG_STATE_HOME= XDG_CONFIG_HOME=; "
             let output = try await DeviceFileService(device: .local).run(environment + Grazr.switchCommand(to: id))
             return try JSONDecoder().decode(GrazrSwitchResult.self, from: output)
         }
@@ -200,6 +225,24 @@ final class GrazrAccountsTests: XCTestCase {
 
         let gone = try await switching(to: "it's-gone")
         XCTAssertEqual(gone, GrazrSwitchResult(ok: false, output: "That account is no longer enrolled"))
+
+        // Re-authenticating: grazr's enrol, pre-answered with "l" and the
+        // account's name, and refused when the browser signed in elsewhere.
+        _ = try await DeviceFileService(device: .local).run(environment + Grazr.installReauthCommand)
+        func reauthenticating(signedInAs login: String) async throws -> String {
+            let output = try await DeviceFileService(device: .local).run(
+                environment + "export LOGIN=\(login) PATH=\"$HOME/.local/bin:$PATH\"; "
+                    // A refused login exits 1, which `run` would throw on.
+                    + "(\(Grazr.reauthInvocation(accountID: "uuid-home", name: "home's@x"))); true"
+            )
+            return String(decoding: output, as: UTF8.self)
+        }
+        let renewed = try await reauthenticating(signedInAs: "uuid-home")
+        XCTAssertTrue(renewed.contains("account name: home's@x\nEnrolled home's@x from enrol-1\n"), renewed)
+
+        let elsewhere = try await reauthenticating(signedInAs: "uuid-work")
+        XCTAssertTrue(elsewhere.contains("That login is uuid-work@x, not home's@x, so nothing changed"), elsewhere)
+        XCTAssertFalse(elsewhere.contains("Enrolled"), elsewhere)
     }
     #endif
 }

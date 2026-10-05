@@ -867,6 +867,50 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Signs a grazr account in again, for one whose login stopped working
+    /// (blocked: authentication_failed). Opens a terminal on the device that
+    /// runs grazr's own enrol for that account: `claude auth login` with an
+    /// isolated config dir, so the account Claude is on is left alone, then
+    /// grazr parks the new credential and lifts the block.
+    func reauthenticateGrazrAccount(_ account: GrazrAccount, on device: Device, workspaceID: String? = nil) {
+        let workspaceID = workspaceID
+            ?? selectedSpace.flatMap { $0.deviceID == device.id ? $0.workspaceID : nil }
+            ?? session(device.id).workspaces.first?.workspaceID
+        Task {
+            do {
+                _ = try await DeviceFileService(device: device).run(Grazr.installReauthCommand)
+                let service = service(for: device)
+                let paneID = try await service.createTab(
+                    workspaceID: workspaceID,
+                    cwd: nil,
+                    label: String(localized: "grazr sign-in")
+                )
+                // Typed once the shell has drawn its prompt; a prompt still
+                // starting up can drop what arrives before it.
+                for _ in 0..<30 {
+                    let screen = try? await service.readPane(paneID: paneID)
+                    if screen?.text.contains(where: { !$0.isWhitespace }) == true { break }
+                    try await Task.sleep(nanoseconds: 100_000_000)
+                }
+                try await service.sendInput(
+                    paneID: paneID,
+                    text: Grazr.reauthInvocation(accountID: account.id, name: account.name)
+                )
+                try await service.sendKeys(paneID: paneID, keys: ["enter"])
+                await refresh(device.id)
+                grazrAccountsDevice = nil
+                isFileManagerActive = false
+                if let workspaceID {
+                    selectedSpace = SpaceRef(deviceID: device.id, workspaceID: workspaceID)
+                }
+                selectedPane = PaneRef(deviceID: device.id, paneID: paneID)
+                selectedShellID = nil
+            } catch {
+                actionError = actionErrorMessage(error, device: device)
+            }
+        }
+    }
+
     private func loadAgentCatalog(deviceID: UUID, using service: HerdrService) async {
         sessions[deviceID]?.agentCatalog = .loading
         do {

@@ -13,6 +13,12 @@ the Sparkle update description — a release without a section here fails CI.
   with its reason), and each card in the Accounts window has a Switch button.
   grazr's own swap only goes to the next account with headroom; this runs that
   same swap, with its lock, pane tags and log, pinned to the chosen account.
+- Re-authenticate a grazr account whose login stopped working (Blocked:
+  authentication_failed), from its card in the Accounts window or the agent's
+  grazr menu. A terminal opens on the device and runs grazr's own enrol for
+  that account: `claude auth login` in an isolated config dir, so the account
+  Claude is on stays as it is. grazr then keeps the new login and lifts the
+  block. Signing in as a different account changes nothing.
 
 ## [0.6.11] - 2026-10-03
 

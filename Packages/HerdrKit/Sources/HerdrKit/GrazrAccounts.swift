@@ -84,45 +84,26 @@ public enum Grazr {
     /// grazr's own `swap` only knows "the next account with headroom", so this
     /// runs that same swap -- rotation lock, credential park, pane tags, log --
     /// with its pick pinned to `accountID`, from any enrolled account rather
-    /// than only those in ACCOUNTS. The environment is the one herdr gives a
-    /// plugin action; grazr's refusals land in `output`, not in a failed exit.
+    /// than only those in ACCOUNTS. grazr's refusals land in `output`, not in a
+    /// failed exit.
     public static func switchCommand(to accountID: String) -> String {
         SSHTunnel.remotePathExport + "\n"
             + "python3 - \(HerdrService.shellQuoted(accountID)) <<'GRAZR_EOF'\n"
             + #"""
-            import contextlib, io, json, os, shutil, subprocess, sys
+            import json, sys
 
             target = sys.argv[1]
-            home = os.path.expanduser("~")
 
-            def finish(ok, output):
-                print(json.dumps({"ok": ok, "output": output}))
+            def fail(output):
+                print(json.dumps({"ok": False, "output": output}))
                 sys.exit(0)
 
-            herdr = shutil.which("herdr")
-            if not herdr:
-                finish(False, "herdr is not on this device's PATH")
-            try:
-                listed = subprocess.run([herdr, "plugin", "list", "--json"], capture_output=True, text=True, timeout=10)
-                plugins = json.loads(listed.stdout)["result"]["plugins"]
-                root = next(plugin["plugin_root"] for plugin in plugins if plugin.get("plugin_id") == "wazum.grazr")
-            except Exception:
-                finish(False, "grazr is not installed")
+            """#
+            + pluginPreamble
+            + #"""
 
-            state = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(home, ".local/state"), "herdr/plugins/wazum.grazr")
-            config = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config"), "herdr/plugins/config/wazum.grazr")
             if not os.path.isfile(os.path.join(state, "accounts", target + ".json")):
-                finish(False, "That account is no longer enrolled")
-
-            os.environ.update({
-                "HERDR_BIN_PATH": herdr,
-                "HERDR_PLUGIN_ROOT": root,
-                "HERDR_PLUGIN_CONFIG_DIR": config,
-                "HERDR_PLUGIN_STATE_DIR": state,
-            })
-            os.chdir(root)
-            sys.path.insert(0, root)
-            import accounts, core, grazr
+                fail("That account is no longer enrolled")
 
             load = accounts.load
             accounts.load = lambda paths, names: load(paths, [])
@@ -137,10 +118,97 @@ public enum Grazr {
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
                 code = grazr.main(["grazr.py", "swap"])
-            finish(code == 0, output.getvalue())
+            print(json.dumps({"ok": code == 0, "output": output.getvalue()}))
             GRAZR_EOF
             """#
     }
+
+    /// Where `installReauthCommand` puts the sign-in script on the device.
+    public static let reauthScriptPath = "~/.cache/herdrm/grazr-reauth.py"
+
+    /// Writes the sign-in script that `reauthInvocation` runs in a terminal.
+    /// It goes to a file first so the terminal shows one short line, not the
+    /// script pasted into the shell.
+    public static var installReauthCommand: String {
+        "mkdir -p ~/.cache/herdrm && cat > \(reauthScriptPath) <<'GRAZR_EOF'\n"
+            + #"""
+            import json, sys
+
+            target, name = sys.argv[1], sys.argv[2]
+
+            def fail(message):
+                print(message + "\n\npress return to close")
+                sys.stdin.readline()
+                sys.exit(1)
+
+            """#
+            + pluginPreamble
+            + #"""
+
+            # grazr's enrol, pre-answered: "l" logs in with an isolated config
+            # dir, leaving the account Claude is on alone, and the name is the
+            # account's own. Re-enrolling lifts grazr's block on it.
+            key = grazr.read_key
+            grazr.read_key = lambda *args: "l"
+            grazr.input = lambda prompt="": print(prompt + name) or name
+            enrol_from = grazr._enrol_from
+
+            def same_account(runtime, source):
+                try:
+                    with open(os.path.join(source, ".claude.json")) as handle:
+                        signed = json.load(handle).get("oauthAccount") or {}
+                except Exception:
+                    signed = {}
+                if signed.get("accountUuid") != target:
+                    print("\nThat login is %s, not %s, so nothing changed. Sign in as %s."
+                          % (signed.get("emailAddress") or "another account", name, name))
+                    return 1
+                return enrol_from(runtime, source)
+
+            grazr._enrol_from = same_account
+            print("Sign in to Claude as %s. Claude's current account is left as it is.\n" % name)
+            code = grazr.main(["grazr.py", "enrol"])
+            print("\npress any key to close")
+            key()
+            sys.exit(code)
+            GRAZR_EOF
+            """#
+    }
+
+    /// The line typed into a fresh terminal on the device; the tab closes
+    /// with the script.
+    public static func reauthInvocation(accountID: String, name: String) -> String {
+        "exec python3 \(reauthScriptPath) \(HerdrService.shellQuoted(accountID)) \(HerdrService.shellQuoted(name))"
+    }
+
+    /// Finds grazr through `herdr plugin list` and sets the environment herdr
+    /// gives a plugin action, then imports grazr's modules. Expects `fail`.
+    private static let pluginPreamble = #"""
+    import contextlib, io, os, shutil, subprocess
+
+    home = os.path.expanduser("~")
+    herdr = shutil.which("herdr")
+    if not herdr:
+        fail("herdr is not on this device's PATH")
+    try:
+        listed = subprocess.run([herdr, "plugin", "list", "--json"], capture_output=True, text=True, timeout=10)
+        plugins = json.loads(listed.stdout)["result"]["plugins"]
+        root = next(plugin["plugin_root"] for plugin in plugins if plugin.get("plugin_id") == "wazum.grazr")
+    except Exception:
+        fail("grazr is not installed")
+
+    state = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(home, ".local/state"), "herdr/plugins/wazum.grazr")
+    config = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config"), "herdr/plugins/config/wazum.grazr")
+    os.environ.update({
+        "HERDR_BIN_PATH": herdr,
+        "HERDR_PLUGIN_ROOT": root,
+        "HERDR_PLUGIN_CONFIG_DIR": config,
+        "HERDR_PLUGIN_STATE_DIR": state,
+    })
+    os.chdir(root)
+    sys.path.insert(0, root)
+    import accounts, core, grazr
+    """#
     #endif
 }
 
@@ -219,6 +287,13 @@ public struct GrazrReport: Decodable, Sendable, Equatable {
     /// a failed login or a hard limit would leave Claude unable to answer.
     public func canSwitch(to account: GrazrAccount, now: Date) -> Bool {
         account.id != active && block(for: account, now: now) == nil
+    }
+
+    /// A block with no end (a refused login, say) lifts only when the account
+    /// is enrolled again; one that ends (a rate limit) lifts on its own.
+    public func needsSignIn(_ account: GrazrAccount, now: Date) -> Bool {
+        guard let block = block(for: account, now: now) else { return false }
+        return block.until == nil
     }
 
     public func threshold(for window: GrazrWindow) -> Int? {

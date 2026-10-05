@@ -94,7 +94,8 @@ struct GrazrAccountsSheet: View {
                                 account: account,
                                 now: Date(),
                                 switching: swapping,
-                                onSwitch: { switchTo(account) }
+                                onSwitch: { switchTo(account) },
+                                onReauthenticate: { model.reauthenticateGrazrAccount(account, on: device) }
                             )
                         }
                     }
@@ -147,6 +148,7 @@ private struct GrazrAccountCard: View {
     let now: Date
     let switching: Bool
     let onSwitch: () -> Void
+    let onReauthenticate: () -> Void
 
     private var isActive: Bool { account.id == report.active }
 
@@ -170,6 +172,10 @@ private struct GrazrAccountCard: View {
                     Button("Switch", action: onSwitch)
                         .controlSize(.small)
                         .disabled(switching)
+                } else if report.needsSignIn(account, now: now) {
+                    Button("Re-authenticate…", action: onReauthenticate)
+                        .controlSize(.small)
+                        .help("Sign in to this account again in a terminal on the device")
                 }
             }
             if let organization = account.organization, organization != "\(account.name)'s Organization" {
