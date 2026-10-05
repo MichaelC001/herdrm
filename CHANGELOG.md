@@ -7,6 +7,20 @@ the Sparkle update description — a release without a section here fails CI.
 
 ## [Unreleased]
 
+### Added
+- **Custom launch arguments per agent.** Settings → Agents has an arguments
+  field for every agent (`droid --auto high`, `agy '--dangerously-skip-permissions'`,
+  `--model …`), parsed shell-style, and the New Agent sheet starts from those
+  defaults so you can tweak a single launch. A global **YOLO mode** switch
+  pre-fills each agent's permission-bypass flag into its arguments, and turning
+  it off strips just those flags. YOLO flags now also cover Droid, Antigravity,
+  Kimi, Devin, Cline, Hermes, Kiro, Amp, Qoder, Qwen Code and Muse.
+
+### Changed
+- The New Agent sheet's "Bypass permissions" switch became "YOLO mode", which
+  edits the visible arguments instead of silently appending a flag. The old
+  default carries over.
+
 ## [0.6.11] - 2026-10-03
 
 ### Added

@@ -2065,38 +2065,6 @@
         }
       }
     },
-    "OPTIONS" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "OPTIONS"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "选项"
-          }
-        }
-      }
-    },
-    "Bypass permissions" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Bypass permissions"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "绕过权限"
-          }
-        }
-      }
-    },
     "Start Agent" : {
       "localizations" : {
         "en" : {
@@ -3405,6 +3373,182 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "终端内容区域"
+          }
+        }
+      }
+    },
+    "ARGUMENTS" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ARGUMENTS"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "参数"
+          }
+        }
+      }
+    },
+    "No extra arguments" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No extra arguments"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无额外参数"
+          }
+        }
+      }
+    },
+    "Unterminated quote in arguments." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unterminated quote in arguments."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "参数中有未闭合的引号。"
+          }
+        }
+      }
+    },
+    "Appended to %@. Defaults live in Settings → Agents." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Appended to %@. Defaults live in Settings → Agents."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "追加在 %@ 之后。默认值可在 设置 → Agents 中配置。"
+          }
+        }
+      }
+    },
+    "YOLO mode" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "YOLO mode"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "YOLO 模式"
+          }
+        }
+      }
+    },
+    "Pre-fills each agent’s permission-bypass flag (for example droid --auto high) into its launch arguments. Turning it off removes those flags and keeps your other arguments." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pre-fills each agent’s permission-bypass flag (for example droid --auto high) into its launch arguments. Turning it off removes those flags and keeps your other arguments."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在每个 Agent 的启动参数中预填其跳过权限确认的参数（例如 droid --auto high）。关闭后会移除这些参数，保留你的其他参数。"
+          }
+        }
+      }
+    },
+    "Arguments appended to %@ when starting this agent." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arguments appended to %@ when starting this agent."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启动该 Agent 时追加在 %@ 之后的参数。"
+          }
+        }
+      }
+    },
+    "Reset to default" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reset to default"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "恢复默认"
+          }
+        }
+      }
+    },
+    "Launch Arguments" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Launch Arguments"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启动参数"
+          }
+        }
+      }
+    },
+    "Shell-style: quote values with spaces. The New Agent sheet starts from these and lets you edit them for one launch." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shell-style: quote values with spaces. The New Agent sheet starts from these and lets you edit them for one launch."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按 Shell 语法解析：含空格的值请加引号。新建 Agent 时以此为初始值，并可针对单次启动修改。"
+          }
+        }
+      }
+    },
+    "Binaries on This Mac" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Binaries on This Mac"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本机可执行文件"
           }
         }
       }

@@ -181,22 +181,6 @@ public actor HerdrService {
         public let path: String
     }
 
-    /// Flags that put a kind's CLI into bypass/yolo mode. Only kinds with a verified
-    /// flag (vendor docs or `--help` output) are listed; nil = the agent has no known
-    /// bypass mode and the UI hides the toggle entirely.
-    public static func bypassFlags(for kind: String) -> [String]? {
-        switch kind {
-        case "claude": return ["--dangerously-skip-permissions"]
-        case "codex": return ["--dangerously-bypass-approvals-and-sandbox"]
-        case "grok": return ["--always-approve"]
-        case "gemini": return ["--yolo"]
-        case "opencode": return ["--auto"]
-        case "cursor": return ["--force"]
-        case "copilot": return ["--allow-all-tools"]
-        default: return nil
-        }
-    }
-
     /// Local CLIs visible on the login-shell search PATH, preserving manifest
     /// order. Probe failure does not throw: lookup still walks the GUI PATH and
     /// well-known prefixes. `overrides` maps a kind to a binary path or command

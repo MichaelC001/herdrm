@@ -1353,7 +1353,7 @@ struct NewAgentSheet: View {
     @State private var deviceID = Device.local.id
     @State private var kind = ""
     @State private var workspaceID: String = ""
-    @AppStorage("agent.bypassDefault") private var bypass = true
+    @State private var arguments = ""
 
     private var chosenDevice: Device {
         model.device(deviceID) ?? .local
@@ -1367,8 +1367,19 @@ struct NewAgentSheet: View {
         session.agentCatalog.kinds
     }
 
-    private var bypassFlags: [String]? {
-        HerdrService.bypassFlags(for: kind)
+    private var yoloArguments: String? {
+        AgentLaunchArguments.yoloArguments(for: kind)
+    }
+
+    private var parsedArguments: [String]? {
+        try? AgentLaunchArguments.tokenize(arguments)
+    }
+
+    private var yoloBinding: Binding<Bool> {
+        Binding(
+            get: { AgentLaunchArguments.containsYolo(arguments, kind: kind) },
+            set: { arguments = AgentLaunchArguments.setYolo($0, in: arguments, kind: kind) }
+        )
     }
 
     private var spaceLabel: String {
@@ -1461,23 +1472,35 @@ struct NewAgentSheet: View {
                 .labelsHidden()
                 .fixedSize()
 
-                // shown only for agents with a verified bypass flag
-                if let flags = bypassFlags {
+                if !kind.isEmpty {
                     Spacer().frame(height: 8)
 
-                    SheetSectionLabel("OPTIONS")
-                    Toggle(isOn: $bypass) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Bypass permissions")
-                                .font(.system(size: 12.5))
-                                .foregroundStyle(Theme.text)
-                            Text(flags.joined(separator: " "))
-                                .font(.system(size: 10.5).monospaced())
-                                .foregroundStyle(Theme.textTertiary)
+                    SheetSectionLabel("ARGUMENTS")
+                    TextField("", text: $arguments, prompt: Text("No extra arguments"))
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12).monospaced())
+                    Text(parsedArguments == nil
+                        ? String(localized: "Unterminated quote in arguments.")
+                        : String(localized: "Appended to \(HerdrService.binaryName(for: kind)). Defaults live in Settings → Agents."))
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(parsedArguments == nil ? Color.red : Theme.textTertiary)
+
+                    // shown only for agents with a verified YOLO flag
+                    if let yolo = yoloArguments {
+                        Toggle(isOn: yoloBinding) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("YOLO mode")
+                                    .font(.system(size: 12.5))
+                                    .foregroundStyle(Theme.text)
+                                Text(yolo)
+                                    .font(.system(size: 10.5).monospaced())
+                                    .foregroundStyle(Theme.textTertiary)
+                            }
                         }
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .padding(.top, 4)
                     }
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
                 }
             }
             .padding(16)
@@ -1493,14 +1516,14 @@ struct NewAgentSheet: View {
                         device: chosenDevice,
                         kind: kind,
                         workspaceID: workspaceID.isEmpty ? nil : workspaceID,
-                        bypass: bypass && bypassFlags != nil
+                        args: parsedArguments ?? []
                     )
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(!kinds.contains(kind))
+                .disabled(!kinds.contains(kind) || parsedArguments == nil)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -1515,9 +1538,13 @@ struct NewAgentSheet: View {
                 ? (model.selectedSpace?.workspaceID ?? "")
                 : ""
             if !kinds.contains(kind) { kind = kinds.first ?? "" }
+            arguments = AgentLaunchArgsStore.resolved(for: kind)
         }
         .onChange(of: kinds) { _, newKinds in
             if !newKinds.contains(kind) { kind = newKinds.first ?? "" }
+        }
+        .onChange(of: kind) { _, newKind in
+            arguments = AgentLaunchArgsStore.resolved(for: newKind)
         }
     }
 

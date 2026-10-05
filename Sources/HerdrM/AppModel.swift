@@ -102,6 +102,52 @@ enum AgentBinaryOverrides {
     }
 }
 
+/// Per-kind default launch arguments, as shell-style strings. A stored key —
+/// even an empty string — is user-owned; a missing key follows YOLO mode
+/// (the kind's YOLO flags when on, nothing when off).
+enum AgentLaunchArgsStore {
+    static let defaultsKey = "agent.launchArgs"
+    /// Kept from the old per-sheet "Bypass permissions" toggle so existing
+    /// users keep their choice.
+    static let yoloModeKey = "agent.bypassDefault"
+
+    static func stored(defaults: UserDefaults = .standard) -> [String: String] {
+        defaults.dictionary(forKey: defaultsKey) as? [String: String] ?? [:]
+    }
+
+    static func yoloMode(defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: yoloModeKey) as? Bool ?? true
+    }
+
+    static func resolved(for kind: String, defaults: UserDefaults = .standard) -> String {
+        if let value = stored(defaults: defaults)[kind] { return value }
+        guard yoloMode(defaults: defaults) else { return "" }
+        return AgentLaunchArguments.yoloArguments(for: kind) ?? ""
+    }
+
+    static func save(_ value: String, for kind: String, defaults: UserDefaults = .standard) {
+        var all = stored(defaults: defaults)
+        all[kind] = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        defaults.set(all, forKey: defaultsKey)
+    }
+
+    static func reset(_ kind: String, defaults: UserDefaults = .standard) {
+        var all = stored(defaults: defaults)
+        all.removeValue(forKey: kind)
+        defaults.set(all, forKey: defaultsKey)
+    }
+
+    /// Flips YOLO mode and pre-fills (or strips) the YOLO flags in every
+    /// customized kind, so their other arguments survive the switch.
+    static func setYoloMode(_ enabled: Bool, defaults: UserDefaults = .standard) {
+        defaults.set(enabled, forKey: yoloModeKey)
+        let updated = stored(defaults: defaults).reduce(into: [String: String]()) { result, entry in
+            result[entry.key] = AgentLaunchArguments.setYolo(enabled, in: entry.value, kind: entry.key)
+        }
+        defaults.set(updated, forKey: defaultsKey)
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var devices: [Device]
@@ -1611,14 +1657,13 @@ final class AppModel: ObservableObject {
 
     /// New Agent: a fresh tab in the space plus agent.start. Agent names are
     /// session-global in herdr, so collisions retry with a unique suffix.
-    /// `bypass` appends the kind's skip-permissions flag when one is known.
+    /// `args` are appended to the kind's command, already tokenized.
     func startNewAgent(
         device: Device,
         kind: String,
         workspaceID: String?,
-        bypass: Bool
+        args: [String]
     ) {
-        let args = bypass ? (HerdrService.bypassFlags(for: kind) ?? []) : []
         Task {
             let service = service(for: device)
             var createdPane: String?
