@@ -2,10 +2,11 @@ import HerdrKit
 import SwiftUI
 
 /// The Accounts sheet's dial: grazr's rotation as a clock. One equal slice per
-/// account in grazr's order, starting at 12 and running clockwise. Inside a
-/// slice time runs clockwise too, from all left to nothing: the hand stands
-/// in the active account's slice at what it has used, the tick is where grazr
-/// swaps, and the next account it would move to is marked.
+/// account in the order they come round, starting at 12 with the active one
+/// and running clockwise: the account grazr moves to next, then the rest by
+/// when they refill. Inside a slice time runs clockwise too, from all left to
+/// nothing: the hand stands in the active account's slice at what it has
+/// used, the tick is where grazr swaps, and the next account is marked.
 struct GrazrAccountsDial: View {
     let report: GrazrReport
     let window: GrazrDialWindow
@@ -14,7 +15,7 @@ struct GrazrAccountsDial: View {
     private let ringRadius: CGFloat = 104
     private let ringWidth: CGFloat = 14
 
-    private var rotation: [GrazrAccount] { report.rotation }
+    private var rotation: [GrazrAccount] { report.dialOrder(now: now) }
     private var active: GrazrAccount? { report.accounts.first { $0.id == report.active } }
     private var next: GrazrAccount? { report.predictedNext(now: now) }
 
@@ -97,13 +98,13 @@ struct GrazrAccountsDial: View {
                 .stroke(Theme.accent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
         }
         if isActive {
-            // A needle across the ring, clear of the centre text.
-            RadialTick(at: hand, from: ringRadius * 0.74, to: ringRadius + ringWidth / 2 + 6)
+            // A needle across the ring, clear of the centre text wherever the slice is.
+            RadialTick(at: hand, from: ringRadius - ringWidth / 2 - 7, to: ringRadius + ringWidth / 2 + 6)
                 .stroke(Theme.statsAccount, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
             Circle()
                 .fill(Theme.statsAccount)
                 .frame(width: 7, height: 7)
-                .offset(offset(at: hand, radius: ringRadius * 0.74))
+                .offset(offset(at: hand, radius: ringRadius - ringWidth / 2 - 7))
         }
     }
 
@@ -153,6 +154,10 @@ struct GrazrAccountsDial: View {
                     Text(next.name)
                         .fontWeight(.semibold)
                         .foregroundStyle(Theme.accent)
+                    if let refill = futureRefill(of: next) {
+                        Text("refills \(GrazrStyle.time(refill, now: now))")
+                            .foregroundStyle(Theme.textTertiary)
+                    }
                 } else {
                     Text("nothing to swap to")
                         .foregroundStyle(Theme.textTertiary)
@@ -182,8 +187,16 @@ struct GrazrAccountsDial: View {
         return used ? String(localized: "refills before it runs out") : String(localized: "no pace yet")
     }
 
+    /// When an account that is spent now is full again, if that is later.
+    private func futureRefill(of account: GrazrAccount) -> Date? {
+        report.availableAt(account, now: now).flatMap { $0 > now ? $0 : nil }
+    }
+
     private var nextText: String {
-        if let next { return String(localized: "next ▸ \(next.name)") }
+        if let next {
+            guard let refill = futureRefill(of: next) else { return String(localized: "next ▸ \(next.name)") }
+            return String(localized: "next ▸ \(next.name), refills \(GrazrStyle.time(refill, now: now))")
+        }
         if let refill = report.nextHeadroom(now: now) {
             return String(localized: "nothing to swap to · \(refill.account.name) refills \(GrazrStyle.time(refill.at, now: now))")
         }
@@ -252,7 +265,10 @@ struct GrazrAccountsDial: View {
         if let block = report.block(for: account, now: now) {
             return (String(localized: "blocked: \(block.reason)"), Theme.danger)
         }
-        if account.id == next?.id { return (String(localized: "NEXT ▸"), Theme.accent) }
+        if account.id == next?.id {
+            guard let refill = futureRefill(of: account) else { return (String(localized: "NEXT ▸"), Theme.accent) }
+            return (String(localized: "NEXT · refills \(GrazrStyle.time(refill, now: now))"), Theme.accent)
+        }
         if !report.isListed(account) { return (String(localized: "not in ACCOUNTS"), Theme.textTertiary) }
         if account.windows.isEmpty { return (String(localized: "no reading yet"), Theme.textTertiary) }
         let low = account.windows.filter { window in

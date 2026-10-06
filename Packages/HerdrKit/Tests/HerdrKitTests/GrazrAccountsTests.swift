@@ -111,6 +111,46 @@ final class GrazrAccountsTests: XCTestCase {
         XCTAssertEqual(unread.predictedNext(now: now)?.id, "e")
     }
 
+    func testTheNextAccountIsTheOneFullAgainWhenTheActiveOneRunsOut() {
+        // 44% of the week used two days in: 22%/day, so 41 more points last
+        // about 1.86 days. b's week resets before then, d's and c's after.
+        let report = GrazrReport(
+            active: "a",
+            accounts: [
+                GrazrAccount(id: "a", name: "a", windows: [window("weekly", 56, resetsIn: 5 * 24)], updated: now.timeIntervalSince1970),
+                GrazrAccount(id: "b", name: "b", windows: [window("weekly", 0, resetsIn: 10)]),
+                GrazrAccount(id: "c", name: "c", windows: [window("weekly", 0, resetsIn: 100)]),
+                GrazrAccount(id: "d", name: "d", windows: [window("weekly", 0, resetsIn: 50)]),
+            ],
+            order: ["d", "a", "c", "b"],
+            settings: ["REMAINING_WEEKLY": "15"]
+        )
+        let swap = report.expectedSwap(now: now)
+        XCTAssertEqual(swap.timeIntervalSince(now) / 3600, 41.0 / 22 * 24, accuracy: 0.01)
+
+        XCTAssertEqual(report.predictedNext(now: now)?.id, "b")
+        XCTAssertEqual(report.availableAt(report.accounts[1], now: now), now.addingTimeInterval(10 * 3600))
+        XCTAssertEqual(report.dialOrder(now: now).map(\.id), ["a", "b", "d", "c"])
+    }
+
+    func testTheDialPutsBlockedAndAvailableAccountsWhereTheyComeRound() {
+        let report = GrazrReport(
+            active: "a",
+            accounts: [
+                GrazrAccount(id: "a", name: "a"),
+                GrazrAccount(id: "b", name: "b", windows: [window("weekly", 0, resetsIn: 20)]),
+                GrazrAccount(id: "c", name: "c", windows: [window("weekly", 60, resetsIn: 20)]),
+                GrazrAccount(id: "d", name: "d", windows: [window("weekly", 80, resetsIn: 20)]),
+                GrazrAccount(id: "e", name: "e"),
+            ],
+            order: ["e", "b", "c", "d", "a"],
+            blocked: ["e": GrazrBlock(reason: "authentication_failed")]
+        )
+        // e is blocked, so c is next; d has headroom now, b refills in 20h.
+        XCTAssertEqual(report.dialOrder(now: now).map(\.id), ["a", "c", "d", "b", "e"])
+        XCTAssertNil(report.availableAt(report.accounts[4], now: now))
+    }
+
     func testWithNothingToSwapToTheSoonestRefillIsNamed() {
         let report = GrazrReport(
             active: "a",

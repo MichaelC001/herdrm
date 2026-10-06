@@ -317,22 +317,65 @@ public struct GrazrReport: Decodable, Sendable, Equatable {
         return listed + [current]
     }
 
-    /// Whether grazr would move into `account`: every open window it watches
-    /// is at or above its threshold. An account with no reading yet counts.
-    public func hasHeadroom(_ account: GrazrAccount, now: Date) -> Bool {
+    /// Whether grazr would move into `account` at `time`: every window it
+    /// watches still open then is at or above its threshold. A parked account
+    /// spends nothing, so a window that resets by then is full again. An
+    /// account with no reading yet counts.
+    public func hasHeadroom(_ account: GrazrAccount, now time: Date) -> Bool {
         account.windows.allSatisfy { window in
-            guard let threshold = threshold(for: window), window.isOpen(now: now) else { return true }
+            guard let threshold = threshold(for: window), window.isOpen(now: time) else { return true }
             return window.remaining >= threshold
         }
     }
 
+    /// When the active account is expected to reach a threshold, at the pace
+    /// of its last reading; `now` when that is already past or unknown.
+    public func expectedSwap(now: Date) -> Date {
+        guard let current = accounts.first(where: { $0.id == active }),
+              let eta = swapEstimate(for: current, now: now), eta > now
+        else { return now }
+        return eta
+    }
+
     /// The account grazr's next swap goes to, as its `core.next_account`
-    /// picks it: the first listed account, not active and not blocked, with
-    /// headroom.
+    /// picks it when that swap comes: the first listed account, not active and
+    /// not blocked, with headroom then. One whose window resets before the
+    /// active account runs out counts, since it is full again by the time.
     public func predictedNext(now: Date) -> GrazrAccount? {
-        order.lazy
+        let swap = expectedSwap(now: now)
+        return order.lazy
             .compactMap { name in accounts.first { $0.name == name } }
-            .first { $0.id != active && block(for: $0, now: now) == nil && hasHeadroom($0, now: now) }
+            .first { $0.id != active && block(for: $0, now: now) == nil && hasHeadroom($0, now: swap) }
+    }
+
+    /// When `account` next has headroom: `now` when it has it already,
+    /// otherwise when the last of its low windows resets. Nil when blocked, or
+    /// when a low window has no reset time to wait for.
+    public func availableAt(_ account: GrazrAccount, now: Date) -> Date? {
+        guard block(for: account, now: now) == nil else { return nil }
+        let low = account.windows.filter { window in
+            guard let threshold = threshold(for: window), window.isOpen(now: now) else { return false }
+            return window.remaining < threshold
+        }
+        guard !low.isEmpty else { return now }
+        let resets = low.compactMap(\.resetsAt)
+        return resets.count == low.count ? resets.max() : nil
+    }
+
+    /// The rotation as it will come round: the active account, then the one
+    /// grazr moves to next, then the rest by when they have headroom again,
+    /// soonest first, ties in `ACCOUNTS` order. Blocked accounts and ones
+    /// with no known refill go last.
+    public func dialOrder(now: Date) -> [GrazrAccount] {
+        let members = rotation
+        let next = predictedNext(now: now)
+        let rank = { (account: GrazrAccount) -> (Int, Date, Int) in
+            let listed = order.firstIndex(of: account.name) ?? order.count
+            if account.id == active { return (0, .distantPast, listed) }
+            if account.id == next?.id { return (1, .distantPast, listed) }
+            return (2, availableAt(account, now: now) ?? .distantFuture, listed)
+        }
+        return members.sorted { rank($0) < rank($1) }
     }
 
     /// With nothing to swap to: the soonest an account other than the active
