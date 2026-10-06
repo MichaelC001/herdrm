@@ -11,6 +11,12 @@ struct GrazrAccountsSheet: View {
     @State private var failure: String?
     @State private var loading = false
     @State private var swapping = false
+    @AppStorage("grazr.accounts.view") private var view = AccountsView.list
+    @AppStorage("grazr.accounts.dialWindow") private var dialWindow = GrazrDialWindow.week
+
+    enum AccountsView: String {
+        case list, dial
+    }
 
     private var swapAction: PluginAction? {
         model.session(device.id).pluginActions
@@ -20,11 +26,24 @@ struct GrazrAccountsSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SheetHeader(
-                systemImage: "person.2",
-                title: String(localized: "Claude Accounts"),
-                subtitle: subtitle
-            )
+            HStack(spacing: 0) {
+                SheetHeader(
+                    systemImage: "person.2",
+                    title: String(localized: "Claude Accounts"),
+                    subtitle: subtitle
+                )
+                Picker("View", selection: $view) {
+                    Image(systemName: "list.bullet").tag(AccountsView.list)
+                        .accessibilityLabel("List")
+                    Image(systemName: "clock").tag(AccountsView.dial)
+                        .accessibilityLabel("Dial")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .help("Show the accounts as a list or as grazr's rotation dial")
+                .padding(.trailing, 16)
+            }
             Rectangle().fill(Theme.hairline).frame(height: 1)
 
             content
@@ -85,6 +104,27 @@ struct GrazrAccountsSheet: View {
                 message(String(localized: "grazr is not installed on \(device.name)."), systemImage: "person.crop.circle.badge.questionmark")
             } else if report.accounts.isEmpty {
                 message(String(localized: "No accounts enrolled yet."), systemImage: "person.crop.circle.badge.plus")
+            } else if view == .dial {
+                ScrollView {
+                    VStack(spacing: 6) {
+                        HStack {
+                            Spacer()
+                            Picker("Window", selection: $dialWindow) {
+                                Text("Week").tag(GrazrDialWindow.week)
+                                Text("5h").tag(GrazrDialWindow.session)
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .fixedSize()
+                            .help("Which window fills the slices")
+                        }
+                        // Redraws each minute so a window past its reset shows as refilled.
+                        TimelineView(.periodic(from: .now, by: 60)) { context in
+                            GrazrAccountsDial(report: report, window: dialWindow, now: context.date)
+                        }
+                    }
+                    .padding(16)
+                }
             } else {
                 ScrollView {
                     VStack(spacing: 10) {
@@ -210,7 +250,7 @@ private struct GrazrAccountCard: View {
 
     private func windowRow(_ window: GrazrWindow) -> some View {
         let left = window.left(now: now)
-        let color = tint(left: left, threshold: report.threshold(for: window))
+        let color = GrazrStyle.tint(left: left, threshold: report.threshold(for: window))
         return HStack(spacing: 8) {
             Text(window.label)
                 .font(.system(size: 11.5, weight: .medium))
@@ -232,19 +272,10 @@ private struct GrazrAccountCard: View {
         }
     }
 
-    private func tint(left: Int, threshold: Int?) -> Color {
-        if left <= 2 { return Theme.danger }
-        if let threshold, left < threshold { return Theme.warning }
-        return Theme.success
-    }
-
     private func resetText(_ window: GrazrWindow) -> String {
         guard let resetsAt = window.resetsAt else { return "" }
         guard window.isOpen(now: now) else { return String(localized: "reset since") }
-        let format = Calendar.current.isDate(resetsAt, inSameDayAs: now)
-            ? Date.FormatStyle().hour().minute()
-            : Date.FormatStyle().weekday(.abbreviated).hour().minute()
-        return String(localized: "resets \(resetsAt.formatted(format))")
+        return String(localized: "resets \(GrazrStyle.time(resetsAt, now: now))")
     }
 
     private func badge(_ text: String, color: Color) -> some View {

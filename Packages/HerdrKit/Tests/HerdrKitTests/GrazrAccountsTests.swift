@@ -72,6 +72,89 @@ final class GrazrAccountsTests: XCTestCase {
         XCTAssertEqual(report.accounts.filter { report.canSwitch(to: $0, now: now) }.map(\.id), ["b"])
     }
 
+    func testTheRotationIsTheConfiguredOrderPlusAnUnlistedActiveAccount() {
+        let report = GrazrReport(
+            active: "z",
+            accounts: [
+                GrazrAccount(id: "a", name: "a@x"), GrazrAccount(id: "b", name: "b@x"),
+                GrazrAccount(id: "z", name: "z@x"), GrazrAccount(id: "y", name: "y@x"),
+            ],
+            order: ["b@x", "a@x", "gone@x"]
+        )
+        XCTAssertEqual(report.rotation.map(\.id), ["b", "a", "z"])
+    }
+
+    func testTheNextAccountIsTheFirstListedOneWithHeadroom() {
+        let report = GrazrReport(
+            active: "a",
+            accounts: [
+                GrazrAccount(id: "a", name: "a", windows: [window("weekly", 90, resetsIn: 30)]),
+                GrazrAccount(id: "b", name: "b", windows: [window("weekly", 50, resetsIn: 30)]),
+                GrazrAccount(id: "c", name: "c", windows: [
+                    window("session", 100, resetsIn: 2),
+                    window("weekly", 10, resetsIn: 30),
+                ]),
+                GrazrAccount(id: "d", name: "d", windows: [
+                    window("weekly", 0, resetsIn: -1),
+                    window("weekly", 40, scope: "Fable", resetsIn: 30),
+                ]),
+                GrazrAccount(id: "e", name: "e"),
+            ],
+            order: ["a", "b", "c", "d", "e"],
+            settings: ["REMAINING_WEEKLY": "15"],
+            blocked: ["b": GrazrBlock(reason: "authentication_failed")]
+        )
+        // a is active, b blocked, c below its week; d's spent week has reset.
+        XCTAssertEqual(report.predictedNext(now: now)?.id, "d")
+
+        let unread = GrazrReport(active: "a", accounts: report.accounts, order: ["a", "c", "e"], settings: report.settings)
+        XCTAssertEqual(unread.predictedNext(now: now)?.id, "e")
+    }
+
+    func testWithNothingToSwapToTheSoonestRefillIsNamed() {
+        let report = GrazrReport(
+            active: "a",
+            accounts: [
+                GrazrAccount(id: "a", name: "a"),
+                GrazrAccount(id: "b", name: "b", windows: [window("weekly", 0, resetsIn: 40)]),
+                GrazrAccount(id: "c", name: "c", windows: [
+                    window("session", 3, resetsIn: 2),
+                    window("weekly", 5, resetsIn: 10),
+                ]),
+            ],
+            order: ["a", "b", "c"]
+        )
+        XCTAssertNil(report.predictedNext(now: now))
+        let refill = report.nextHeadroom(now: now)
+        XCTAssertEqual(refill?.account.id, "c")
+        XCTAssertEqual(refill?.at, now.addingTimeInterval(10 * 3600))
+    }
+
+    func testTheSwapEstimateCarriesTheWindowsPaceOn() {
+        let report = GrazrReport(settings: ["REMAINING_WEEKLY": "15"])
+        func account(_ windows: [GrazrWindow]) -> GrazrAccount {
+            GrazrAccount(id: "a", name: "a", windows: windows, updated: now.timeIntervalSince1970)
+        }
+        // 25% used two days into the week: 12.5%/day, so 60 more points last 4.8 days.
+        let steady = account([window("weekly", 75, resetsIn: 5 * 24)])
+        XCTAssertEqual(report.swapEstimate(for: steady, now: now), now.addingTimeInterval(4.8 * 86400))
+        // Three days in, the same 25% runs out after the week resets.
+        XCTAssertNil(report.swapEstimate(for: account([window("weekly", 75, resetsIn: 4 * 24)]), now: now))
+        XCTAssertNil(report.swapEstimate(for: account([window("weekly", 100, resetsIn: 5 * 24)]), now: now))
+        XCTAssertEqual(report.swapEstimate(for: account([window("weekly", 10, resetsIn: 24)]), now: now), now)
+        XCTAssertNil(report.swapEstimate(for: GrazrAccount(id: "a", name: "a", windows: steady.windows), now: now))
+    }
+
+    func testTheDialPicksTheSessionOrTheAllModelsWeek() {
+        let account = GrazrAccount(id: "a", name: "a", windows: [
+            window("weekly", 42, scope: "Fable", resetsIn: 30),
+            window("weekly", 14, resetsIn: 30),
+            window("session", 70, resetsIn: 2),
+        ])
+        XCTAssertEqual(account.window(.week)?.remaining, 14)
+        XCTAssertEqual(account.window(.session)?.remaining, 70)
+    }
+
     func testOnlyABlockWithoutAnEndNeedsASignIn() {
         let report = GrazrReport(
             accounts: [GrazrAccount(id: "a", name: "a"), GrazrAccount(id: "b", name: "b"), GrazrAccount(id: "c", name: "c")],

@@ -19,6 +19,13 @@ the Sparkle update description — a release without a section here fails CI.
   that account: `claude auth login` in an isolated config dir, so the account
   Claude is on stays as it is. grazr then keeps the new login and lifts the
   block. Signing in as a different account changes nothing.
+- A dial view in the Accounts window shows grazr's rotation as a clock: one
+  slice per account in its order, filled by what each has left this week (or
+  in the 5-hour window), a hand at the active account's usage, a tick where
+  grazr swaps, and the account it moves to next. The centre estimates when the
+  active account reaches its threshold at its current pace, or, with nothing
+  to swap to, which account refills first. The List | Dial choice is
+  remembered.
 
 ## [0.6.11] - 2026-10-03
 

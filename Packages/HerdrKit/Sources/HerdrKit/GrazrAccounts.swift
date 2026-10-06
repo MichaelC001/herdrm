@@ -303,6 +303,81 @@ public struct GrazrReport: Decodable, Sendable, Equatable {
         default: return nil
         }
     }
+
+    // MARK: - Rotation
+
+    /// The accounts grazr rotates through, in its order: `ACCOUNTS`, plus the
+    /// active account when the config leaves it out. grazr never moves into an
+    /// unlisted account, so the others are not part of it.
+    public var rotation: [GrazrAccount] {
+        let listed = order.compactMap { name in accounts.first { $0.name == name } }
+        guard let active, !listed.contains(where: { $0.id == active }),
+              let current = accounts.first(where: { $0.id == active })
+        else { return listed }
+        return listed + [current]
+    }
+
+    /// Whether grazr would move into `account`: every open window it watches
+    /// is at or above its threshold. An account with no reading yet counts.
+    public func hasHeadroom(_ account: GrazrAccount, now: Date) -> Bool {
+        account.windows.allSatisfy { window in
+            guard let threshold = threshold(for: window), window.isOpen(now: now) else { return true }
+            return window.remaining >= threshold
+        }
+    }
+
+    /// The account grazr's next swap goes to, as its `core.next_account`
+    /// picks it: the first listed account, not active and not blocked, with
+    /// headroom.
+    public func predictedNext(now: Date) -> GrazrAccount? {
+        order.lazy
+            .compactMap { name in accounts.first { $0.name == name } }
+            .first { $0.id != active && block(for: $0, now: now) == nil && hasHeadroom($0, now: now) }
+    }
+
+    /// With nothing to swap to: the soonest an account other than the active
+    /// one has headroom again, once its low windows reset.
+    public func nextHeadroom(now: Date) -> (account: GrazrAccount, at: Date)? {
+        rotation
+            .filter { $0.id != active && block(for: $0, now: now) == nil }
+            .compactMap { account -> (GrazrAccount, Date)? in
+                let low = account.windows.filter { window in
+                    guard let threshold = threshold(for: window), window.isOpen(now: now) else { return false }
+                    return window.remaining < threshold
+                }
+                let resets = low.compactMap(\.resetsAt)
+                guard !low.isEmpty, resets.count == low.count, let last = resets.max() else { return nil }
+                return (account, last)
+            }
+            .min { $0.1 < $1.1 }
+            .map { (account: $0.0, at: $0.1) }
+    }
+
+    /// When `account` falls below a threshold at the pace of its last reading,
+    /// the soonest over the windows grazr watches: used ÷ time elapsed in the
+    /// window, carried on from the reading. A window that resets first does
+    /// not count; one already below its threshold answers the reading's time.
+    /// Nil with no reading, no usage yet, or no window that runs out.
+    public func swapEstimate(for account: GrazrAccount, now: Date) -> Date? {
+        guard let updated = account.updated.map(Date.init(timeIntervalSince1970:)) else { return nil }
+        return account.windows.compactMap { window -> Date? in
+            guard let threshold = threshold(for: window), let resetsAt = window.resetsAt,
+                  window.isOpen(now: now), let length = window.length
+            else { return nil }
+            if window.remaining < threshold { return updated }
+            let elapsed = length - resetsAt.timeIntervalSince(updated)
+            let used = Double(100 - window.remaining)
+            guard elapsed > 0, used > 0 else { return nil }
+            let eta = updated.addingTimeInterval(Double(window.remaining - threshold) * elapsed / used)
+            return eta < resetsAt ? eta : nil
+        }.min()
+    }
+}
+
+/// Which window the Accounts dial fills its slices with.
+public enum GrazrDialWindow: String, CaseIterable, Sendable {
+    case week
+    case session
 }
 
 public struct GrazrAccount: Decodable, Sendable, Equatable, Identifiable {
@@ -332,6 +407,14 @@ public struct GrazrAccount: Decodable, Sendable, Equatable, Identifiable {
                 }
             }
             return (rank(lhs), lhs.scope ?? "") < (rank(rhs), rhs.scope ?? "")
+        }
+    }
+
+    /// The 5-hour window, or the all-models week (not a per-model one).
+    public func window(_ kind: GrazrDialWindow) -> GrazrWindow? {
+        switch kind {
+        case .session: return windows.first { $0.group == "session" }
+        case .week: return windows.first { $0.group == "weekly" && $0.scope == nil }
         }
     }
 
@@ -376,6 +459,15 @@ public struct GrazrWindow: Decodable, Sendable, Equatable {
     /// A window past its reset has refilled, whatever the last reading said.
     public func isOpen(now: Date) -> Bool {
         resetsAt.map { $0 > now } ?? true
+    }
+
+    /// How long the window runs, from reset to reset.
+    public var length: TimeInterval? {
+        switch group {
+        case "session": return 5 * 3600
+        case "weekly": return 7 * 86400
+        default: return nil
+        }
     }
 
     /// What is left right now: the reading inside the window, all of it after.
