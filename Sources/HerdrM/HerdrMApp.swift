@@ -32,7 +32,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated {
                 guard let self, !self.terminationRequested else { exit(0) }
                 self.terminationRequested = true
-                NSApp.terminate(nil)
+                // Not from inside this handler: it runs on the main queue, and
+                // terminate waits for applicationShouldTerminate's reply, whose
+                // main-actor Task needs that same queue, so the quit never ends
+                // (and a second SIGTERM queues behind it). A run-loop block
+                // leaves the main queue free.
+                RunLoop.main.perform {
+                    MainActor.assumeIsolated { NSApp.terminate(nil) }
+                }
             }
         }
         source.resume()
