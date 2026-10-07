@@ -322,6 +322,7 @@ struct TerminalSettingsView: View {
     @AppStorage(TerminalDefaults.lineSpacingKey) private var lineSpacing = TerminalDefaults.defaultLineSpacing
     @AppStorage("terminal.mouseReporting") private var mouseReporting = true
     @AppStorage("terminal.copyOnSelect") private var copyOnSelect = true
+    @AppStorage(TerminalDefaults.tabLayoutKey) private var tabLayout = true
 
     @State private var importMessage: String?
     @State private var importSucceeded = false
@@ -397,6 +398,16 @@ struct TerminalSettingsView: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Copy on select")
                         Text("Copies text to the clipboard as soon as you finish selecting it with the mouse, like herdr's copy_on_select.")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                Toggle(isOn: $tabLayout) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Show every pane of the selected tab")
+                        Text("When a herdr tab is split, lay its panes out like the herdr TUI does and attach to each one. Off shows one pane at a time.")
                             .font(.system(size: 10.5))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)

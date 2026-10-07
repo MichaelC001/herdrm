@@ -7,6 +7,18 @@ the Sparkle update description — a release without a section here fails CI.
 
 ## [Unreleased]
 
+### Added
+- **Split tabs show every pane.** When the selected pane's herdr tab is split,
+  herdrm now lays out all of its panes the way the herdr TUI does, each one a
+  live attach sized to its share of the window, instead of showing one pane at a
+  time. Dividers drag the real herdr split ratio (`layout.set_split_ratio`), the
+  layout follows `layout.updated` and pane open/close events, and clicking into a
+  pane moves the selection (sidebar row, unread mark) there. A thin accent ring
+  marks the selected pane. Zoomed tabs and single-pane tabs look as before. Teams
+  of coding agents spawned side by side (pi-team-panes, Claude Code teammates)
+  are readable in one view. Settings › Terminal › "Show every pane of the
+  selected tab" turns it off.
+
 ## [0.6.11] - 2026-10-03
 
 ### Added

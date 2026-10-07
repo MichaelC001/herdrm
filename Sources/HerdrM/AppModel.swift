@@ -38,6 +38,12 @@ struct SpaceRef: Hashable {
     let workspaceID: String
 }
 
+/// Global tab identity, like `PaneRef` for panes.
+struct TabRef: Hashable {
+    let deviceID: UUID
+    let tabID: String
+}
+
 /// Live state for one device's herdr session.
 struct DeviceSessionState {
     var connection: ConnectionState = .idle
@@ -125,9 +131,10 @@ final class AppModel: ObservableObject {
             if let old = oldValue, old != selectedPane {
                 unreadAgents.remove(AgentUnreadKey(deviceID: old.deviceID, paneID: old.paneID))
             }
-            noteSelectedAttachSession()
+            noteVisibleAttachSessions()
             if let pane = selectedPane, pane != oldValue {
                 snapPaneViewportToBottom(pane)
+                refreshSelectedTabLayout()
             }
         }
     }
@@ -151,16 +158,38 @@ final class AppModel: ObservableObject {
     /// state instead of re-attaching. Evicted when its pane closes.
     @Published var attachSessions: [AttachedEntry] = []
 
-    /// Keeps the selected pane's attach alive so switching back preserves its content.
+    /// Keeps every visible pane's attach alive so switching back preserves its content.
     /// Runs synchronously inside the `selectedPane` assignment, so the kept-alive entry
     /// is in `attachSessions` in the same update the selection lands in — a separate
     /// onAppear/onChange would leave a one-frame window with no view for the new pane.
-    private func noteSelectedAttachSession() {
-        guard let entry = selectedAttachedEntry,
-              !attachSessions.contains(where: { $0.id == entry.id })
-        else { return }
-        attachSessions.append(entry)
+    /// With a tab layout showing, the selected pane's neighbours get their entries here too.
+    private func noteVisibleAttachSessions() {
+        for ref in visiblePaneRefs {
+            guard let entry = attachedEntry(for: ref),
+                  !attachSessions.contains(where: { $0.id == entry.id })
+            else { continue }
+            attachSessions.append(entry)
+        }
     }
+
+    // MARK: - Tab layout
+
+    /// Draw every pane of the selected tab the way the herdr TUI arranges them,
+    /// instead of one pane at a time. Persisted by ContentView's `@AppStorage`;
+    /// the model only mirrors it so selection logic can read it.
+    @Published var showsTabLayout = true {
+        didSet {
+            guard showsTabLayout != oldValue else { return }
+            noteVisibleAttachSessions()
+            refreshSelectedTabLayout()
+        }
+    }
+    /// Split trees fetched with `layout.export`, refreshed on `layout.updated`
+    /// and after pane topology changes. Missing means single-pane mode.
+    @Published var tabLayouts: [TabRef: TabLayoutDescription] = [:]
+    /// Ratios of dividers being dragged, applied over the server's tree until
+    /// `layout.set_split_ratio` has confirmed the drop.
+    @Published var splitRatioOverrides: [SplitPath: Double] = [:]
     /// Finished agents the user has not opened since they flipped to `done`.
     @Published private(set) var unreadAgents: Set<AgentUnreadKey> = []
 
@@ -521,6 +550,116 @@ final class AppModel: ObservableObject {
         return nil
     }
 
+    /// The tab holding the selected pane.
+    var selectedTabRef: TabRef? {
+        if let entry = selectedEntry {
+            return TabRef(deviceID: entry.device.id, tabID: entry.agent.tabID)
+        }
+        if let entry = selectedTerminalEntry, let tabID = entry.tabID {
+            return TabRef(deviceID: entry.device.id, tabID: tabID)
+        }
+        return nil
+    }
+
+    /// The split tree to draw, or nil when the terminal area shows one pane: the
+    /// feature is off, the tab has a single pane, herdr has it zoomed, or the
+    /// layout has not been fetched.
+    var visibleTabLayout: TabLayoutDescription? {
+        guard showsTabLayout,
+              let ref = selectedTabRef,
+              let layout = tabLayouts[ref],
+              !layout.zoomed,
+              layout.root.paneCount > 1
+        else { return nil }
+        return layout
+    }
+
+    /// Panes the terminal area shows right now: the selected tab's panes, or
+    /// just the selected pane.
+    var visiblePaneRefs: Set<PaneRef> {
+        guard let selected = selectedPane else { return [] }
+        guard let layout = visibleTabLayout else { return [selected] }
+        return Set(layout.root.paneIDs.map { PaneRef(deviceID: selected.deviceID, paneID: $0) })
+    }
+
+    /// The attachable entry for a pane: its agent, or the bare terminal.
+    func attachedEntry(for ref: PaneRef) -> AttachedEntry? {
+        guard let device = device(ref.deviceID) else { return nil }
+        if let agent = session(ref.deviceID).agents.first(where: { $0.paneID == ref.paneID }) {
+            return .agent(agentEntry(device: device, agent: agent))
+        }
+        if let terminal = terminalEntries(for: device).first(where: { $0.pane.paneID == ref.paneID }) {
+            return .terminal(terminal)
+        }
+        return nil
+    }
+
+    /// Fetches the selected tab's split tree. Nothing happens with the feature
+    /// off, and a failed call (an older herdr without `layout.export`, a tab
+    /// that just closed) leaves whatever was there, which means single-pane mode.
+    func refreshSelectedTabLayout() {
+        guard let ref = selectedTabRef else { return }
+        refreshTabLayout(ref)
+    }
+
+    func refreshTabLayout(_ ref: TabRef) {
+        guard showsTabLayout, let device = device(ref.deviceID) else { return }
+        let service = service(for: device)
+        Task { @MainActor [weak self] in
+            guard let layout = try? await service.exportLayout(tabID: ref.tabID),
+                  let self
+            else { return }
+            self.tabLayouts[ref] = layout
+            self.noteVisibleAttachSessions()
+        }
+    }
+
+    /// A `layout.updated` event names its tab: refetch the shown tab, forget any
+    /// other cached tree so the next visit fetches it fresh.
+    private func handleLayoutUpdated(_ event: HerdrEvent, deviceID: UUID) {
+        guard let tabID = event.payload["data"]?["layout"]?["tab_id"]?.stringValue else {
+            refreshSelectedTabLayout()
+            return
+        }
+        let ref = TabRef(deviceID: deviceID, tabID: tabID)
+        if ref == selectedTabRef {
+            refreshTabLayout(ref)
+        } else {
+            tabLayouts[ref] = nil
+        }
+    }
+
+    /// A divider is being dragged: preview the ratio locally.
+    func updateSplitDrag(path: SplitPath, ratio: Double) {
+        splitRatioOverrides[path] = TabLayoutGeometry.clampRatio(ratio)
+    }
+
+    /// The divider was dropped: hand the ratio to herdr, keep the preview until
+    /// it answers, then let the server's tree take over again.
+    func endSplitDrag(path: SplitPath, ratio: Double) {
+        let clamped = TabLayoutGeometry.clampRatio(ratio)
+        splitRatioOverrides[path] = clamped
+        guard let ref = selectedTabRef, let device = device(ref.deviceID) else {
+            splitRatioOverrides[path] = nil
+            return
+        }
+        let service = service(for: device)
+        Task { @MainActor [weak self] in
+            let layout = try? await service.setSplitRatio(tabID: ref.tabID, path: path, ratio: clamped)
+            guard let self else { return }
+            if let layout { self.tabLayouts[ref] = layout }
+            self.splitRatioOverrides[path] = nil
+        }
+    }
+
+    /// The keyboard landed in another pane of the shown tab: make it the selection,
+    /// so the sidebar, unread marks and viewport snap follow. Selection stays a
+    /// herdrm-side notion; herdr's own focus is left alone, as it is for sidebar clicks.
+    func focusVisiblePane(_ ref: PaneRef) {
+        guard ref != selectedPane, visiblePaneRefs.contains(ref) else { return }
+        selectedPane = ref
+    }
+
     private var firstVisiblePaneRef: PaneRef? {
         visibleAgents.first?.ref ?? visibleTerminals.first?.ref
     }
@@ -763,6 +902,12 @@ final class AppModel: ObservableObject {
                                     resubscribeDelay = 500_000_000
                                     break
                                 }
+                                if self.selectedTabRef?.deviceID == device.id {
+                                    self.refreshSelectedTabLayout()
+                                }
+                            } else if event.kind == HerdrEvent.layoutUpdatedKind {
+                                self.handleLayoutUpdated(event, deviceID: device.id)
+                                self.scheduleRefresh(device.id)
                             } else {
                                 self.scheduleRefresh(device.id)
                             }
@@ -1100,6 +1245,10 @@ final class AppModel: ObservableObject {
             // over by another client still exists, so it stays — its Reconnect overlay
             // needs the kept-alive child to rebuild the attach.
             attachSessions.removeAll { $0.device.id == deviceID && !paneIDs.contains($0.ref.paneID) }
+            if let tabs = snapshot.tabs {
+                let tabIDs = Set(tabs.map(\.tabID))
+                tabLayouts = tabLayouts.filter { $0.key.deviceID != deviceID || tabIDs.contains($0.key.tabID) }
+            }
             if let selected = selectedPane, selected.deviceID == deviceID,
                !paneIDs.contains(selected.paneID) {
                 selectedPane = nil

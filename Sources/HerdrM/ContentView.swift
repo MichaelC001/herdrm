@@ -272,6 +272,9 @@ struct DetailView: View {
     @ObservedObject var model: AppModel
     @Binding var sidebarCollapsed: Bool
     @State private var hasOpenedFileManager = false
+    /// Persisted here (Settings toggles the same key); the model mirrors it because
+    /// selection logic there decides which panes stay attached.
+    @AppStorage(TerminalDefaults.tabLayoutKey) private var tabLayoutEnabled = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -280,6 +283,8 @@ struct DetailView: View {
                 .zIndex(1)
             Rectangle().fill(Theme.hairline).frame(height: 1)
             detailContent
+                .onAppear { model.showsTabLayout = tabLayoutEnabled }
+                .onChange(of: tabLayoutEnabled) { _, enabled in model.showsTabLayout = enabled }
                 // Losing the selected agent tears the SplitContainer down without
                 // resetting the axis, which would leave the same phantom split.
                 //
@@ -524,11 +529,7 @@ struct DetailView: View {
                 // selection — or opening/closing the split — never tears a terminal
                 // down: its content survives the round trip. Do not key this on the
                 // selection; that rebuild-on-switch is exactly what this removes.
-                ZStack {
-                    ForEach(model.attachSessions) { session in
-                        attachChild(session, isSelected: session.id == entry.id)
-                    }
-                }
+                tabLayoutArea(selected: entry)
             } second: {
                 ShellTerminalView(
                     fontName: terminalFontName,
@@ -565,6 +566,14 @@ struct DetailView: View {
                 splitTracker.onSideChanged = { model.activeSplitSide = $0 }
                 splitTracker.isAgentView = { view in
                     AttachViewRegistry.liveViews.contains { $0 === view }
+                }
+                // A click into a neighbouring pane of the shown tab moves the selection
+                // there, so the sidebar row and unread marks follow the keyboard.
+                splitTracker.onAttachViewFocused = { view in
+                    guard let id = AttachViewRegistry.id(for: view),
+                          let session = model.attachSessions.first(where: { $0.id == id })
+                    else { return }
+                    model.focusVisiblePane(session.ref)
                 }
                 splitTracker.start()
             }
@@ -627,10 +636,71 @@ struct DetailView: View {
         }
     }
 
-    /// One kept-alive attach. Stays in the hierarchy while deselected (opacity 0, no hit
-    /// testing) so its content survives; the selected one is visible and interactive.
+    /// Divider thickness between the panes of a tab layout; also its drag hit area.
+    private static let paneGap: CGFloat = 6
+    private static let tabLayoutSpace = "tabLayout"
+
+    /// Every kept-alive attach in one structural position (see the identity note in
+    /// `attachedTerminal`). With a tab layout showing, the selected tab's panes take
+    /// the frames herdr's split tree gives them and the rest hide at full size; without
+    /// one, the selected pane fills the area as before. Only frames change here, never
+    /// identity, so a pane joining or leaving the tab re-sizes its neighbours without
+    /// re-attaching them.
     @ViewBuilder
-    private func attachChild(_ session: AppModel.AttachedEntry, isSelected: Bool) -> some View {
+    private func tabLayoutArea(selected entry: AppModel.AttachedEntry) -> some View {
+        GeometryReader { proxy in
+            let bounds = CGRect(origin: .zero, size: proxy.size)
+            let solved = model.visibleTabLayout.map {
+                TabLayoutGeometry.solve(
+                    $0.root, in: bounds, gap: Self.paneGap, overrides: model.splitRatioOverrides
+                )
+            }
+            let frames = Dictionary(
+                (solved?.panes ?? []).map { ($0.paneID, $0.rect) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            let visible = model.visiblePaneRefs
+            ZStack(alignment: .topLeading) {
+                ForEach(model.attachSessions) { session in
+                    // Pane ids repeat across devices; only the selected device's tab is laid out.
+                    let rect = session.device.id == entry.device.id
+                        ? frames[session.ref.paneID] ?? bounds
+                        : bounds
+                    attachChild(
+                        session,
+                        isVisible: visible.contains(session.ref),
+                        isSelected: session.id == entry.id,
+                        inTabLayout: solved != nil
+                    )
+                    .frame(width: rect.width, height: rect.height)
+                    .offset(x: rect.minX, y: rect.minY)
+                }
+                ForEach(solved?.dividers ?? [], id: \.path) { divider in
+                    PaneDivider(
+                        divider: divider,
+                        coordinateSpace: Self.tabLayoutSpace,
+                        onDrag: { model.updateSplitDrag(path: divider.path, ratio: $0) },
+                        onEnd: { model.endSplitDrag(path: divider.path, ratio: $0) }
+                    )
+                    .frame(width: divider.rect.width, height: divider.rect.height)
+                    .offset(x: divider.rect.minX, y: divider.rect.minY)
+                }
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+            .coordinateSpace(name: Self.tabLayoutSpace)
+        }
+    }
+
+    /// One kept-alive attach. Stays in the hierarchy while hidden (opacity 0, no hit
+    /// testing) so its content survives; visible panes are interactive. In a tab layout
+    /// the selected pane carries a thin accent ring, the TUI's focused-border cue.
+    @ViewBuilder
+    private func attachChild(
+        _ session: AppModel.AttachedEntry,
+        isVisible: Bool,
+        isSelected: Bool,
+        inTabLayout: Bool
+    ) -> some View {
         let attachmentCapabilities: AgentAttachmentCapabilities? = {
             guard case .agent(let agentEntry) = session else { return nil }
             return model.attachmentCapabilities(for: agentEntry)
@@ -651,7 +721,7 @@ struct DetailView: View {
                 mouseReporting: terminalMouseReporting,
                 copyOnSelect: terminalCopyOnSelect,
                 // A selected shell or the file manager covers the attach side.
-                isVisible: isSelected && model.selectedShellID == nil && !model.isFileManagerActive,
+                isVisible: isVisible && model.selectedShellID == nil && !model.isFileManagerActive,
                 onAttachmentError: { model.actionError = $0 },
                 onAttachmentUploadingChanged: { uploadingAttachment = $0 },
                 onExit: { code in endedAttach[session.id] = code }
@@ -663,7 +733,7 @@ struct DetailView: View {
                 .id("attach-\(session.id)-\(attachRetry[session.id] ?? 0)")
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
-            if isSelected, endedAttach[session.id] != nil {
+            if isVisible, endedAttach[session.id] != nil {
                 attachEndedOverlay(session)
             }
         }
@@ -674,8 +744,16 @@ struct DetailView: View {
         // the compositing group gives the text an opaque background to blend
         // against, matching the pre-keep-alive single-view rendering.
         .background(Theme.terminalBackground)
-        .opacity(isSelected ? 1 : 0)
-        .allowsHitTesting(isSelected)
+        .overlay {
+            if inTabLayout, isSelected {
+                Rectangle()
+                    .strokeBorder(Theme.accent.opacity(0.7), lineWidth: 1)
+                    .padding(2)
+                    .allowsHitTesting(false)
+            }
+        }
+        .opacity(isVisible ? 1 : 0)
+        .allowsHitTesting(isVisible)
     }
 
     /// ssh exits 255 for transport failures; everything else is the far end closing
@@ -738,6 +816,54 @@ struct DetailView: View {
         }
     }
 
+}
+
+/// The gap between two panes of a tab layout: a hairline that highlights on hover and
+/// drags the real herdr split ratio. Reports ratios, not positions, so the model can
+/// preview locally and commit with `layout.set_split_ratio` on release.
+private struct PaneDivider: View {
+    let divider: DividerFrame
+    /// Name of the coordinate space `divider.containerRect` is expressed in.
+    let coordinateSpace: String
+    let onDrag: (Double) -> Void
+    let onEnd: (Double) -> Void
+
+    @State private var hovering = false
+    @State private var dragging = false
+
+    var body: some View {
+        Rectangle()
+            .fill(hovering || dragging ? Theme.accent.opacity(0.6) : Theme.hairline)
+            .frame(
+                width: divider.direction == .right ? 1 : nil,
+                height: divider.direction == .down ? 1 : nil
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.terminalBackground)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .named(coordinateSpace))
+                    .onChanged { value in
+                        dragging = true
+                        onDrag(divider.ratio(at: value.location))
+                    }
+                    .onEnded { value in
+                        dragging = false
+                        onEnd(divider.ratio(at: value.location))
+                    }
+            )
+            // set() instead of push()/pop(), as the ⌘D divider does: a divider can
+            // vanish under the pointer when the tab's layout changes, and an
+            // unbalanced push leaves the resize cursor stuck app-wide.
+            .onHover { inside in
+                hovering = inside
+                if inside {
+                    (divider.direction == .right ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).set()
+                } else {
+                    NSCursor.arrow.set()
+                }
+            }
+    }
 }
 
 struct AddDeviceSheet: View {

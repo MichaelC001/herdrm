@@ -597,12 +597,6 @@ public actor HerdrService {
         ).layout
     }
 
-    /// Moves herdr's own focus to a pane, so the TUI's highlighted border and
-    /// `focused_pane_id` follow a click in herdrm.
-    public func focusPane(paneID: String) async throws {
-        _ = try await client().request(method: "pane.focus", params: .object(["pane_id": .string(paneID)]))
-    }
-
     public func closeWorkspace(workspaceID: String) async throws {
         _ = try await client().request(
             method: "workspace.close",
