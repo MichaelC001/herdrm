@@ -453,7 +453,8 @@ public struct GrazrReport: Decodable, Sendable, Equatable {
             if window.remaining < threshold { return updated }
             let elapsed = length - resetsAt.timeIntervalSince(updated)
             let used = Double(100 - window.remaining)
-            guard elapsed > 0, used > 0 else { return nil }
+            // A window's first minutes after a swap are Claude reloading, not a pace.
+            guard elapsed >= Self.minimumPaceSample, used > 0 else { return nil }
             let eta = updated.addingTimeInterval(Double(window.remaining - threshold) * elapsed / used)
             return eta < resetsAt ? eta : nil
         }.min()

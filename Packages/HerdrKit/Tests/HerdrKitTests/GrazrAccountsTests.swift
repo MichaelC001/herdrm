@@ -43,6 +43,19 @@ final class GrazrAccountsTests: XCTestCase {
         XCTAssertNil(covered.upcomingGap(now: now))
     }
 
+    func testASwapEstimateIgnoresAWindowsFirstMinutes() {
+        // 6% of a fresh 5-hour window gone in 2.4 minutes is Claude reloading
+        // after a swap, not a pace: only the week (16% in 23.2 h) counts.
+        let account = GrazrAccount(id: "a", name: "a", windows: [
+            window("session", 94, resetsIn: 5 - 0.04), window("weekly", 84, resetsIn: 7 * 24 - 23.2),
+        ], updated: now.timeIntervalSince1970)
+        let report = GrazrReport(active: "a", accounts: [account], settings: ["REMAINING_SESSION": "15", "REMAINING_WEEKLY": "15"])
+
+        let eta = report.swapEstimate(for: account, now: now)
+
+        XCTAssertEqual(eta.map { $0.timeIntervalSince(now) / 3600 } ?? 0, 69 / (16 / 23.2), accuracy: 0.01)
+    }
+
     func testModelScopesListEveryPerModelWeekOnce() {
         let report = GrazrReport(accounts: [
             GrazrAccount(id: "a", name: "a", windows: [

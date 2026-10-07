@@ -104,7 +104,9 @@ extension GrazrReport {
                 running = next
                 continue
             }
-            let current = (windows[account.id] ?? []).map { $0.settled(at: time) }
+            let parked = windows[account.id] ?? []
+            events += parkedRefills(parked, of: account, after: now, through: time)
+            let current = parked.map { $0.settled(at: time) }
             let swapAt = min(runOut(current, from: time, until: end, rates: rates, toEmpty: false) ?? end, end)
             let next = swapAt < end ? pick(at: swapAt, windows: windows, leaving: account) : nil
             // With nowhere to go grazr stays, and the account runs until it is empty.
@@ -127,14 +129,25 @@ extension GrazrReport {
             }
             running = next
         }
-        // Parked accounts refill on schedule too.
+        // Accounts that sit parked to the end refill on schedule too.
         for account in rotation {
-            for window in account.windows {
-                guard let reset = window.resetsAt, reset > now, reset < end else { continue }
-                events.append(.refill(at: reset, account: account, group: window.group))
-            }
+            events += parkedRefills(windows[account.id] ?? [], of: account, after: now, through: end.addingTimeInterval(-1))
         }
         return GrazrTimeline(stretches: stretches, events: Self.distinct(events))
+    }
+
+    /// Resets of a parked account's low windows between `start` and `end`:
+    /// only a window that ran low coming back is worth a mark.
+    private func parkedRefills(
+        _ windows: [ProjectedWindow], of account: GrazrAccount, after start: Date, through end: Date
+    ) -> [GrazrTimeline.Event] {
+        windows.compactMap { window in
+            guard let reset = window.resetsAt, reset > start, reset <= end,
+                  let threshold = threshold(group: window.group),
+                  window.remaining <= Double(threshold) + Self.thresholdTolerance
+            else { return nil }
+            return .refill(at: reset, account: account, group: window.group)
+        }
     }
 
     /// In time order, with one refill per account, group and minute: a
@@ -155,6 +168,9 @@ extension GrazrReport {
 
     /// Percent per second each watched window loses, from the active account's
     /// last reading (as `swapEstimate` measures it), keyed by group and model.
+    /// A window read in its first half hour gives none: right after a swap
+    /// Claude reloads its context, and those minutes extrapolate to an
+    /// account running dry within the hour.
     func burnRates(now: Date) -> [String: Double] {
         guard let current = accounts.first(where: { $0.id == active }),
               let updated = current.updated.map(Date.init(timeIntervalSince1970:))
@@ -166,11 +182,14 @@ extension GrazrReport {
             else { continue }
             let elapsed = length - resetsAt.timeIntervalSince(updated)
             let used = Double(100 - window.remaining)
-            guard elapsed > 0, used > 0 else { continue }
+            guard elapsed >= Self.minimumPaceSample, used > 0 else { continue }
             rates[Self.rateKey(window.group, window.scope)] = used / elapsed
         }
         return rates
     }
+
+    /// How long a window must have run before its pace counts.
+    static let minimumPaceSample: TimeInterval = 30 * 60
 
     private static func rateKey(_ group: String, _ scope: String?) -> String {
         group + "|" + (scope ?? "")
@@ -215,7 +234,7 @@ extension GrazrReport {
     }
 
     /// The windows of an account that ran from `start` to `stop`, and the
-    /// resets it went through on the way.
+    /// resets on the way of windows that had run low by then.
     private func advance(
         _ windows: [ProjectedWindow], from start: Date, to stop: Date, rates: [String: Double]
     ) -> ([ProjectedWindow], [(at: Date, group: String)]) {
@@ -224,7 +243,11 @@ extension GrazrReport {
             var current = window
             var time = start
             while let reset = current.resetsAt, reset <= stop {
-                refills.append((reset, current.group))
+                let leftAtReset = current.remaining - rate(for: current, in: rates) * reset.timeIntervalSince(time)
+                if let threshold = threshold(group: current.group),
+                   leftAtReset <= Double(threshold) + Self.thresholdTolerance {
+                    refills.append((reset, current.group))
+                }
                 current = current.settled(at: reset)
                 time = reset
             }

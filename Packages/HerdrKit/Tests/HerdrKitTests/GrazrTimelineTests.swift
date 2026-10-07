@@ -80,13 +80,28 @@ final class GrazrTimelineTests: XCTestCase {
         assertContiguous(timeline, to: now.addingTimeInterval(day))
     }
 
-    func testAWeeklyResetInsideTheHorizonIsARefill() {
+    func testASpentWeekResettingInsideTheHorizonIsARefill() {
         let a = GrazrAccount(id: "a", name: "a", windows: [window("weekly", 60, resetsIn: 30)])
+        let spent = GrazrAccount(id: "s", name: "s", windows: [window("weekly", 0, resetsIn: 30)])
+        let report = GrazrReport(active: "a", accounts: [a, spent], order: ["a", "s"], settings: thresholds)
+
+        let timeline = report.timeline(now: now, horizon: 7 * day)
+
+        // a's week resets too, but it never ran low: no dot for it.
+        XCTAssertEqual(timeline.events, [.refill(at: now.addingTimeInterval(30 * 3600), account: spent, group: "weekly")])
+    }
+
+    func testAWindowThatNeverRanLowGivesNoRefills() {
+        // The active account's 5-hour window keeps resetting all week without
+        // ever getting near its threshold: a dot every five hours says nothing.
+        let a = GrazrAccount(id: "a", name: "a", windows: [
+            window("session", 94, resetsIn: 4), window("weekly", 84, resetsIn: 7 * 24 - 23.2),
+        ], updated: now.timeIntervalSince1970)
         let report = GrazrReport(active: "a", accounts: [a], order: ["a"], settings: thresholds)
 
         let timeline = report.timeline(now: now, horizon: 7 * day)
 
-        XCTAssertEqual(timeline.events, [.refill(at: now.addingTimeInterval(30 * 3600), account: a, group: "weekly")])
+        XCTAssertFalse(timeline.events.contains { if case .refill(_, _, "session") = $0 { return true }; return false })
     }
 
     func testABlockedAccountIsNeverPicked() {
@@ -142,10 +157,26 @@ final class GrazrTimelineTests: XCTestCase {
         assertContiguous(timeline, to: now.addingTimeInterval(day))
     }
 
+    func testAPaceFromAWindowsFirstMinutesIsNotTrusted() {
+        // Seen live right after a swap: 6% of a fresh 5-hour window gone in
+        // 2.4 minutes (Claude reloading its context) read as 150% an hour, and
+        // every account after it ran dry within the hour.
+        let a = GrazrAccount(id: "a", name: "a", windows: [
+            window("session", 94, resetsIn: 5 - 0.04), window("weekly", 84, resetsIn: 7 * 24 - 23.2),
+        ], updated: now.timeIntervalSince1970)
+        let b = GrazrAccount(id: "b", name: "b")
+        let report = GrazrReport(active: "a", accounts: [a, b], order: ["a", "b"], settings: thresholds)
+
+        let timeline = report.timeline(now: now, horizon: day)
+
+        XCTAssertEqual(timeline.stretches.map(\.account?.id), ["a"], "the week's pace alone keeps a going all day")
+    }
+
     func testStretchesAreBounded() {
-        // 84% gone in the first second of a 5-hour window: the accounts take
-        // turns every second, and a gap waits out each reset.
-        let a = GrazrAccount(id: "a", name: "a", windows: [window("session", 16, resetsIn: 5 - 1 / 3600.0)], updated: now.timeIntervalSince1970)
+        // 84% gone in the first half hour of a 5-hour window (the shortest
+        // sample the pace trusts): the accounts take turns every few minutes,
+        // and a gap waits out each reset.
+        let a = GrazrAccount(id: "a", name: "a", windows: [window("session", 16, resetsIn: 4.5)], updated: now.timeIntervalSince1970)
         let b = GrazrAccount(id: "b", name: "b", windows: [window("session", 100, resetsIn: 5)])
         let report = GrazrReport(active: "a", accounts: [a, b], order: ["a", "b"], settings: thresholds)
 
