@@ -159,6 +159,11 @@ public actor SSHTunnel {
                   let range = command.range(of: " \(forward)") else { return nil }
             let spec = command[command.index(after: range.lowerBound)...].dropFirst(3)
             guard let colon = spec.firstIndex(of: ":") else { return nil }
+            // The reaper deletes this path, so accept only the names localSocketPath
+            // generates (`<digits>.sock`): no `..`, no subdirectory, nothing outside.
+            let name = spec[..<colon].dropFirst(tunnelDirectory.count + 1)
+            guard name.hasSuffix(".sock"), name.count > 5,
+                  name.dropLast(5).allSatisfy({ ("0"..."9").contains($0) }) else { return nil }
             return OrphanedForward(pid: pid, localSocketPath: String(spec[..<colon]))
         }
     }

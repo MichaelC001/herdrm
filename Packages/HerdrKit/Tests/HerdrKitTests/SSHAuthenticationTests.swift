@@ -627,6 +627,9 @@ final class OrphanedForwardTests: XCTestCase {
             613     1 /usr/bin/ssh -N -L /tmp/other/1.sock:/run/x.sock host
             614     1 /usr/bin/ssh -tt -o BatchMode=yes cloud-dev exec herdr agent attach 3 -L \(dir)/1.sock:x
             615     1 /opt/homebrew/bin/ssh -N -L \(dir)/2.sock:/run/x.sock host
+            616     1 /usr/bin/ssh -N -L \(dir)/../../../Users/u/.zshrc:/run/x.sock host
+            617     1 /usr/bin/ssh -N -L \(dir)/sub/3.sock:/run/x.sock host
+            618     1 /usr/bin/ssh -N -L \(dir)/.sock:/run/x.sock host
         """
         XCTAssertEqual(SSHTunnel.orphanedForwards(inProcessList: ps, tunnelDirectory: dir), [])
     }
