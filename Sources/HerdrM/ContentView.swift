@@ -660,6 +660,9 @@ struct DetailView: View {
                 uniquingKeysWith: { first, _ in first }
             )
             let visible = model.visiblePaneRefs
+            // By entry id, not pane: a pane whose kind just changed has a new entry, and
+            // the old one must not share its slot while the next snapshot prunes it.
+            let visibleIDs = Set(visible.compactMap { model.attachedEntry(for: $0)?.id })
             ZStack(alignment: .topLeading) {
                 ForEach(model.attachSessions) { session in
                     // Pane ids repeat across devices; only the selected device's tab is laid out.
@@ -668,7 +671,7 @@ struct DetailView: View {
                         : bounds
                     attachChild(
                         session,
-                        isVisible: visible.contains(session.ref),
+                        isVisible: visibleIDs.contains(session.id),
                         isSelected: session.id == entry.id,
                         inTabLayout: solved != nil
                     )

@@ -1243,8 +1243,13 @@ final class AppModel: ObservableObject {
                 .union(snapshot.agents.map(\.paneID))
             // Drop kept-alive attaches whose pane is gone (closed). A pane only taken
             // over by another client still exists, so it stays — its Reconnect overlay
-            // needs the kept-alive child to rebuild the attach.
-            attachSessions.removeAll { $0.device.id == deviceID && !paneIDs.contains($0.ref.paneID) }
+            // needs the kept-alive child to rebuild the attach. An attach whose pane
+            // changed kind (a shell that became an agent) goes too: the pane now has a
+            // different entry, and two live attaches would share one slot of a tab layout.
+            attachSessions.removeAll {
+                $0.device.id == deviceID
+                    && (!paneIDs.contains($0.ref.paneID) || attachedEntry(for: $0.ref)?.id != $0.id)
+            }
             if let tabs = snapshot.tabs {
                 let tabIDs = Set(tabs.map(\.tabID))
                 tabLayouts = tabLayouts.filter { $0.key.deviceID != deviceID || tabIDs.contains($0.key.tabID) }
