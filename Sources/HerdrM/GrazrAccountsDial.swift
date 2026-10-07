@@ -338,6 +338,13 @@ struct GrazrAccountsDial: View {
             }
             Text(target.account.name)
                 .foregroundStyle(Theme.textSecondary)
+            // The tick on the ring: where grazr moves off this account.
+            if let threshold = reading.flatMap(report.threshold(for:)) {
+                Text(left.map { $0 < threshold } == true
+                     ? String(localized: "below the \(threshold)% swap tick")
+                     : String(localized: "tick: grazr swaps below \(threshold)%"))
+                    .foregroundStyle(left.map { $0 < threshold } == true ? Theme.warning : Theme.textSecondary)
+            }
             if let reading, let resetsAt = reading.resetsAt, reading.isOpen(now: now) {
                 Text("resets \(GrazrStyle.time(resetsAt, now: now))")
                     .foregroundStyle(Theme.textTertiary)
