@@ -84,7 +84,7 @@ struct GrazrAccountsDial: View {
                     .font(.system(size: 10.5))
                 }
             }
-            legend
+            GrazrAccountsLegend(report: report, window: window, now: now)
         }
         .frame(maxWidth: .infinity)
     }
@@ -108,7 +108,7 @@ struct GrazrAccountsDial: View {
             }
             ForEach(Array(rotation.enumerated()), id: \.element.id) { index, account in
                 badge(index: index, account: account)
-                    .offset(offset(at: middle(index, count), radius: ringRadius + 26))
+                    .offset(ringOffset(at: middle(index, count), radius: ringRadius + 26))
             }
             centre
                 .frame(width: innerEdge * 1.44)
@@ -195,7 +195,7 @@ struct GrazrAccountsDial: View {
         Circle()
             .fill(Theme.statsAccount)
             .frame(width: 7, height: 7)
-            .offset(offset(at: hand, radius: ringRadius - ringWidth / 2 - inset))
+            .offset(ringOffset(at: hand, radius: ringRadius - ringWidth / 2 - inset))
     }
 
     /// One account's share of a model ring: what that model has left this
@@ -377,7 +377,7 @@ struct GrazrAccountsDial: View {
         case .slice(let account, let model):
             sliceTip(account: account, model: model)
         case .gap(let gap):
-            tipBox {
+            GrazrTipBox {
                 Text("Gap")
                     .fontWeight(.semibold)
                     .foregroundStyle(Theme.danger)
@@ -394,15 +394,6 @@ struct GrazrAccountsDial: View {
         return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"
     }
 
-    private func tipBox<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 2, content: content)
-            .font(.system(size: 11))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Theme.contentBackground))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.sidebarBorder))
-            .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
-    }
 
     private func sliceTip(account: GrazrAccount, model: String?) -> some View {
         let reading: GrazrWindow? = if let model {
@@ -412,7 +403,7 @@ struct GrazrAccountsDial: View {
         }
         let title = model ?? (window == .week ? String(localized: "All models") : String(localized: "5-hour window"))
         let left = reading?.left(now: now)
-        return tipBox {
+        return GrazrTipBox {
             HStack(spacing: 6) {
                 Text(title)
                     .fontWeight(.semibold)
@@ -435,163 +426,5 @@ struct GrazrAccountsDial: View {
                     .foregroundStyle(Theme.textTertiary)
             }
         }
-    }
-
-    // MARK: - Legend
-
-    private var legend: some View {
-        let unlisted = report.sortedAccounts.filter { account in !rotation.contains { $0.id == account.id } }
-        return VStack(spacing: 0) {
-            if !models.isEmpty {
-                // Names the columns once rather than repeating the model on every row.
-                HStack(spacing: 8) {
-                    Spacer(minLength: 8)
-                    Text("All")
-                        .frame(width: 40, alignment: .trailing)
-                    ForEach(models, id: \.self) { scope in
-                        Text(scope)
-                            .lineLimit(1)
-                            .frame(width: modelColumnWidth, alignment: .trailing)
-                    }
-                    Color.clear.frame(width: statusWidth, height: 1)
-                }
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(Theme.textTertiary)
-            }
-            ForEach(Array(rotation.enumerated()), id: \.element.id) { index, account in
-                legendRow(number: index + 1, account: account)
-            }
-            ForEach(unlisted) { account in
-                legendRow(number: nil, account: account)
-            }
-        }
-        .padding(.horizontal, 4)
-    }
-
-    private let modelColumnWidth: CGFloat = 44
-    /// Narrower beside model columns, so the account names keep their room.
-    private var statusWidth: CGFloat { models.isEmpty ? 170 : 150 }
-
-    private func legendRow(number: Int?, account: GrazrAccount) -> some View {
-        let isActive = account.id == report.active
-        let left = account.window(window)?.left(now: now)
-        let (status, color) = status(of: account)
-        return HStack(spacing: 8) {
-            Text(number.map { "\($0)" } ?? "–")
-                .font(.system(size: 10.5, weight: .bold).monospacedDigit())
-                .foregroundStyle(Theme.textTertiary)
-                .frame(width: 14, alignment: .trailing)
-            Circle()
-                .fill(isActive ? Theme.statsAccount : .clear)
-                .overlay(Circle().stroke(isActive ? .clear : Theme.textGhost, lineWidth: 1.2))
-                .frame(width: 8, height: 8)
-            Text(account.name)
-                .font(.system(size: 12, weight: isActive ? .semibold : .regular))
-                .foregroundStyle(isActive ? Theme.statsAccount : Theme.text)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 8)
-            Text(left.map { "\($0)%" } ?? "–")
-                .font(.system(size: 11.5).monospacedDigit())
-                .foregroundStyle(left.map { GrazrStyle.tint(left: $0, threshold: account.window(window).flatMap(report.threshold(for:))) } ?? Theme.textTertiary)
-                .frame(width: 40, alignment: .trailing)
-            ForEach(models, id: \.self) { scope in
-                let model = account.modelWindow(scope)
-                let modelLeft = model?.left(now: now)
-                Text(modelLeft.map { "\($0)%" } ?? "–")
-                    .font(.system(size: 11.5).monospacedDigit())
-                    .foregroundStyle(modelLeft.map { GrazrStyle.tint(left: $0, threshold: model.flatMap(report.threshold(for:))) } ?? Theme.textTertiary)
-                    .frame(width: modelColumnWidth, alignment: .trailing)
-            }
-            Text(status)
-                .font(.system(size: 11, weight: account.id == next?.id ? .semibold : .regular))
-                .foregroundStyle(color)
-                .lineLimit(1)
-                .frame(width: statusWidth, alignment: .leading)
-        }
-        .padding(.vertical, 4)
-    }
-
-    private func status(of account: GrazrAccount) -> (String, Color) {
-        if account.id == report.active {
-            let eta = report.swapEstimate(for: account, now: now).flatMap { $0 > now ? $0 : nil }
-            return (eta.map { String(localized: "active · ~\(GrazrStyle.time($0, now: now))") } ?? String(localized: "active"), Theme.statsAccount)
-        }
-        if let block = report.block(for: account, now: now) {
-            return (String(localized: "blocked: \(block.reason)"), Theme.danger)
-        }
-        if account.id == next?.id {
-            guard let refill = futureRefill(of: account) else { return (String(localized: "NEXT ▸"), Theme.accent) }
-            return (String(localized: "NEXT · refills \(GrazrStyle.time(refill, now: now))"), Theme.accent)
-        }
-        if !report.isListed(account) { return (String(localized: "not in ACCOUNTS"), Theme.textTertiary) }
-        if account.windows.isEmpty { return (String(localized: "no reading yet"), Theme.textTertiary) }
-        let low = account.windows.filter { window in
-            guard let threshold = report.threshold(for: window), window.isOpen(now: now) else { return false }
-            return window.remaining < threshold
-        }
-        if let refill = low.compactMap(\.resetsAt).max() {
-            return (String(localized: "spent · resets \(GrazrStyle.time(refill, now: now))"), Theme.textTertiary)
-        }
-        return (String(localized: "ready"), Theme.textSecondary)
-    }
-
-    private func offset(at fraction: Double, radius: CGFloat) -> CGSize {
-        let angle = fraction * 2 * .pi - .pi / 2
-        return CGSize(width: cos(angle) * radius, height: sin(angle) * radius)
-    }
-}
-
-/// An arc of a ring centred in its frame, between two fractions of a turn
-/// measured clockwise from 12 o'clock.
-private struct RingArc: Shape {
-    let start: Double
-    let end: Double
-    let radius: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        guard end > start else { return path }
-        let centre = CGPoint(x: rect.midX, y: rect.midY)
-        let steps = max(2, Int((end - start) * 180))
-        for step in 0...steps {
-            let angle = (start + (end - start) * Double(step) / Double(steps)) * 2 * .pi - .pi / 2
-            let point = CGPoint(x: centre.x + cos(angle) * radius, y: centre.y + sin(angle) * radius)
-            step == 0 ? path.move(to: point) : path.addLine(to: point)
-        }
-        return path
-    }
-}
-
-/// A line along a radius, at a fraction of a turn clockwise from 12 o'clock.
-private struct RadialTick: Shape {
-    let at: Double
-    let from: CGFloat
-    let to: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        let centre = CGPoint(x: rect.midX, y: rect.midY)
-        let angle = at * 2 * .pi - .pi / 2
-        var path = Path()
-        path.move(to: CGPoint(x: centre.x + cos(angle) * from, y: centre.y + sin(angle) * from))
-        path.addLine(to: CGPoint(x: centre.x + cos(angle) * to, y: centre.y + sin(angle) * to))
-        return path
-    }
-}
-
-/// How the Accounts cards and dial colour a reading and say a time.
-enum GrazrStyle {
-    static func tint(left: Int, threshold: Int?) -> Color {
-        if left <= 2 { return Theme.danger }
-        if let threshold, left < threshold { return Theme.warning }
-        return Theme.success
-    }
-
-    /// "14:00" today, "Thu 14:00" on another day.
-    static func time(_ date: Date, now: Date) -> String {
-        let format = Calendar.current.isDate(date, inSameDayAs: now)
-            ? Date.FormatStyle().hour().minute()
-            : Date.FormatStyle().weekday(.abbreviated).hour().minute()
-        return date.formatted(format)
     }
 }
