@@ -604,3 +604,30 @@ final class AgentAttachmentDeliveryPolicyTests: XCTestCase {
         )
     }
 }
+
+final class OrphanedForwardTests: XCTestCase {
+    private let dir = "/var/folders/_z/abc/T/herdrm-tunnels"
+
+    func testFindsReparentedForwardsFromTheTunnelDirectory() {
+        let ps = """
+          43722     1 /usr/bin/ssh -N -o BatchMode=yes -o StreamLocalBindUnlink=yes -L \(dir)/16502.sock:/home/u/.config/herdr/herdr.sock cloud-dev
+          58703 58434 /usr/bin/ssh -N -o BatchMode=yes -L \(dir)/90001.sock:/home/u/.config/herdr/herdr.sock cloud-dev
+            901     1 /usr/bin/ssh -N -o ControlMaster=no -o ControlPath=none -L \(dir)/7.sock:/Users/v/.config/herdr/herdr.sock ssh://v@10.0.0.2:2222
+        """
+        XCTAssertEqual(SSHTunnel.orphanedForwards(inProcessList: ps, tunnelDirectory: dir), [
+            .init(pid: 43722, localSocketPath: "\(dir)/16502.sock"),
+            .init(pid: 901, localSocketPath: "\(dir)/7.sock"),
+        ])
+    }
+
+    func testLeavesEveryOtherSSHAlone() {
+        let ps = """
+          43746     1 /usr/bin/ssh -oConnectTimeout=5 cloud-dev .mutagen-agents/agent
+            612     1 /usr/bin/ssh -N -L 8080:localhost:80 web
+            613     1 /usr/bin/ssh -N -L /tmp/other/1.sock:/run/x.sock host
+            614     1 /usr/bin/ssh -tt -o BatchMode=yes cloud-dev exec herdr agent attach 3 -L \(dir)/1.sock:x
+            615     1 /opt/homebrew/bin/ssh -N -L \(dir)/2.sock:/run/x.sock host
+        """
+        XCTAssertEqual(SSHTunnel.orphanedForwards(inProcessList: ps, tunnelDirectory: dir), [])
+    }
+}

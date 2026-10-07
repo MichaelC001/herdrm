@@ -15,6 +15,29 @@ import UserNotifications
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
+    private var terminationSignal: DispatchSourceSignal?
+    private var terminationRequested = false
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Before any session starts, so a reaped socket can never be one of ours.
+        SSHTunnel.reapOrphanedForwards()
+
+        // `pkill herdrm` (and launchd) send SIGTERM, whose default action ends the
+        // process on the spot: this delegate never hears of it and every ssh child
+        // survives. Route it through the normal quit; a second SIGTERM still ends a
+        // quit that hangs.
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !self.terminationRequested else { exit(0) }
+                self.terminationRequested = true
+                NSApp.terminate(nil)
+            }
+        }
+        source.resume()
+        terminationSignal = source
+    }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         Task { @MainActor in

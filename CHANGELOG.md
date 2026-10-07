@@ -7,6 +7,13 @@ the Sparkle update description — a release without a section here fails CI.
 
 ## [Unreleased]
 
+### Fixed
+- Remote devices no longer leave `ssh` tunnels running after herdrm is gone.
+  Quitting already closed them, but stopping the app with `kill`/`pkill` skipped
+  that step, and a crash or force quit left each tunnel up with its own connection
+  to the host. herdrm now treats `kill` as a normal quit, and at launch it stops
+  tunnels left behind by an earlier run and removes their sockets.
+
 ## [0.6.11] - 2026-10-03
 
 ### Added
