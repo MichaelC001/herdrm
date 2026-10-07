@@ -33,6 +33,10 @@ the Sparkle update description — a release without a section here fails CI.
   headroom left shows as such. Hovering a ring pops up which window it is
   (All models, a model, or the 5-hour window), what that account has left in it,
   grazr's swap threshold for it (the tick on the ring), and when it resets.
+  When the active account will run out before any other has headroom, the
+  hand-off is marked red on the ring, the centre's "nothing to swap to" turns
+  red, and hovering the mark says how long the gap lasts and which account
+  refills first.
 
 ## [0.6.11] - 2026-10-03
 

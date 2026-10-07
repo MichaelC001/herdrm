@@ -8,7 +8,9 @@ import SwiftUI
 /// nothing: the hand stands in the active account's slice at what it has
 /// used, the tick is where grazr swaps, and the next account is marked.
 /// On the week, each model with a limit of its own ("Fable") gets a thinner
-/// ring inside, read the same way.
+/// ring inside, read the same way. When the active account will run out
+/// before any other has headroom, the hand-off is marked red: a gap in the
+/// rotation until the soonest refill.
 struct GrazrAccountsDial: View {
     let report: GrazrReport
     let window: GrazrDialWindow
@@ -26,6 +28,8 @@ struct GrazrAccountsDial: View {
     private var rotation: [GrazrAccount] { report.dialOrder(now: now) }
     private var active: GrazrAccount? { report.accounts.first { $0.id == report.active } }
     private var next: GrazrAccount? { report.predictedNext(now: now) }
+    private var gap: GrazrGap? { report.upcomingGap(now: now) }
+
     /// Per-model limits are weekly; the 5-hour window has none.
     private var models: [String] { window == .week ? report.modelScopes : [] }
 
@@ -63,10 +67,21 @@ struct GrazrAccountsDial: View {
                                 .accessibilityHidden(true)
                         }
                     }
-                if !models.isEmpty {
-                    Text("Outer ring: all models · inner: \(models.joined(separator: ", "))")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(Theme.textTertiary)
+                if !models.isEmpty || gap != nil {
+                    HStack(spacing: 0) {
+                        if !models.isEmpty {
+                            Text("Outer ring: all models · inner: \(models.joined(separator: ", "))")
+                                .foregroundStyle(Theme.textTertiary)
+                        }
+                        if !models.isEmpty, gap != nil {
+                            Text(" · ").foregroundStyle(Theme.textTertiary)
+                        }
+                        if let gap {
+                            Text("red: nothing to swap to until \(GrazrStyle.time(gap.until, now: now))")
+                                .foregroundStyle(Theme.danger)
+                        }
+                    }
+                    .font(.system(size: 10.5))
                 }
             }
             legend
@@ -84,6 +99,13 @@ struct GrazrAccountsDial: View {
             ForEach(Array(rotation.enumerated()), id: \.element.id) { index, account in
                 slice(account, index: index, count: count)
             }
+            if let junction = gapJunction {
+                RingArc(start: junction - gapMarkHalfWidth, end: junction + gapMarkHalfWidth, radius: (gapMarkOuter + gapMarkInner) / 2)
+                    .stroke(Theme.danger, style: StrokeStyle(lineWidth: gapMarkOuter - gapMarkInner, lineCap: .butt))
+            }
+            if let hand = activeHand {
+                needle(at: hand)
+            }
             ForEach(Array(rotation.enumerated()), id: \.element.id) { index, account in
                 badge(index: index, account: account)
                     .offset(offset(at: middle(index, count), radius: ringRadius + 26))
@@ -99,6 +121,20 @@ struct GrazrAccountsDial: View {
         let gap = count > 1 ? min(0.014, span * 0.1) : 0
         return (Double(index) * span + gap / 2, Double(index + 1) * span - gap / 2)
     }
+
+    /// Where the rotation hands off into the gap: the space before the slice
+    /// of the account that refills first.
+    private var gapJunction: Double? {
+        guard let gap, let index = rotation.firstIndex(where: { $0.id == gap.account.id }) else { return nil }
+        let count = rotation.count
+        let start = bounds(index, count).start
+        let previousEnd = index > 0 ? bounds(index - 1, count).end : bounds(count - 1, count).end - 1
+        return (start + previousEnd) / 2
+    }
+
+    private let gapMarkHalfWidth = 0.012
+    private var gapMarkOuter: CGFloat { ringRadius + ringWidth / 2 + 3 }
+    private var gapMarkInner: CGFloat { innerEdge - 3 }
 
     private func middle(_ index: Int, _ count: Int) -> Double {
         let (start, end) = bounds(index, count)
@@ -139,16 +175,27 @@ struct GrazrAccountsDial: View {
             RingArc(start: start, end: end, radius: ringRadius + ringWidth / 2 + 5)
                 .stroke(Theme.accent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
         }
-        if isActive {
-            // A needle across the ring, clear of the centre text wherever the slice is.
-            let inset: CGFloat = models.isEmpty ? 7 : 3
-            RadialTick(at: hand, from: ringRadius - ringWidth / 2 - inset, to: ringRadius + ringWidth / 2 + 6)
-                .stroke(Theme.statsAccount, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-            Circle()
-                .fill(Theme.statsAccount)
-                .frame(width: 7, height: 7)
-                .offset(offset(at: hand, radius: ringRadius - ringWidth / 2 - inset))
-        }
+    }
+
+    /// Where the active account's needle stands: at what it has used.
+    private var activeHand: Double? {
+        guard let index = rotation.firstIndex(where: { $0.id == report.active }) else { return nil }
+        let (start, end) = bounds(index, rotation.count)
+        let left = rotation[index].window(window)?.left(now: now) ?? 100
+        return start + Double(100 - left) / 100 * (end - start)
+    }
+
+    /// A needle across the ring, clear of the centre text wherever the slice
+    /// is. Drawn over the gap mark, which it meets when the account runs low.
+    @ViewBuilder
+    private func needle(at hand: Double) -> some View {
+        let inset: CGFloat = models.isEmpty ? 7 : 3
+        RadialTick(at: hand, from: ringRadius - ringWidth / 2 - inset, to: ringRadius + ringWidth / 2 + 6)
+            .stroke(Theme.statsAccount, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+        Circle()
+            .fill(Theme.statsAccount)
+            .frame(width: 7, height: 7)
+            .offset(offset(at: hand, radius: ringRadius - ringWidth / 2 - inset))
     }
 
     /// One account's share of a model ring: what that model has left this
@@ -233,7 +280,7 @@ struct GrazrAccountsDial: View {
                     }
                 } else {
                     Text("nothing to swap to")
-                        .foregroundStyle(Theme.textTertiary)
+                        .foregroundStyle(gap == nil ? Theme.textTertiary : Theme.danger)
                     if let refill = report.nextHeadroom(now: now) {
                         Text(refill.account.name)
                             .foregroundStyle(Theme.textSecondary)
@@ -288,11 +335,11 @@ struct GrazrAccountsDial: View {
 
     // MARK: - Ring tip
 
-    /// What the pointer is over: one account's slice of one ring.
-    struct RingTarget: Equatable {
-        let account: GrazrAccount
-        /// The model of an inner ring; nil on the main ring.
-        let model: String?
+    /// What the pointer is over: one account's slice of one ring (`model` is
+    /// nil on the main ring), or the red gap mark.
+    enum RingTarget: Equatable {
+        case slice(account: GrazrAccount, model: String?)
+        case gap(GrazrGap)
     }
 
     /// The slice and ring under `point` (in the dial's frame), from its angle
@@ -305,29 +352,67 @@ struct GrazrAccountsDial: View {
         let distance = hypot(dx, dy)
         var turn = (atan2(dy, dx) + .pi / 2) / (2 * .pi)
         if turn < 0 { turn += 1 }
+        if let gap, let junction = gapJunction,
+           distance >= gapMarkInner, distance <= gapMarkOuter,
+           min(abs(turn - junction), 1 - abs(turn - junction)) <= gapMarkHalfWidth {
+            return .gap(gap)
+        }
         let index = min(count - 1, Int(turn * Double(count)))
         let (start, end) = bounds(index, count)
         guard turn >= start, turn <= end else { return nil }
         let account = rotation[index]
         if abs(distance - ringRadius) <= ringWidth / 2 + 2 {
-            return RingTarget(account: account, model: nil)
+            return .slice(account: account, model: nil)
         }
         for (modelIndex, scope) in models.enumerated()
         where abs(distance - modelRadius(modelIndex)) <= modelRingWidth / 2 + 1.5 {
-            return RingTarget(account: account, model: scope)
+            return .slice(account: account, model: scope)
         }
         return nil
     }
 
+    @ViewBuilder
     func tip(for target: RingTarget) -> some View {
-        let reading: GrazrWindow? = if let model = target.model {
-            target.account.modelWindow(model)
-        } else {
-            target.account.window(window)
+        switch target {
+        case .slice(let account, let model):
+            sliceTip(account: account, model: model)
+        case .gap(let gap):
+            tipBox {
+                Text("Gap")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Theme.danger)
+                Text("Nothing to swap to for \(Self.duration(from: now, to: gap.until))")
+                    .foregroundStyle(Theme.text)
+                Text("\(gap.account.name) refills \(GrazrStyle.time(gap.until, now: now))")
+                    .foregroundStyle(Theme.textSecondary)
+            }
         }
-        let title = target.model ?? (window == .week ? String(localized: "All models") : String(localized: "5-hour window"))
+    }
+
+    private static func duration(from start: Date, to end: Date) -> String {
+        let minutes = max(0, Int(end.timeIntervalSince(start) / 60))
+        return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"
+    }
+
+    private func tipBox<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 2, content: content)
+            .font(.system(size: 11))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Theme.contentBackground))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.sidebarBorder))
+            .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
+    }
+
+    private func sliceTip(account: GrazrAccount, model: String?) -> some View {
+        let reading: GrazrWindow? = if let model {
+            account.modelWindow(model)
+        } else {
+            account.window(window)
+        }
+        let title = model ?? (window == .week ? String(localized: "All models") : String(localized: "5-hour window"))
         let left = reading?.left(now: now)
-        return VStack(alignment: .leading, spacing: 2) {
+        return tipBox {
             HStack(spacing: 6) {
                 Text(title)
                     .fontWeight(.semibold)
@@ -336,7 +421,7 @@ struct GrazrAccountsDial: View {
                     .monospacedDigit()
                     .foregroundStyle(left.map { GrazrStyle.tint(left: $0, threshold: reading.flatMap(report.threshold(for:))) } ?? Theme.textTertiary)
             }
-            Text(target.account.name)
+            Text(account.name)
                 .foregroundStyle(Theme.textSecondary)
             // The tick on the ring: where grazr moves off this account.
             if let threshold = reading.flatMap(report.threshold(for:)) {
@@ -350,12 +435,6 @@ struct GrazrAccountsDial: View {
                     .foregroundStyle(Theme.textTertiary)
             }
         }
-        .font(.system(size: 11))
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Theme.contentBackground))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.sidebarBorder))
-        .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
     }
 
     // MARK: - Legend

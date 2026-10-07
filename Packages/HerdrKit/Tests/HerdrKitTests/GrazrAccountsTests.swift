@@ -27,6 +27,22 @@ final class GrazrAccountsTests: XCTestCase {
         XCTAssertFalse(report.isListed(report.accounts[1]))
     }
 
+    func testAGapRunsUntilTheSoonestRefillWhenNothingHasHeadroom() {
+        let accounts = [
+            GrazrAccount(id: "a", name: "a", windows: [window("weekly", 1, resetsIn: 100)], updated: now.timeIntervalSince1970),
+            GrazrAccount(id: "b", name: "b", windows: [window("session", 2, resetsIn: 3), window("weekly", 87, resetsIn: 140)]),
+            GrazrAccount(id: "c", name: "c", windows: [window("weekly", 0, resetsIn: 60)]),
+        ]
+        let report = GrazrReport(active: "a", accounts: accounts, order: ["a", "b", "c"])
+        XCTAssertNil(report.predictedNext(now: now))
+        XCTAssertEqual(report.upcomingGap(now: now), GrazrGap(until: now.addingTimeInterval(3 * 3600), account: accounts[1]))
+
+        // With an account to move into there is no gap.
+        let covered = GrazrReport(active: "a", accounts: accounts + [GrazrAccount(id: "d", name: "d")], order: ["a", "b", "c", "d"])
+        XCTAssertEqual(covered.predictedNext(now: now)?.id, "d")
+        XCTAssertNil(covered.upcomingGap(now: now))
+    }
+
     func testModelScopesListEveryPerModelWeekOnce() {
         let report = GrazrReport(accounts: [
             GrazrAccount(id: "a", name: "a", windows: [

@@ -384,6 +384,16 @@ public struct GrazrReport: Decodable, Sendable, Equatable {
         return members.sorted { rank($0) < rank($1) }
     }
 
+    /// A stretch with no account to run: when the active account reaches its
+    /// swap point and no other has headroom by then, the work waits for the
+    /// soonest refill. Nil when grazr has somewhere to go.
+    public func upcomingGap(now: Date) -> GrazrGap? {
+        guard active != nil, predictedNext(now: now) == nil,
+              let refill = nextHeadroom(now: now), refill.at > expectedSwap(now: now)
+        else { return nil }
+        return GrazrGap(until: refill.at, account: refill.account)
+    }
+
     /// With nothing to swap to: the soonest an account other than the active
     /// one has headroom again, once its low windows reset.
     public func nextHeadroom(now: Date) -> (account: GrazrAccount, at: Date)? {
@@ -421,6 +431,12 @@ public struct GrazrReport: Decodable, Sendable, Equatable {
             return eta < resetsAt ? eta : nil
         }.min()
     }
+}
+
+/// Nothing to swap to until `account` has headroom again at `until`.
+public struct GrazrGap: Sendable, Equatable {
+    public let until: Date
+    public let account: GrazrAccount
 }
 
 /// Which window the Accounts dial fills its slices with.
