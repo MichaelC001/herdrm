@@ -55,6 +55,9 @@ extension FocusedValues {
 struct HerdrMApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @AppStorage("app.theme") private var themePreference = "system"
+    /// Read here as well as in DetailView and Settings: an @AppStorage on the App
+    /// invalidates the commands body, so the menu checkmark follows the setting.
+    @AppStorage(TerminalDefaults.tabLayoutKey) private var tabLayoutEnabled = true
     @FocusedValue(\.appModel) private var focusedModel
     @FocusedValue(\.splitAxis) private var focusedSplitAxis
 
@@ -116,6 +119,16 @@ struct HerdrMApp: App {
                 Button("Split Horizontally") { focusedModel?.shellSplitAxis = .horizontal }
                     .keyboardShortcut("d", modifiers: [.command, .shift])
                     .disabled(focusedModel?.selectedAttachedEntry == nil)
+
+                Divider()
+
+                // Herdr's own tab splits (not the local ⌘D shell). The toggle is the
+                // Settings switch; Zoom Pane is herdr's pane.zoom, so the TUI zooms too.
+                Toggle("Show Tab Panes", isOn: $tabLayoutEnabled)
+                    .keyboardShortcut("l", modifiers: [.command, .shift])
+                Button("Zoom Pane") { focusedModel?.toggleSelectedPaneZoom() }
+                    .keyboardShortcut("z", modifiers: [.command, .shift])
+                    .disabled(focusedModel == nil)
 
                 Divider()
 

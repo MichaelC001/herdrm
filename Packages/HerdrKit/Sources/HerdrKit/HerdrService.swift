@@ -597,6 +597,15 @@ public actor HerdrService {
         ).layout
     }
 
+    /// Toggles herdr's zoom on a pane: zoomed, the tab shows only that pane, in
+    /// the TUI and here alike.
+    public func toggleZoom(paneID: String) async throws {
+        _ = try await client().request(
+            method: "pane.zoom",
+            params: .object(["pane_id": .string(paneID), "mode": .string("toggle")])
+        )
+    }
+
     public func closeWorkspace(workspaceID: String) async throws {
         _ = try await client().request(
             method: "workspace.close",

@@ -652,6 +652,27 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// herdr's zoom on the selected pane: zoomed, the tab shows only that pane in the
+    /// TUI and here alike (the refetched tree's `zoomed` flag collapses the view); again
+    /// to restore the splits. Nothing to zoom in a single-pane tab.
+    func toggleSelectedPaneZoom() {
+        guard let pane = selectedPane,
+              let ref = selectedTabRef,
+              let layout = tabLayouts[ref],
+              layout.root.paneCount > 1,
+              let device = device(pane.deviceID)
+        else { return }
+        let service = service(for: device)
+        Task { @MainActor [weak self] in
+            do {
+                try await service.toggleZoom(paneID: pane.paneID)
+            } catch {
+                self?.actionError = self?.actionErrorMessage(error, device: device)
+            }
+            self?.refreshTabLayout(ref)
+        }
+    }
+
     /// The keyboard landed in another pane of the shown tab: make it the selection,
     /// so the sidebar, unread marks and viewport snap follow. Selection stays a
     /// herdrm-side notion; herdr's own focus is left alone, as it is for sidebar clicks.
