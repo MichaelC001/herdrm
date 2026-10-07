@@ -7,6 +7,13 @@ the Sparkle update description — a release without a section here fails CI.
 
 ## [Unreleased]
 
+### Fixed
+- A remote device no longer fails to connect with "SSH tunnel failed: ssh exited
+  0" when your ssh config shares connections (`ControlMaster auto`). If another
+  ssh to the same host was already running (Mutagen, a terminal, another app),
+  the tunnel was handed to that connection and herdrm's own ssh exited at once.
+  The tunnel now always opens its own connection.
+
 ## [0.6.11] - 2026-10-03
 
 ### Added

@@ -92,6 +92,25 @@ final class SSHDestinationTests: XCTestCase {
         XCTAssertEqual(SSHTunnel.sshDestination("vincent@[fe80::1]:2222"), "ssh://vincent@[fe80::1]:2222")
     }
 
+    func testForwardOpensItsOwnConnectionEvenWhenSSHConfigMultiplexes() {
+        let args = SSHTunnel.forwardArguments(
+            localSock: "/tmp/herdrm-1.sock",
+            remoteSock: "/home/u/.config/herdr/herdr.sock",
+            target: "vincent@10.10.10.87:2222",
+            authenticationArguments: ["-o", "BatchMode=yes"]
+        )
+        // A forward handed to an existing ControlMaster lives in that master's process
+        // and our ssh exits 0 at once, so the tunnel must never join or become a master.
+        func option(_ name: String) -> String? {
+            zip(args, args.dropFirst()).first { $0.0 == "-o" && $0.1.hasPrefix("\(name)=") }?.1
+        }
+        XCTAssertEqual(option("ControlPath"), "ControlPath=none")
+        XCTAssertEqual(option("ControlMaster"), "ControlMaster=no")
+        XCTAssertEqual(args.first, "-N")
+        XCTAssertEqual(Array(args[1...2]), ["-o", "BatchMode=yes"])
+        XCTAssertEqual(args.suffix(3), ["-L", "/tmp/herdrm-1.sock:/home/u/.config/herdr/herdr.sock", "ssh://vincent@10.10.10.87:2222"])
+    }
+
     func testPlainTargetsPassThroughUntouched() {
         XCTAssertEqual(SSHTunnel.sshDestination("vincent@10.10.10.87"), "vincent@10.10.10.87")
         XCTAssertEqual(SSHTunnel.sshDestination("my-config-alias"), "my-config-alias")
