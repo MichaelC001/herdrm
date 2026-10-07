@@ -570,6 +570,39 @@ public actor HerdrService {
         _ = try await client().request(method: "pane.close", params: .object(["pane_id": .string(paneID)]))
     }
 
+    // MARK: - Tab layout
+
+    /// The split tree of a tab, as `layout.export` reports it.
+    public func exportLayout(tabID: String) async throws -> TabLayoutDescription {
+        struct Envelope: Codable { let layout: TabLayoutDescription }
+        return try await client().request(
+            method: "layout.export",
+            params: .object(["tab_id": .string(tabID)]),
+            as: Envelope.self
+        ).layout
+    }
+
+    /// Sets the first child's share of one split; `path` addresses it from the
+    /// root (`false` first, `true` second). Returns the layout after the change.
+    public func setSplitRatio(tabID: String, path: SplitPath, ratio: Double) async throws -> TabLayoutDescription {
+        struct Envelope: Codable { let layout: TabLayoutDescription }
+        return try await client().request(
+            method: "layout.set_split_ratio",
+            params: .object([
+                "tab_id": .string(tabID),
+                "path": .array(path.steps.map { .bool($0) }),
+                "ratio": .number(ratio),
+            ]),
+            as: Envelope.self
+        ).layout
+    }
+
+    /// Moves herdr's own focus to a pane, so the TUI's highlighted border and
+    /// `focused_pane_id` follow a click in herdrm.
+    public func focusPane(paneID: String) async throws {
+        _ = try await client().request(method: "pane.focus", params: .object(["pane_id": .string(paneID)]))
+    }
+
     public func closeWorkspace(workspaceID: String) async throws {
         _ = try await client().request(
             method: "workspace.close",
