@@ -27,6 +27,26 @@ final class GrazrAccountsTests: XCTestCase {
         XCTAssertFalse(report.isListed(report.accounts[1]))
     }
 
+    func testModelScopesListEveryPerModelWeekOnce() {
+        let report = GrazrReport(accounts: [
+            GrazrAccount(id: "a", name: "a", windows: [
+                window("session", 77, resetsIn: 2),
+                window("weekly", 27, resetsIn: 100),
+                window("weekly", 64, scope: "Fable", resetsIn: 100),
+            ]),
+            GrazrAccount(id: "b", name: "b", windows: [
+                window("weekly", 62, scope: "Fable", resetsIn: 50),
+                window("weekly", 90, scope: "Opus", resetsIn: 50),
+            ]),
+            GrazrAccount(id: "c", name: "c"),
+        ])
+
+        XCTAssertEqual(report.modelScopes, ["Fable", "Opus"])
+        XCTAssertEqual(report.accounts[0].modelWindow("Fable")?.remaining, 64)
+        XCTAssertNil(report.accounts[0].modelWindow("Opus"))
+        XCTAssertEqual(report.accounts[0].window(.week)?.remaining, 27)
+    }
+
     func testAWindowPastItsResetIsFullAgain() {
         let spent = window("session", 0, resetsIn: -1)
         XCTAssertFalse(spent.isOpen(now: now))

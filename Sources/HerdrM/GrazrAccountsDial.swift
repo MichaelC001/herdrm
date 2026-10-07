@@ -7,17 +7,33 @@ import SwiftUI
 /// when they refill. Inside a slice time runs clockwise too, from all left to
 /// nothing: the hand stands in the active account's slice at what it has
 /// used, the tick is where grazr swaps, and the next account is marked.
+/// On the week, each model with a limit of its own ("Fable") gets a thinner
+/// ring inside, read the same way.
 struct GrazrAccountsDial: View {
     let report: GrazrReport
     let window: GrazrDialWindow
     let now: Date
 
-    private let ringRadius: CGFloat = 104
+    private let ringRadius: CGFloat = 116
     private let ringWidth: CGFloat = 14
+    private let modelRingWidth: CGFloat = 6
+    /// Room between the main ring and the first model ring, clear of the needle.
+    private let modelRingGap: CGFloat = 7
 
     private var rotation: [GrazrAccount] { report.dialOrder(now: now) }
     private var active: GrazrAccount? { report.accounts.first { $0.id == report.active } }
     private var next: GrazrAccount? { report.predictedNext(now: now) }
+    /// Per-model limits are weekly; the 5-hour window has none.
+    private var models: [String] { window == .week ? report.modelScopes : [] }
+
+    private func modelRadius(_ index: Int) -> CGFloat {
+        ringRadius - ringWidth / 2 - modelRingGap - modelRingWidth / 2 - CGFloat(index) * (modelRingWidth + 3)
+    }
+
+    /// Where the rings end towards the centre.
+    private var innerEdge: CGFloat {
+        models.isEmpty ? ringRadius - ringWidth / 2 : modelRadius(models.count - 1) - modelRingWidth / 2
+    }
 
     var body: some View {
         VStack(spacing: 14) {
@@ -31,6 +47,11 @@ struct GrazrAccountsDial: View {
                     .frame(width: (ringRadius + 40) * 2, height: (ringRadius + 40) * 2)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(accessibilitySummary)
+                if !models.isEmpty {
+                    Text("Outer ring: all models · inner: \(models.joined(separator: ", "))")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Theme.textTertiary)
+                }
             }
             legend
         }
@@ -50,7 +71,7 @@ struct GrazrAccountsDial: View {
                     .offset(offset(at: middle(index, count), radius: ringRadius + 26))
             }
             centre
-                .frame(width: (ringRadius - ringWidth) * 1.55)
+                .frame(width: innerEdge * 1.44)
         }
     }
 
@@ -93,18 +114,44 @@ struct GrazrAccountsDial: View {
             RadialTick(at: start + Double(100 - threshold) / 100 * length, from: ringRadius - ringWidth / 2 - 3, to: ringRadius + ringWidth / 2 + 3)
                 .stroke(Theme.textSecondary, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
         }
+        ForEach(Array(models.enumerated()), id: \.element) { modelIndex, scope in
+            modelSlice(account.modelWindow(scope), radius: modelRadius(modelIndex), start: start, end: end, usable: usable)
+        }
         if account.id == next?.id {
             RingArc(start: start, end: end, radius: ringRadius + ringWidth / 2 + 5)
                 .stroke(Theme.accent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
         }
         if isActive {
             // A needle across the ring, clear of the centre text wherever the slice is.
-            RadialTick(at: hand, from: ringRadius - ringWidth / 2 - 7, to: ringRadius + ringWidth / 2 + 6)
+            let inset: CGFloat = models.isEmpty ? 7 : 3
+            RadialTick(at: hand, from: ringRadius - ringWidth / 2 - inset, to: ringRadius + ringWidth / 2 + 6)
                 .stroke(Theme.statsAccount, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
             Circle()
                 .fill(Theme.statsAccount)
                 .frame(width: 7, height: 7)
-                .offset(offset(at: hand, radius: ringRadius - ringWidth / 2 - 7))
+                .offset(offset(at: hand, radius: ringRadius - ringWidth / 2 - inset))
+        }
+    }
+
+    /// One account's share of a model ring: what that model has left this
+    /// week, emptying clockwise like the main ring, with grazr's threshold.
+    @ViewBuilder
+    private func modelSlice(_ reading: GrazrWindow?, radius: CGFloat, start: Double, end: Double, usable: Bool) -> some View {
+        let length = end - start
+        let left = reading?.left(now: now)
+        let threshold = reading.flatMap(report.threshold(for:))
+        RingArc(start: start, end: end, radius: radius)
+            .stroke(Theme.textGhost.opacity(0.2), style: StrokeStyle(lineWidth: modelRingWidth, lineCap: .butt))
+        if let left, left > 0 {
+            RingArc(start: start + Double(100 - left) / 100 * length, end: end, radius: radius)
+                .stroke(
+                    GrazrStyle.tint(left: left, threshold: threshold).opacity(usable ? 0.85 : 0.3),
+                    style: StrokeStyle(lineWidth: modelRingWidth, lineCap: .butt)
+                )
+        }
+        if let threshold {
+            RadialTick(at: start + Double(100 - threshold) / 100 * length, from: radius - modelRingWidth / 2 - 1.5, to: radius + modelRingWidth / 2 + 1.5)
+                .stroke(Theme.textSecondary, style: StrokeStyle(lineWidth: 1, lineCap: .round))
         }
     }
 
@@ -138,6 +185,14 @@ struct GrazrAccountsDial: View {
                     Text("No reading yet")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.textTertiary)
+                }
+                ForEach(models, id: \.self) { scope in
+                    if let model = active.modelWindow(scope) {
+                        let left = model.left(now: now)
+                        Text("\(scope) \(left)% left")
+                            .font(.system(size: 11.5, weight: .medium).monospacedDigit())
+                            .foregroundStyle(GrazrStyle.tint(left: left, threshold: report.threshold(for: model)))
+                    }
                 }
                 Text(swapText(for: active))
                     .font(.system(size: 11))
@@ -207,7 +262,10 @@ struct GrazrAccountsDial: View {
         guard let active else { return nextText }
         let left = (active.window(window)?.left(now: now)).map { String(localized: "\($0)% left") }
             ?? String(localized: "no reading yet")
-        return [active.name, left, swapText(for: active), nextText].joined(separator: ", ")
+        let modelsLeft = models.compactMap { scope in
+            active.modelWindow(scope).map { String(localized: "\(scope) \($0.left(now: now))% left") }
+        }
+        return ([active.name, left] + modelsLeft + [swapText(for: active), nextText]).joined(separator: ", ")
     }
 
     // MARK: - Legend
@@ -215,6 +273,22 @@ struct GrazrAccountsDial: View {
     private var legend: some View {
         let unlisted = report.sortedAccounts.filter { account in !rotation.contains { $0.id == account.id } }
         return VStack(spacing: 0) {
+            if !models.isEmpty {
+                // Names the columns once rather than repeating the model on every row.
+                HStack(spacing: 8) {
+                    Spacer(minLength: 8)
+                    Text("All")
+                        .frame(width: 40, alignment: .trailing)
+                    ForEach(models, id: \.self) { scope in
+                        Text(scope)
+                            .lineLimit(1)
+                            .frame(width: modelColumnWidth, alignment: .trailing)
+                    }
+                    Color.clear.frame(width: statusWidth, height: 1)
+                }
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Theme.textTertiary)
+            }
             ForEach(Array(rotation.enumerated()), id: \.element.id) { index, account in
                 legendRow(number: index + 1, account: account)
             }
@@ -224,6 +298,10 @@ struct GrazrAccountsDial: View {
         }
         .padding(.horizontal, 4)
     }
+
+    private let modelColumnWidth: CGFloat = 44
+    /// Narrower beside model columns, so the account names keep their room.
+    private var statusWidth: CGFloat { models.isEmpty ? 170 : 150 }
 
     private func legendRow(number: Int?, account: GrazrAccount) -> some View {
         let isActive = account.id == report.active
@@ -248,11 +326,19 @@ struct GrazrAccountsDial: View {
                 .font(.system(size: 11.5).monospacedDigit())
                 .foregroundStyle(left.map { GrazrStyle.tint(left: $0, threshold: account.window(window).flatMap(report.threshold(for:))) } ?? Theme.textTertiary)
                 .frame(width: 40, alignment: .trailing)
+            ForEach(models, id: \.self) { scope in
+                let model = account.modelWindow(scope)
+                let modelLeft = model?.left(now: now)
+                Text(modelLeft.map { "\($0)%" } ?? "–")
+                    .font(.system(size: 11.5).monospacedDigit())
+                    .foregroundStyle(modelLeft.map { GrazrStyle.tint(left: $0, threshold: model.flatMap(report.threshold(for:))) } ?? Theme.textTertiary)
+                    .frame(width: modelColumnWidth, alignment: .trailing)
+            }
             Text(status)
                 .font(.system(size: 11, weight: account.id == next?.id ? .semibold : .regular))
                 .foregroundStyle(color)
                 .lineLimit(1)
-                .frame(width: 170, alignment: .leading)
+                .frame(width: statusWidth, alignment: .leading)
         }
         .padding(.vertical, 4)
     }

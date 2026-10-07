@@ -262,6 +262,12 @@ public struct GrazrReport: Decodable, Sendable, Equatable {
     public var enabled: Bool { settings["ENABLED"] != "0" }
     public var dryRun: Bool { settings["DRY_RUN"] == "1" }
 
+    /// The models that carry a weekly limit of their own on any account
+    /// ("Fable"), by name: one inner ring each on the dial's week.
+    public var modelScopes: [String] {
+        Set(accounts.flatMap { $0.windows.filter { $0.group == "weekly" }.compactMap(\.scope) }).sorted()
+    }
+
     /// The active account first, then `ACCOUNTS` order, then any enrolled
     /// account the config leaves out.
     public var sortedAccounts: [GrazrAccount] {
@@ -459,6 +465,11 @@ public struct GrazrAccount: Decodable, Sendable, Equatable, Identifiable {
         case .session: return windows.first { $0.group == "session" }
         case .week: return windows.first { $0.group == "weekly" && $0.scope == nil }
         }
+    }
+
+    /// The weekly limit Claude keeps for one model ("Fable") on this account.
+    public func modelWindow(_ scope: String) -> GrazrWindow? {
+        windows.first { $0.group == "weekly" && $0.scope == scope }
     }
 
     /// The tightest window still open: how close the account is to the wall.

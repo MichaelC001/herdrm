@@ -27,7 +27,10 @@ the Sparkle update description — a release without a section here fails CI.
   the one with headroom when the active one runs out, so an account whose
   week resets before then counts. The centre estimates when that swap comes at
   the current pace, and when the next account refills. The List | Dial choice is
-  remembered.
+  remembered. On the week, each model with a weekly limit of its own (Fable)
+  gets a thinner ring inside, with its own threshold tick, a line in the centre
+  and a column in the legend, so an account spent overall but with model
+  headroom left shows as such.
 
 ## [0.6.11] - 2026-10-03
 
