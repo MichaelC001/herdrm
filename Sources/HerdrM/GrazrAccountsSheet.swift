@@ -11,6 +11,8 @@ struct GrazrAccountsSheet: View {
     @State private var failure: String?
     @State private var loading = false
     @State private var swapping = false
+    /// grazr's word when Refresh could not ask Claude, shown by the button.
+    @State private var refreshNote: String?
     @AppStorage("grazr.accounts.view") private var view = AccountsView.list
     @AppStorage("grazr.accounts.dialWindow") private var dialWindow = GrazrDialWindow.week
 
@@ -53,13 +55,20 @@ struct GrazrAccountsSheet: View {
 
             HStack {
                 Button {
-                    Task { await load() }
+                    Task { await load(askClaude: true) }
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
+                .help("Ask Claude for every account's usage now, then reload")
                 .disabled(loading)
                 if loading || swapping {
                     ProgressView().controlSize(.small)
+                } else if let refreshNote {
+                    Text(refreshNote)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.warning)
+                        .lineLimit(2)
+                        .help(refreshNote)
                 }
                 Spacer()
                 if let swapAction {
@@ -169,9 +178,17 @@ struct GrazrAccountsSheet: View {
         }
     }
 
-    private func load() async {
+    /// Reads grazr's records. With `askClaude`, has grazr refresh them from
+    /// Claude first: its records of parked accounts otherwise stay as they
+    /// were when grazr left them, so a plain reload shows nothing new.
+    private func load(askClaude: Bool = false) async {
         loading = true
         defer { loading = false }
+        if askClaude {
+            let output = try? await DeviceFileService(device: device).run(Grazr.refreshCommand)
+            let result = output.flatMap { try? JSONDecoder().decode(GrazrSwitchResult.self, from: $0) }
+            refreshNote = result?.ok == false ? result?.summary : nil
+        }
         do {
             let output = try await DeviceFileService(device: device).run(Grazr.readerCommand)
             report = try JSONDecoder().decode(GrazrReport.self, from: output)

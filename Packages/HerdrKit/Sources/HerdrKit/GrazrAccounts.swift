@@ -123,6 +123,33 @@ public enum Grazr {
             """#
     }
 
+    /// Has grazr read every account's usage from Claude now (`grazr.py
+    /// refresh`), so the reader that follows sees current numbers rather than
+    /// what each parked account showed when grazr left it. Prints a
+    /// `GrazrSwitchResult`; a grazr without the command says so instead.
+    public static let refreshCommand: String =
+        SSHTunnel.remotePathExport + "\n"
+            + "python3 - <<'GRAZR_EOF'\n"
+            + #"""
+            import json, sys
+
+            def fail(output):
+                print(json.dumps({"ok": False, "output": output}))
+                sys.exit(0)
+
+            """#
+            + pluginPreamble
+            + #"""
+
+            if not hasattr(grazr, "refresh"):
+                fail("This grazr cannot re-read accounts. Update it to 0.4.7+senad.2 or later")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = grazr.main(["grazr.py", "refresh"])
+            print(json.dumps({"ok": code == 0, "output": output.getvalue()}))
+            GRAZR_EOF
+            """#
+
     /// Where `installReauthCommand` puts the sign-in script on the device.
     public static let reauthScriptPath = "~/.cache/herdrm/grazr-reauth.py"
 

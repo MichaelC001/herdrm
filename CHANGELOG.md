@@ -37,6 +37,11 @@ the Sparkle update description — a release without a section here fails CI.
   hand-off is marked red on the ring, the centre's "nothing to swap to" turns
   red, and hovering the mark says how long the gap lasts and which account
   refills first.
+- The Accounts window's Refresh button asks Claude for every account's usage
+  through grazr (`grazr.py refresh`, grazr 0.4.7+senad.2 or later) before
+  reloading. It used to re-read grazr's records only, and grazr records a
+  parked account's usage only while it is live, so an account that had refilled
+  or had its limit lifted kept showing as spent.
 
 ## [0.6.11] - 2026-10-03
 

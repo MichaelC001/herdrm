@@ -302,6 +302,51 @@ final class GrazrAccountsTests: XCTestCase {
         XCTAssertEqual(report.sortedAccounts[1].windows, [])
     }
 
+    /// The refresh script runs `grazr.py refresh` in herdr's plugin
+    /// environment, and an older grazr without the command says so.
+    func testRefreshRunsGrazrsRefreshAndAnOlderGrazrSaysItCannot() async throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("grazr-refresh-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let root = home.appendingPathComponent("plugins/wazum.grazr")
+        let bin = home.appendingPathComponent(".local/bin")
+        for directory in [root, bin] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        func write(_ text: String, to url: URL) throws {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        }
+        try write("""
+        #!/bin/sh
+        printf '{"result":{"plugins":[{"plugin_id":"wazum.grazr","plugin_root":"%s"}]}}' '\(root.path)'
+        """, to: bin.appendingPathComponent("herdr"))
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin.appendingPathComponent("herdr").path)
+        try write("", to: root.appendingPathComponent("accounts.py"))
+        try write("", to: root.appendingPathComponent("core.py"))
+        let environment = "export HOME='\(home.path)' XDG_STATE_HOME= XDG_CONFIG_HOME=; "
+        func refreshing() async throws -> GrazrSwitchResult {
+            let output = try await DeviceFileService(device: .local).run(environment + Grazr.refreshCommand)
+            return try JSONDecoder().decode(GrazrSwitchResult.self, from: output)
+        }
+
+        try write("""
+        import os
+        def refresh():
+            pass
+        def main(argv):
+            print("%s %s" % (argv[1], os.environ["HERDR_PLUGIN_STATE_DIR"].endswith("/wazum.grazr")))
+            print("personal: weekly_all 49% left")
+            return 0
+        """, to: root.appendingPathComponent("grazr.py"))
+        let refreshed = try await refreshing()
+        XCTAssertEqual(refreshed, GrazrSwitchResult(ok: true, output: "refresh True\npersonal: weekly_all 49% left\n"))
+
+        try write("def main(argv):\n    return 0\n", to: root.appendingPathComponent("grazr.py"))
+        let older = try await refreshing()
+        XCTAssertFalse(older.ok)
+        XCTAssertEqual(older.summary, "This grazr cannot re-read accounts. Update it to 0.4.7+senad.2 or later")
+    }
+
     /// The switch and sign-in scripts, against a stand-in herdr and grazr in a
     /// throwaway home: they find grazr through `herdr plugin list` and run it in
     /// herdr's plugin environment. A switch pins the pick to the chosen
