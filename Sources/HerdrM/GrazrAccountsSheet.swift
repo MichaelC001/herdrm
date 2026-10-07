@@ -17,7 +17,7 @@ struct GrazrAccountsSheet: View {
     @AppStorage("grazr.accounts.dialWindow") private var dialWindow = GrazrDialWindow.week
 
     enum AccountsView: String {
-        case list, dial
+        case list, dial, clock
     }
 
     private var swapAction: PluginAction? {
@@ -37,13 +37,15 @@ struct GrazrAccountsSheet: View {
                 Picker("View", selection: $view) {
                     Image(systemName: "list.bullet").tag(AccountsView.list)
                         .accessibilityLabel("List")
-                    Image(systemName: "clock").tag(AccountsView.dial)
+                    Image(systemName: "chart.pie").tag(AccountsView.dial)
                         .accessibilityLabel("Dial")
+                    Image(systemName: "clock").tag(AccountsView.clock)
+                        .accessibilityLabel("Clock")
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .fixedSize()
-                .help("Show the accounts as a list or as grazr's rotation dial")
+                .help("Show the accounts as a list, grazr's rotation dial, or a clock of who runs when")
                 .padding(.trailing, 16)
             }
             Rectangle().fill(Theme.hairline).frame(height: 1)
@@ -113,23 +115,27 @@ struct GrazrAccountsSheet: View {
                 message(String(localized: "grazr is not installed on \(device.name)."), systemImage: "person.crop.circle.badge.questionmark")
             } else if report.accounts.isEmpty {
                 message(String(localized: "No accounts enrolled yet."), systemImage: "person.crop.circle.badge.plus")
-            } else if view == .dial {
+            } else if view == .dial || view == .clock {
                 ScrollView {
                     VStack(spacing: 6) {
                         HStack {
                             Spacer()
                             Picker("Window", selection: $dialWindow) {
                                 Text("Week").tag(GrazrDialWindow.week)
-                                Text("5h").tag(GrazrDialWindow.session)
+                                Text(view == .clock ? "24h" : "5h").tag(GrazrDialWindow.session)
                             }
                             .pickerStyle(.segmented)
                             .labelsHidden()
                             .fixedSize()
-                            .help("Which window fills the slices")
+                            .help(view == .clock ? "How far ahead the clock looks" : "Which window fills the slices")
                         }
                         // Redraws each minute so a window past its reset shows as refilled.
                         TimelineView(.periodic(from: .now, by: 60)) { context in
-                            GrazrAccountsDial(report: report, window: dialWindow, now: context.date)
+                            if view == .clock {
+                                GrazrAccountsClock(report: report, span: dialWindow, now: context.date)
+                            } else {
+                                GrazrAccountsDial(report: report, window: dialWindow, now: context.date)
+                            }
                         }
                     }
                     .padding(16)

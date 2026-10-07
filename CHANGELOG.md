@@ -37,6 +37,13 @@ the Sparkle update description — a release without a section here fails CI.
   hand-off is marked red on the ring, the centre's "nothing to swap to" turns
   red, and hovering the mark says how long the gap lasts and which account
   refills first.
+- A clock view in the Accounts window shows grazr's rotation over time: a
+  24-hour face or a week, the hand at now, and a ring ahead of it coloured by
+  the account grazr is expected to be on, red where no account has room.
+  Swaps are ticks across the ring and refills numbered dots beside it;
+  hovering says who runs from when to when and how much they will have left.
+  The projection uses the active account's current pace and picks the way
+  grazr does today.
 - The Accounts window's Refresh button asks Claude for every account's usage
   through grazr (`grazr.py refresh`, grazr 0.4.7+senad.2 or later) before
   reloading. It used to re-read grazr's records only, and grazr records a
