@@ -30,7 +30,9 @@ the Sparkle update description — a release without a section here fails CI.
   remembered. On the week, each model with a weekly limit of its own (Fable)
   gets a thinner ring inside, with its own threshold tick, a line in the centre
   and a column in the legend, so an account spent overall but with model
-  headroom left shows as such.
+  headroom left shows as such. Hovering a ring pops up which window it is
+  (All models, a model, or the 5-hour window), what that account has left in it,
+  and when it resets.
 
 ## [0.6.11] - 2026-10-03
 

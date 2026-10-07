@@ -14,6 +14,9 @@ struct GrazrAccountsDial: View {
     let window: GrazrDialWindow
     let now: Date
 
+    /// Where the pointer rests over the dial, for the ring tip.
+    @State private var pointer: CGPoint?
+
     private let ringRadius: CGFloat = 116
     private let ringWidth: CGFloat = 14
     private let modelRingWidth: CGFloat = 6
@@ -44,9 +47,22 @@ struct GrazrAccountsDial: View {
                     .padding(.vertical, 40)
             } else {
                 dial
-                    .frame(width: (ringRadius + 40) * 2, height: (ringRadius + 40) * 2)
+                    .frame(width: dialSide, height: dialSide)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(accessibilitySummary)
+                    .contentShape(Rectangle())
+                    .onContinuousHover { phase in
+                        if case .active(let location) = phase { pointer = location } else { pointer = nil }
+                    }
+                    .overlay {
+                        if let pointer, let target = ringTarget(at: pointer) {
+                            tip(for: target)
+                                .fixedSize()
+                                .position(x: pointer.x, y: pointer.y - 40)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
+                    }
                 if !models.isEmpty {
                     Text("Outer ring: all models · inner: \(models.joined(separator: ", "))")
                         .font(.system(size: 10.5))
@@ -59,6 +75,8 @@ struct GrazrAccountsDial: View {
     }
 
     // MARK: - Dial
+
+    private var dialSide: CGFloat { (ringRadius + 40) * 2 }
 
     private var dial: some View {
         let count = rotation.count
@@ -266,6 +284,71 @@ struct GrazrAccountsDial: View {
             active.modelWindow(scope).map { String(localized: "\(scope) \($0.left(now: now))% left") }
         }
         return ([active.name, left] + modelsLeft + [swapText(for: active), nextText]).joined(separator: ", ")
+    }
+
+    // MARK: - Ring tip
+
+    /// What the pointer is over: one account's slice of one ring.
+    struct RingTarget: Equatable {
+        let account: GrazrAccount
+        /// The model of an inner ring; nil on the main ring.
+        let model: String?
+    }
+
+    /// The slice and ring under `point` (in the dial's frame), from its angle
+    /// and its distance from the centre. Nil in a gap, the centre or outside.
+    func ringTarget(at point: CGPoint) -> RingTarget? {
+        let count = rotation.count
+        guard count > 0 else { return nil }
+        let dx = point.x - dialSide / 2
+        let dy = point.y - dialSide / 2
+        let distance = hypot(dx, dy)
+        var turn = (atan2(dy, dx) + .pi / 2) / (2 * .pi)
+        if turn < 0 { turn += 1 }
+        let index = min(count - 1, Int(turn * Double(count)))
+        let (start, end) = bounds(index, count)
+        guard turn >= start, turn <= end else { return nil }
+        let account = rotation[index]
+        if abs(distance - ringRadius) <= ringWidth / 2 + 2 {
+            return RingTarget(account: account, model: nil)
+        }
+        for (modelIndex, scope) in models.enumerated()
+        where abs(distance - modelRadius(modelIndex)) <= modelRingWidth / 2 + 1.5 {
+            return RingTarget(account: account, model: scope)
+        }
+        return nil
+    }
+
+    func tip(for target: RingTarget) -> some View {
+        let reading: GrazrWindow? = if let model = target.model {
+            target.account.modelWindow(model)
+        } else {
+            target.account.window(window)
+        }
+        let title = target.model ?? (window == .week ? String(localized: "All models") : String(localized: "5-hour window"))
+        let left = reading?.left(now: now)
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Theme.text)
+                Text(left.map { String(localized: "\($0)% left") } ?? String(localized: "no reading yet"))
+                    .monospacedDigit()
+                    .foregroundStyle(left.map { GrazrStyle.tint(left: $0, threshold: reading.flatMap(report.threshold(for:))) } ?? Theme.textTertiary)
+            }
+            Text(target.account.name)
+                .foregroundStyle(Theme.textSecondary)
+            if let reading, let resetsAt = reading.resetsAt, reading.isOpen(now: now) {
+                Text("resets \(GrazrStyle.time(resetsAt, now: now))")
+                    .foregroundStyle(Theme.textTertiary)
+            }
+        }
+        .font(.system(size: 11))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Theme.contentBackground))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.sidebarBorder))
+        .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
     }
 
     // MARK: - Legend
