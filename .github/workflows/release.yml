@@ -60,60 +60,26 @@ jobs:
       - name: Extract release notes from CHANGELOG
         run: |
           python3 - "$VERSION" <<'PYEOF'
-          import html, re, sys
+          import re, sys
           version = sys.argv[1]
           text = open("CHANGELOG.md").read()
           m = re.search(rf"## \[{re.escape(version)}\][^\n]*\n(.*?)(?=\n## \[|\Z)", text, re.S)
           if not m or not m.group(1).strip():
               sys.exit(f"CHANGELOG.md has no section for {version} — add one before tagging")
-          notes = m.group(1).strip()
-          open("notes.md", "w").write(notes)
-
-          def inline(text):
-              # Sparkle renders release notes as HTML, so inline markdown has to
-              # be converted or it shows literally (**bold**, `code`). Escape
-              # first, then translate; code spans before emphasis so ** inside a
-              # span stays literal.
-              s = html.escape(text)
-              s = re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
-              s = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", s)
-              s = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<em>\1</em>", s)
-              s = re.sub(r"\[([^\]]+)\]\(([^)\s]+)\)", r'<a href="\2">\1</a>', s)
-              return s
-
-          # Buffer each list item's full text before converting: a bullet can
-          # wrap across lines, and an emphasis span (**bold**) may open on the
-          # "- " line and close on a continuation — converting per line would
-          # miss it. Join continuations first, then run inline() on the whole.
-          out, in_ul, item = [], False, None
-          def flush_item():
-              global item
-              if item is not None:
-                  out.append("<li>" + inline(item) + "</li>")
-                  item = None
-          for line in notes.splitlines():
-              s = line.rstrip()
-              if s.startswith("- "):
-                  if not in_ul:
-                      out.append("<ul>"); in_ul = True
-                  flush_item()
-                  item = s[2:]
-              elif s.startswith("  ") and item is not None:
-                  item += " " + s.strip()
-              else:
-                  flush_item()
-                  if in_ul:
-                      out.append("</ul>"); in_ul = False
-                  if s.startswith("### "):
-                      out.append("<h3>" + html.escape(s[4:]) + "</h3>")
-                  elif s:
-                      out.append("<p>" + inline(s) + "</p>")
-          flush_item()
-          if in_ul:
-              out.append("</ul>")
-          open("notes.html", "w").write("\n".join(out))
+          open("notes.md", "w").write(m.group(1).strip() + "\n")
           PYEOF
           echo "--- notes.md ---"; cat notes.md
+
+      - name: Render release notes to HTML for Sparkle
+        run: |
+          # Sparkle shows the appcast <description> as HTML in a WebView, so the
+          # Markdown has to be converted or it renders literally (**bold**, `code`,
+          # and nested/loose lists collapse). cmark is the reference CommonMark
+          # implementation, so the result matches how the CHANGELOG renders on
+          # GitHub — including nested sub-lists and multi-paragraph bullets.
+          brew install cmark
+          cmark notes.md > notes.html
+          echo "--- notes.html ---"; cat notes.html
 
       - name: Notarize and staple
         env:
