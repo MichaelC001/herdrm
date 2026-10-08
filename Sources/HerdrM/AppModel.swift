@@ -50,6 +50,9 @@ struct DeviceSessionState {
     /// The agent row's context menu, grouped per plugin. Empty until loaded,
     /// or when the device runs no plugin with actions.
     var pluginActions: [PluginActionGroup] = []
+    /// grazr's accounts, for the menu's Switch to Account list. Nil until
+    /// read, or when the device runs no grazr.
+    var grazrReport: GrazrReport?
 }
 
 struct SSHAuthenticationRequest: Identifiable {
@@ -831,6 +834,92 @@ final class AppModel: ObservableObject {
         // An older server without plugin RPCs keeps an empty menu section.
         guard let actions = try? await service.pluginActions() else { return }
         sessions[deviceID]?.pluginActions = PluginActionGroup.menu(actions)
+        if actions.contains(where: { $0.pluginID == Grazr.pluginID }) {
+            // Not awaited: an SSH round trip must not hold up the connect.
+            Task { await loadGrazrReport(deviceID: deviceID) }
+        } else {
+            sessions[deviceID]?.grazrReport = nil
+        }
+    }
+
+    /// A failed read keeps the last list; the menu only offers what it shows.
+    func loadGrazrReport(deviceID: UUID) async {
+        guard let device = device(deviceID),
+              let output = try? await DeviceFileService(device: device).run(Grazr.readerCommand),
+              let report = try? JSONDecoder().decode(GrazrReport.self, from: output)
+        else { return }
+        sessions[deviceID]?.grazrReport = report
+    }
+
+    /// Moves Claude on `device` to `account` with grazr, like its swap action
+    /// but to the account picked rather than the next one with headroom.
+    func switchGrazrAccount(_ account: GrazrAccount, on device: Device, onFinish: (() -> Void)? = nil) {
+        let title = String(localized: "grazr: switch to \(account.name)")
+        Task {
+            defer { onFinish?() }
+            do {
+                let output = try await DeviceFileService(device: device).run(Grazr.switchCommand(to: account.id))
+                let result = try JSONDecoder().decode(GrazrSwitchResult.self, from: output)
+                if result.ok {
+                    NotificationManager.shared.postPluginResult(
+                        title: title,
+                        body: result.summary ?? String(localized: "Done"),
+                        deviceName: device.name
+                    )
+                } else {
+                    actionError = result.summary.map { "\(title): \($0)" }
+                        ?? String(localized: "\(title) failed")
+                }
+            } catch {
+                actionError = actionErrorMessage(error, device: device)
+            }
+            await loadGrazrReport(deviceID: device.id)
+            await refresh(device.id)
+        }
+    }
+
+    /// Signs a grazr account in again, for one whose login stopped working
+    /// (blocked: authentication_failed). Opens a terminal on the device that
+    /// runs grazr's own enrol for that account: `claude auth login` with an
+    /// isolated config dir, so the account Claude is on is left alone, then
+    /// grazr parks the new credential and lifts the block.
+    func reauthenticateGrazrAccount(_ account: GrazrAccount, on device: Device, workspaceID: String? = nil) {
+        let workspaceID = workspaceID
+            ?? selectedSpace.flatMap { $0.deviceID == device.id ? $0.workspaceID : nil }
+            ?? session(device.id).workspaces.first?.workspaceID
+        Task {
+            do {
+                _ = try await DeviceFileService(device: device).run(Grazr.installReauthCommand)
+                let service = service(for: device)
+                let paneID = try await service.createTab(
+                    workspaceID: workspaceID,
+                    cwd: nil,
+                    label: String(localized: "grazr sign-in")
+                )
+                // Typed once the shell has drawn its prompt; a prompt still
+                // starting up can drop what arrives before it.
+                for _ in 0..<30 {
+                    let screen = try? await service.readPane(paneID: paneID)
+                    if screen?.text.contains(where: { !$0.isWhitespace }) == true { break }
+                    try await Task.sleep(nanoseconds: 100_000_000)
+                }
+                try await service.sendInput(
+                    paneID: paneID,
+                    text: Grazr.reauthInvocation(accountID: account.id, name: account.name)
+                )
+                try await service.sendKeys(paneID: paneID, keys: ["enter"])
+                await refresh(device.id)
+                grazrAccountsDevice = nil
+                isFileManagerActive = false
+                if let workspaceID {
+                    selectedSpace = SpaceRef(deviceID: device.id, workspaceID: workspaceID)
+                }
+                selectedPane = PaneRef(deviceID: device.id, paneID: paneID)
+                selectedShellID = nil
+            } catch {
+                actionError = actionErrorMessage(error, device: device)
+            }
+        }
     }
 
     private func loadAgentCatalog(deviceID: UUID, using service: HerdrService) async {

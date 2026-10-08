@@ -6,6 +6,8 @@ enum SidebarContextMenuItem {
     case item(title: String, action: () -> Void)
     case destructive(title: String, action: () -> Void)
     case submenu(title: String, items: [SidebarContextMenuItem])
+    /// One of a set, ticked when it is the current one; no action greys it out.
+    case choice(title: String, isChecked: Bool, action: (() -> Void)?)
     case separator
 }
 
@@ -91,10 +93,13 @@ struct SpaceRowDragHost: View {
 struct AgentRowDragHost: View {
     let entryID: String
     let pluginActions: [PluginActionGroup]
+    let grazrReport: GrazrReport?
     let onClick: () -> Void
     let onRename: () -> Void
     let onPluginAction: (PluginAction) -> Void
     let onGrazrAccounts: () -> Void
+    let onSwitchGrazrAccount: (GrazrAccount) -> Void
+    let onReauthenticateGrazrAccount: (GrazrAccount) -> Void
     let onMenuOpen: () -> Void
     let onClose: () -> Void
     let onDragStart: (String) -> Void
@@ -132,10 +137,14 @@ struct AgentRowDragHost: View {
                     .item(title: action.menuTitle, action: { onPluginAction(action) })
                 }
                 if group.pluginID == Grazr.pluginID {
-                    actions.insert(contentsOf: [
+                    var accounts: [SidebarContextMenuItem] = [
                         .item(title: String(localized: "Accounts…"), action: onGrazrAccounts),
-                        .separator,
-                    ], at: 0)
+                    ]
+                    if let switchMenu = grazrSwitchMenu {
+                        accounts.append(switchMenu)
+                    }
+                    accounts += grazrSignInItems
+                    actions.insert(contentsOf: accounts + [.separator], at: 0)
                 }
                 items.append(.submenu(title: group.name, items: actions))
             }
@@ -143,6 +152,39 @@ struct AgentRowDragHost: View {
         items.append(.separator)
         items.append(.destructive(title: String(localized: "Close Agent…"), action: onClose))
         return items
+    }
+
+    /// grazr's accounts as last read, the active one ticked. A blocked one
+    /// says why and cannot be picked.
+    private var grazrSwitchMenu: SidebarContextMenuItem? {
+        guard let report = grazrReport, report.accounts.count > 1 else { return nil }
+        let now = Date()
+        let accounts: [SidebarContextMenuItem] = report.sortedAccounts.map { account in
+            var title = account.name
+            if account.id != report.active, let block = report.block(for: account, now: now) {
+                title = String(localized: "\(account.name) (blocked: \(block.reason))")
+            }
+            return .choice(
+                title: title,
+                isChecked: account.id == report.active,
+                action: report.canSwitch(to: account, now: now) ? { onSwitchGrazrAccount(account) } : nil
+            )
+        }
+        return .submenu(title: String(localized: "Switch to Account"), items: accounts)
+    }
+
+    /// One per account whose login grazr found refused.
+    private var grazrSignInItems: [SidebarContextMenuItem] {
+        guard let report = grazrReport else { return [] }
+        let now = Date()
+        return report.sortedAccounts
+            .filter { report.needsSignIn($0, now: now) }
+            .map { account in
+                .item(
+                    title: String(localized: "Re-authenticate \(account.name)…"),
+                    action: { onReauthenticateGrazrAccount(account) }
+                )
+            }
     }
 }
 
@@ -268,6 +310,17 @@ final class SidebarRowDragNSView: NSView, NSDraggingSource {
                 let menuItem = menu.addItem(withTitle: title, action: #selector(runMenuItem(_:)), keyEquivalent: "")
                 menuItem.target = self
                 menuItem.representedObject = MenuAction(action)
+            case .choice(let title, let isChecked, let action):
+                let menuItem = menu.addItem(
+                    withTitle: title,
+                    action: action == nil ? nil : #selector(runMenuItem(_:)),
+                    keyEquivalent: ""
+                )
+                menuItem.state = isChecked ? .on : .off
+                if let action {
+                    menuItem.target = self
+                    menuItem.representedObject = MenuAction(action)
+                }
             case .submenu(let title, let children):
                 let menuItem = menu.addItem(withTitle: title, action: nil, keyEquivalent: "")
                 menuItem.submenu = buildMenu(children)

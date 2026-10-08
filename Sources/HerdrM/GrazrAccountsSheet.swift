@@ -11,6 +11,14 @@ struct GrazrAccountsSheet: View {
     @State private var failure: String?
     @State private var loading = false
     @State private var swapping = false
+    /// grazr's word when Refresh could not ask Claude, shown by the button.
+    @State private var refreshNote: String?
+    @AppStorage("grazr.accounts.view") private var view = AccountsView.list
+    @AppStorage("grazr.accounts.dialWindow") private var dialWindow = GrazrDialWindow.week
+
+    enum AccountsView: String {
+        case list, dial, clock
+    }
 
     private var swapAction: PluginAction? {
         model.session(device.id).pluginActions
@@ -20,11 +28,26 @@ struct GrazrAccountsSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SheetHeader(
-                systemImage: "person.2",
-                title: String(localized: "Claude Accounts"),
-                subtitle: subtitle
-            )
+            HStack(spacing: 0) {
+                SheetHeader(
+                    systemImage: "person.2",
+                    title: String(localized: "Claude Accounts"),
+                    subtitle: subtitle
+                )
+                Picker("View", selection: $view) {
+                    Image(systemName: "list.bullet").tag(AccountsView.list)
+                        .accessibilityLabel("List")
+                    Image(systemName: "chart.pie").tag(AccountsView.dial)
+                        .accessibilityLabel("Dial")
+                    Image(systemName: "clock").tag(AccountsView.clock)
+                        .accessibilityLabel("Clock")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .help("Show the accounts as a list, grazr's rotation dial, or a clock of who runs when")
+                .padding(.trailing, 16)
+            }
             Rectangle().fill(Theme.hairline).frame(height: 1)
 
             content
@@ -34,13 +57,20 @@ struct GrazrAccountsSheet: View {
 
             HStack {
                 Button {
-                    Task { await load() }
+                    Task { await load(askClaude: true) }
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
+                .help("Ask Claude for every account's usage now, then reload")
                 .disabled(loading)
                 if loading || swapping {
                     ProgressView().controlSize(.small)
+                } else if let refreshNote {
+                    Text(refreshNote)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.warning)
+                        .lineLimit(2)
+                        .help(refreshNote)
                 }
                 Spacer()
                 if let swapAction {
@@ -85,11 +115,43 @@ struct GrazrAccountsSheet: View {
                 message(String(localized: "grazr is not installed on \(device.name)."), systemImage: "person.crop.circle.badge.questionmark")
             } else if report.accounts.isEmpty {
                 message(String(localized: "No accounts enrolled yet."), systemImage: "person.crop.circle.badge.plus")
+            } else if view == .dial || view == .clock {
+                ScrollView {
+                    VStack(spacing: 6) {
+                        HStack {
+                            Spacer()
+                            Picker("Window", selection: $dialWindow) {
+                                Text("Week").tag(GrazrDialWindow.week)
+                                Text(view == .clock ? "24h" : "5h").tag(GrazrDialWindow.session)
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .fixedSize()
+                            .help(view == .clock ? "How far ahead the clock looks" : "Which window fills the slices")
+                        }
+                        // Redraws each minute so a window past its reset shows as refilled.
+                        TimelineView(.periodic(from: .now, by: 60)) { context in
+                            if view == .clock {
+                                GrazrAccountsClock(report: report, span: dialWindow, now: context.date)
+                            } else {
+                                GrazrAccountsDial(report: report, window: dialWindow, now: context.date)
+                            }
+                        }
+                    }
+                    .padding(16)
+                }
             } else {
                 ScrollView {
                     VStack(spacing: 10) {
                         ForEach(report.sortedAccounts) { account in
-                            GrazrAccountCard(report: report, account: account, now: Date())
+                            GrazrAccountCard(
+                                report: report,
+                                account: account,
+                                now: Date(),
+                                switching: swapping,
+                                onSwitch: { switchTo(account) },
+                                onReauthenticate: { model.reauthenticateGrazrAccount(account, on: device) }
+                            )
                         }
                     }
                     .padding(16)
@@ -114,9 +176,25 @@ struct GrazrAccountsSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func load() async {
+    private func switchTo(_ account: GrazrAccount) {
+        swapping = true
+        model.switchGrazrAccount(account, on: device) {
+            swapping = false
+            Task { await load() }
+        }
+    }
+
+    /// Reads grazr's records. With `askClaude`, has grazr refresh them from
+    /// Claude first: its records of parked accounts otherwise stay as they
+    /// were when grazr left them, so a plain reload shows nothing new.
+    private func load(askClaude: Bool = false) async {
         loading = true
         defer { loading = false }
+        if askClaude {
+            let output = try? await DeviceFileService(device: device).run(Grazr.refreshCommand)
+            let result = output.flatMap { try? JSONDecoder().decode(GrazrSwitchResult.self, from: $0) }
+            refreshNote = result?.ok == false ? result?.summary : nil
+        }
         do {
             let output = try await DeviceFileService(device: device).run(Grazr.readerCommand)
             report = try JSONDecoder().decode(GrazrReport.self, from: output)
@@ -131,6 +209,9 @@ private struct GrazrAccountCard: View {
     let report: GrazrReport
     let account: GrazrAccount
     let now: Date
+    let switching: Bool
+    let onSwitch: () -> Void
+    let onReauthenticate: () -> Void
 
     private var isActive: Bool { account.id == report.active }
 
@@ -150,6 +231,15 @@ private struct GrazrAccountCard: View {
                     badge(String(localized: "Not in ACCOUNTS"), color: Theme.textTertiary)
                 }
                 Spacer(minLength: 0)
+                if report.canSwitch(to: account, now: now) {
+                    Button("Switch", action: onSwitch)
+                        .controlSize(.small)
+                        .disabled(switching)
+                } else if report.needsSignIn(account, now: now) {
+                    Button("Re-authenticate…", action: onReauthenticate)
+                        .controlSize(.small)
+                        .help("Sign in to this account again in a terminal on the device")
+                }
             }
             if let organization = account.organization, organization != "\(account.name)'s Organization" {
                 Text(organization)
@@ -183,7 +273,7 @@ private struct GrazrAccountCard: View {
 
     private func windowRow(_ window: GrazrWindow) -> some View {
         let left = window.left(now: now)
-        let color = tint(left: left, threshold: report.threshold(for: window))
+        let color = GrazrStyle.tint(left: left, threshold: report.threshold(for: window))
         return HStack(spacing: 8) {
             Text(window.label)
                 .font(.system(size: 11.5, weight: .medium))
@@ -205,19 +295,10 @@ private struct GrazrAccountCard: View {
         }
     }
 
-    private func tint(left: Int, threshold: Int?) -> Color {
-        if left <= 2 { return Theme.danger }
-        if let threshold, left < threshold { return Theme.warning }
-        return Theme.success
-    }
-
     private func resetText(_ window: GrazrWindow) -> String {
         guard let resetsAt = window.resetsAt else { return "" }
         guard window.isOpen(now: now) else { return String(localized: "reset since") }
-        let format = Calendar.current.isDate(resetsAt, inSameDayAs: now)
-            ? Date.FormatStyle().hour().minute()
-            : Date.FormatStyle().weekday(.abbreviated).hour().minute()
-        return String(localized: "resets \(resetsAt.formatted(format))")
+        return String(localized: "resets \(GrazrStyle.time(resetsAt, now: now))")
     }
 
     private func badge(_ text: String, color: Color) -> some View {

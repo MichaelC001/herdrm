@@ -466,10 +466,15 @@ struct SidebarView: View {
             AgentRowDragHost(
                 entryID: entry.id,
                 pluginActions: model.session(entry.device.id).pluginActions,
+                grazrReport: model.session(entry.device.id).grazrReport,
                 onClick: { model.selectAgent(entry.ref) },
                 onRename: { model.agentToRename = entry },
                 onPluginAction: { model.runPluginAction($0, for: entry) },
                 onGrazrAccounts: { model.grazrAccountsDevice = entry.device },
+                onSwitchGrazrAccount: { model.switchGrazrAccount($0, on: entry.device) },
+                onReauthenticateGrazrAccount: {
+                    model.reauthenticateGrazrAccount($0, on: entry.device, workspaceID: entry.agent.workspaceID)
+                },
                 onMenuOpen: { Task { await model.loadPluginActions(deviceID: entry.device.id) } },
                 onClose: { model.requestClosePane(entry.ref, name: entry.title) },
                 onDragStart: { draggingAgentID = $0 },
