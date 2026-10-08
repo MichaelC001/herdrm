@@ -29,16 +29,24 @@ build: gen
 # library validation refuses the bundled Sparkle/Tailcat frameworks when the app
 # has no Team ID (dyld: "different Team IDs"), so the tree is re-signed without
 # the runtime option — fine for a locally built copy, not for distribution.
+#
+# Version stamps mirror CI (tag → MARKETING_VERSION, run number → CFBundleVersion)
+# so the local build outranks the published release: project.yml's 0.1.0/1
+# would make Sparkle offer the App Store-style release as an "update" and
+# silently replace the fixed binary with the older one.
+LOCAL_VERSION = $(shell git describe --tags --always | sed 's/^v//')
+LOCAL_BUILD = $(shell git rev-list --count HEAD)
 release: gen
-	xcodebuild -project HerdrM.xcodeproj -scheme HerdrM -configuration Release -derivedDataPath build build CODE_SIGN_IDENTITY="$(CODE_SIGN_IDENTITY)" CODE_SIGN_STYLE=Manual -skipPackagePluginValidation | tail -5
+	xcodebuild -project HerdrM.xcodeproj -scheme HerdrM -configuration Release -derivedDataPath build build CODE_SIGN_IDENTITY="$(CODE_SIGN_IDENTITY)" CODE_SIGN_STYLE=Manual -skipPackagePluginValidation MARKETING_VERSION="$(LOCAL_VERSION)" CURRENT_PROJECT_VERSION="$(LOCAL_BUILD)" | tail -5
 	codesign --force --deep --sign - build/Build/Products/Release/herdrm.app
 
-# Replace /Applications/HerdrM.app with the local Release build (backs up the
-# previous copy next to it once, as HerdrM.previous.app).
+# Replace /Applications/HerdrM.app with the local Release build. The copy it replaces
+# is kept as build/HerdrM.previous.zip, refreshed on every install — zipped, not a
+# second .app, so Launch Services and Sparkle never see two bundles with one ID.
 install: release
 	pkill -x herdrm || true
 	sleep 1
-	if [ -d /Applications/HerdrM.app ] && [ ! -d /Applications/HerdrM.previous.app ]; then ditto /Applications/HerdrM.app /Applications/HerdrM.previous.app; fi
+	if [ -d /Applications/HerdrM.app ]; then ditto -c -k --keepParent /Applications/HerdrM.app build/HerdrM.previous.zip; fi
 	rm -rf /Applications/HerdrM.app
 	ditto build/Build/Products/Release/herdrm.app /Applications/HerdrM.app
 	open /Applications/HerdrM.app
