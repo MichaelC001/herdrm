@@ -2337,6 +2337,22 @@
         }
       }
     },
+    "Changing the tailcat token reconnects the device" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Changing the tailcat token reconnects the device"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改 tailcat 令牌会重新连接该设备"
+          }
+        }
+      }
+    },
     "Name" : {
       "localizations" : {
         "en" : {

@@ -1023,6 +1023,32 @@ final class AppModel: ObservableObject {
         store.save(devices)
     }
 
+    /// Renames a tailcat device and/or replaces its token. A new token
+    /// reconnects the device so its bridge comes back up with it.
+    func updateTailcatDevice(_ id: UUID, name: String, token: String) {
+        guard let index = devices.firstIndex(where: { $0.id == id }), devices[index].isTailcat else { return }
+        let stored = (try? TailcatCredentialStore.token(for: id)) ?? nil
+        if stored != token {
+            do {
+                try TailcatCredentialStore.setToken(token, for: id)
+            } catch {
+                actionError = error.localizedDescription
+                return
+            }
+            let stale = detachSession(id)
+            Task { [weak self] in
+                // A live bridge is reused as-is by ensureUp, so it must be gone
+                // before the session reconnects with the new token.
+                await stale?.disconnect()
+                await TailcatBridgeManager.shared.tearDown(deviceID: id)
+                guard let self, let device = self.device(id) else { return }
+                self.startSession(device)
+            }
+        }
+        devices[index].name = name
+        store.save(devices)
+    }
+
     func removeDevice(_ device: Device) {
         guard !device.isLocal else { return }
         removeSSHPassword(for: device.id)
