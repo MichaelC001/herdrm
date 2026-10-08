@@ -262,40 +262,117 @@ struct SettingsView: View {
 }
 
 struct AgentsSettingsView: View {
-    var model: AppModel
+    @ObservedObject var model: AppModel
     @State private var drafts: [String: String] = AgentBinaryOverrides.load()
+    @State private var argDrafts: [String: String] = [:]
+    @State private var yoloMode = AgentLaunchArgsStore.yoloMode()
 
-    /// Kinds the picker knows how to start. The lookup command is `kind`,
-    /// except Cursor which installs as `cursor-agent`.
-    private static let kinds: [(kind: String, label: String, hint: String)] = [
-        ("claude", "Claude", "claude"),
-        ("codex", "Codex", "codex"),
-        ("cursor", "Cursor", "cursor-agent"),
-        ("gemini", "Gemini", "gemini"),
-        ("grok", "Grok", "grok"),
-        ("kimi", "Kimi", "kimi"),
-        ("opencode", "OpenCode", "opencode"),
-        ("pi", "Pi", "pi"),
-        ("omp", "Oh My Pi", "omp"),
-        ("copilot", "Copilot", "copilot"),
+    /// Kinds herdr ships manifests for (plus OMP, which starts through its
+    /// lifecycle extension). Kinds a connected server advertises beyond these
+    /// are appended with their raw name.
+    private static let knownKinds: [(kind: String, label: String)] = [
+        ("claude", "Claude"),
+        ("codex", "Codex"),
+        ("droid", "Droid"),
+        ("agy", "Antigravity"),
+        ("cursor", "Cursor"),
+        ("gemini", "Gemini"),
+        ("grok", "Grok"),
+        ("kimi", "Kimi"),
+        ("opencode", "OpenCode"),
+        ("copilot", "Copilot"),
+        ("devin", "Devin"),
+        ("cline", "Cline"),
+        ("kiro", "Kiro"),
+        ("amp", "Amp"),
+        ("hermes", "Hermes"),
+        ("kilo", "Kilo"),
+        ("qodercli", "Qoder"),
+        ("qwen", "Qwen Code"),
+        ("letta", "Letta"),
+        ("maki", "Maki"),
+        ("muse", "Muse"),
+        ("pi", "Pi"),
+        ("omp", "Oh My Pi"),
     ]
+
+    private var kinds: [(kind: String, label: String)] {
+        var rows = Self.knownKinds
+        for session in model.sessions.values {
+            for kind in session.agentCatalog.kinds where !rows.contains(where: { $0.kind == kind }) {
+                rows.append((kind, kind))
+            }
+        }
+        return rows
+    }
 
     var body: some View {
         Form {
             Section {
-                ForEach(Self.kinds, id: \.kind) { row in
-                    TextField(row.label, text: binding(row.kind), prompt: Text("Automatic"))
-                        .font(.system(size: 12).monospaced())
-                        .help(String(localized: "Command or path for \(row.hint). Leave empty to detect."))
+                Toggle(isOn: yoloBinding) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("YOLO mode")
+                        Text("Pre-fills each agent’s permission-bypass flag (for example droid --auto high) into its launch arguments. Turning it off removes those flags and keeps your other arguments.")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
+            }
+
+            Section {
+                ForEach(kinds, id: \.kind) { row in
+                    LabeledContent(row.label) {
+                        HStack(spacing: 6) {
+                            TextField("", text: argBinding(row.kind), prompt: Text("No extra arguments"))
+                                .labelsHidden()
+                                .font(.system(size: 11.5).monospaced())
+                                .help(String(localized: "Arguments appended to \(HerdrService.binaryName(for: row.kind)) when starting this agent."))
+                            if AgentLaunchArgsStore.stored()[row.kind] != nil {
+                                Button {
+                                    AgentLaunchArgsStore.reset(row.kind)
+                                    argDrafts[row.kind] = AgentLaunchArgsStore.resolved(for: row.kind)
+                                } label: {
+                                    Image(systemName: "arrow.uturn.backward")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Reset to default")
+                            }
+                        }
+                    }
+                }
+            } header: {
+                Text("Launch Arguments")
+            } footer: {
+                Text("Shell-style: quote values with spaces. The New Agent sheet starts from these and lets you edit them for one launch.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                ForEach(kinds, id: \.kind) { row in
+                    LabeledContent(row.label) {
+                        TextField("", text: binding(row.kind), prompt: Text("Automatic"))
+                            .labelsHidden()
+                            .font(.system(size: 11.5).monospaced())
+                            .help(String(localized: "Command or path for \(HerdrService.binaryName(for: row.kind)). Leave empty to detect."))
+                    }
+                }
+            } header: {
+                Text("Binaries on This Mac")
             } footer: {
                 Text("Finder-launched apps don’t inherit your terminal PATH. herdrm captures it once from a login + interactive shell, then looks up these names. A path here is an escape hatch when detection picks the wrong binary.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(20)
-        .onAppear { drafts = AgentBinaryOverrides.load() }
+        .formStyle(.grouped)
+        .frame(height: 560)
+        .onAppear {
+            drafts = AgentBinaryOverrides.load()
+            yoloMode = AgentLaunchArgsStore.yoloMode()
+            reloadArgDrafts()
+        }
         .onChange(of: drafts) { _, _ in commit() }
         .onDisappear(perform: commit)
         .onSubmit(commit)
@@ -306,10 +383,40 @@ struct AgentsSettingsView: View {
         model.reloadAgentCatalog(deviceID: Device.local.id)
     }
 
+    private func reloadArgDrafts() {
+        argDrafts = Dictionary(uniqueKeysWithValues: kinds.map {
+            ($0.kind, AgentLaunchArgsStore.resolved(for: $0.kind))
+        })
+    }
+
+    private var yoloBinding: Binding<Bool> {
+        Binding(
+            get: { yoloMode },
+            set: { enabled in
+                yoloMode = enabled
+                AgentLaunchArgsStore.setYoloMode(enabled)
+                reloadArgDrafts()
+            }
+        )
+    }
+
     private func binding(_ kind: String) -> Binding<String> {
         Binding(
             get: { drafts[kind] ?? "" },
             set: { drafts[kind] = $0 }
+        )
+    }
+
+    private func argBinding(_ kind: String) -> Binding<String> {
+        Binding(
+            get: { argDrafts[kind] ?? AgentLaunchArgsStore.resolved(for: kind) },
+            set: { value in
+                argDrafts[kind] = value
+                // Typing the untouched default back keeps the kind following YOLO mode.
+                if AgentLaunchArgsStore.stored()[kind] == nil,
+                   value == AgentLaunchArgsStore.resolved(for: kind) { return }
+                AgentLaunchArgsStore.save(value, for: kind)
+            }
         )
     }
 }
