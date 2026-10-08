@@ -471,6 +471,30 @@ public actor HerdrService {
         return Self.processInfoShowsShellInitialization(processInfo)
     }
 
+    /// The pane's shell pid and its foreground processes — on the device's own
+    /// host, so they line up with the machine stats sampler's process table.
+    public func paneProcessPIDs(paneID: String) async throws -> Set<Int32> {
+        let result = try await client().request(
+            method: "pane.process_info",
+            params: .object(["pane_id": .string(paneID)])
+        )
+        guard let processInfo = result["process_info"] else { return [] }
+        return Self.processInfoPIDs(processInfo)
+    }
+
+    static func processInfoPIDs(_ processInfo: JSONValue) -> Set<Int32> {
+        var pids: Set<Int32> = []
+        if let shell = integer(processInfo["shell_pid"]), let pid = Int32(exactly: shell) {
+            pids.insert(pid)
+        }
+        for process in processInfo["foreground_processes"]?.arrayValue ?? [] {
+            if let value = integer(process["pid"]), let pid = Int32(exactly: value) {
+                pids.insert(pid)
+            }
+        }
+        return pids
+    }
+
     static func processInfoShowsShellInitialization(_ processInfo: JSONValue) -> Bool {
         guard let shellPID = integer(processInfo["shell_pid"]),
               integer(processInfo["foreground_process_group_id"]) == shellPID

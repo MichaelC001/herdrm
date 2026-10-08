@@ -51,8 +51,31 @@ struct RootView: View {
                             .hidden()
                     )
             }
+
+            // Machine stats panel, opening upward from the bottom-right meters.
+            if model.showMachineStats, let device = model.statsDevice {
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .onTapGesture { model.showMachineStats = false }
+                MachineStatsPanel(
+                    model: model,
+                    stats: model.machineStats,
+                    device: device,
+                    isPresented: $model.showMachineStats
+                )
+                .padding(.bottom, StatusStripMetrics.height + 6)
+                .padding(.trailing, 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                .transition(.scale(scale: 0.96, anchor: .bottomTrailing).combined(with: .opacity))
+                .background(
+                    Button("") { model.showMachineStats = false }
+                        .keyboardShortcut(.cancelAction)
+                        .hidden()
+                )
+            }
         }
         .animation(.spring(response: 0.25, dampingFraction: 0.85), value: model.showDevicePanel)
+        .animation(.spring(response: 0.25, dampingFraction: 0.85), value: model.showMachineStats)
         .background(
             Button("") { sidebarCollapsed.toggle() }
                 .keyboardShortcut("b", modifiers: .command)
@@ -106,6 +129,11 @@ struct RootView: View {
             Text(model.closeRequest?.message ?? "")
         }
     }
+}
+
+/// Bottom status strip under the terminal; matches the sidebar footer's 40pt.
+enum StatusStripMetrics {
+    static let height: CGFloat = 40
 }
 
 /// Titlebar metrics: 28pt matches the system traffic-light centerline (14pt) exactly.
@@ -303,6 +331,10 @@ struct DetailView: View {
                 .onChange(of: model.isFileManagerActive) { _, active in
                     if active { hasOpenedFileManager = true }
                 }
+            if let device = model.statsDevice {
+                Rectangle().fill(Theme.hairline).frame(height: 1)
+                statusStrip(device: device)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.contentBackground.ignoresSafeArea())
@@ -323,6 +355,24 @@ struct DetailView: View {
         .onAppear {
             if model.isFileManagerActive { hasOpenedFileManager = true }
         }
+    }
+
+    /// Bottom strip under the terminal: the host's machine stats, right-aligned.
+    /// As tall as the sidebar footer, so the two read as one bottom bar.
+    private func statusStrip(device: Device) -> some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            MachineStatsIndicator(
+                stats: model.machineStats,
+                device: device,
+                isOpen: model.showMachineStats
+            ) {
+                model.showMachineStats.toggle()
+            }
+        }
+        .padding(.trailing, 10)
+        .frame(height: StatusStripMetrics.height)
+        .background(Theme.contentBackground)
     }
 
     // MARK: - Titlebar strip (28pt, traditional)

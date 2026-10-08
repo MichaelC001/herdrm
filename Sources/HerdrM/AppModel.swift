@@ -201,6 +201,10 @@ final class AppModel: ObservableObject {
     @Published var selectedShellID: UUID?
     /// In-window device panel (NSPopover crashes in ViewBridge on macOS 26+ betas).
     @Published var showDevicePanel = false
+    /// Machine stats under the terminal: the sampler state lives in its own object so its
+    /// two-second ticks don't republish the whole app model.
+    let machineStats = MachineStatsModel()
+    @Published var showMachineStats = false
     @Published var deviceToEdit: Device?
     @Published var sshAuthenticationRequest: SSHAuthenticationRequest?
     @Published var spaceToRename: SpaceEntry?
@@ -618,6 +622,13 @@ final class AppModel: ObservableObject {
 
     var selectedShell: ShellSession? {
         selectedShellID.flatMap { id in shellSessions.first { $0.id == id } }
+    }
+
+    /// The host the machine stats follow: the selected pane's device.
+    var statsDevice: Device? {
+        guard !isFileManagerActive else { return nil }
+        guard let device = selectedShell?.device ?? selectedAttachedEntry?.device else { return nil }
+        return MachineStatsStream.isSupported(device) ? device : nil
     }
 
     /// Every click opens another terminal, like New Agent opens another agent.
