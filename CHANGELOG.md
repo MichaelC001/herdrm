@@ -19,7 +19,77 @@ the Sparkle update description — a release without a section here fails CI.
 
   An agent's child processes (MCP servers, shells, builds) count toward that
   agent. Each device needs just one long-lived ssh session, which closes when
-  you switch away or the window is hidden.
+  you switch away or the window is hidden. (#111, thanks @senadaruc!)
+- **Custom launch arguments per agent.** Settings → Agents has an arguments
+  field for every agent (`droid --auto high`, `agy '--dangerously-skip-permissions'`,
+  `--model …`), parsed shell-style, and the New Agent sheet starts from those
+  defaults so you can tweak a single launch. A global **YOLO mode** switch
+  pre-fills each agent's permission-bypass flag into its arguments, and turning
+  it off strips just those flags. YOLO flags now also cover Droid, Antigravity,
+  Kimi, Devin, Cline, Hermes, Kiro, Amp, Qoder, Qwen Code and Muse.
+  (#117, thanks @thedavidweng!)
+- **Switch Claude to the grazr account you pick.** An agent's grazr menu has a
+  Switch to Account list (the active account ticked, a blocked one greyed out
+  with its reason), and each card in the Accounts window has a Switch button.
+  grazr's own swap only goes to the next account with headroom; this runs that
+  same swap, with its lock, pane tags and log, pinned to the chosen account.
+  (#116, thanks @senadaruc!)
+- **Re-authenticate a grazr account** whose login stopped working (Blocked:
+  authentication_failed), from its card or the agent's grazr menu. A terminal
+  opens on the device and runs grazr's own enrol for that account
+  (`claude auth login` in an isolated config dir, so the account Claude is on
+  stays put); grazr keeps the new login and lifts the block. Signing in as a
+  different account changes nothing. (#116, thanks @senadaruc!)
+- **grazr rotation dial and clock** in the Accounts window. The dial shows the
+  rotation as a clock face — one slice per account in rotation order, filled by
+  what each has left this week or in the 5-hour window, a hand at the active
+  account's usage, a tick at grazr's swap threshold, and the next account
+  marked; per-model inner rings (e.g. Fable) and a red hand-off when nothing
+  has headroom. The clock shows the rotation over time (24-hour or weekly face)
+  coloured by the account grazr is expected to be on, with swap ticks and
+  refill markers. The List | Dial choice is remembered. (#116, thanks @senadaruc!)
+- The Accounts window's **Refresh** asks Claude for every account's usage
+  through grazr (`grazr.py refresh`, grazr 0.4.7+senad.2 or later) before
+  reloading, so an account that had refilled or had its limit lifted no longer
+  keeps showing as spent. (#116, thanks @senadaruc!)
+- Agent and terminal panes tell herdr that HerdrM's terminal draws Kitty
+  graphics (`HERDR_ATTACH_GRAPHICS=1` on the attach command, set on the far
+  side for remote devices). With a herdr that sends pane images to attach
+  clients, pictures an agent shows — such as Claude Code's pasted-image
+  thumbnails — appear in HerdrM, including on SSH devices. herdr versions
+  without that support ignore the variable. (#115, thanks @senadaruc!)
+
+### Changed
+- The New Agent sheet's "Bypass permissions" switch became **YOLO mode**, which
+  edits the visible arguments instead of silently appending a flag. The old
+  default carries over. (#117, thanks @thedavidweng!)
+
+### Fixed
+- New Agent works on a device that has no Space left. herdr closes a Space
+  together with its last pane, so closing the last terminal could leave a
+  device with none, and New Agent then failed with "workspace_not_found: no
+  active workspace". It now creates a Space (in your home folder on this Mac)
+  and starts the agent there, and the sheet says so beforehand. Closing the
+  last pane of a Space now also warns that herdr closes the Space too.
+  (#114, thanks @senadaruc!)
+- Editing a tailcat device now shows its tailcat token, not an empty SSH target
+  field; a name-only save no longer reconnects, and saving can no longer turn a
+  tailcat device into an SSH device and orphan its token. (#112, thanks @stu43005!)
+- Tailcat devices no longer offer operations their tunnel can't do: New Terminal
+  hides Standalone, New Space hides the folder browser (full paths like `C:\…`
+  still work for Windows hosts), and the Files transfer picker leaves them out.
+  Each only showed an error before. (#113, thanks @stu43005!)
+- A remote device no longer fails to connect with "SSH tunnel failed: ssh exited
+  0" when your ssh config shares connections (`ControlMaster auto`). If another
+  ssh to the same host was already running (Mutagen, a terminal, another app),
+  the tunnel was handed to that connection and herdrm's own ssh exited at once.
+  The tunnel now always opens its own connection. (#119, thanks @senadaruc!)
+- Remote devices no longer leave `ssh` tunnels running after herdrm is gone.
+  Quitting already closed them, but stopping the app with `kill`/`pkill` skipped
+  that step, and a crash or force quit left each tunnel up with its own
+  connection to the host. herdrm now treats `kill` as a normal quit, and at
+  launch it stops tunnels left behind by an earlier run and removes their
+  sockets. (#120, thanks @senadaruc!)
 
 ## [0.6.11] - 2026-10-03
 
