@@ -7,6 +7,8 @@ the Sparkle update description — a release without a section here fails CI.
 
 ## [Unreleased]
 
+## [0.6.12] - 2026-10-07
+
 ### Added
 - **Live machine stats.** A strip under the terminal shows small CPU, RAM and
   Disk meters at its right end, lined up with the sidebar's device footer. They
