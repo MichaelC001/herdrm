@@ -17,7 +17,21 @@ the Sparkle update description — a release without a section here fails CI.
   marks the selected pane. Zoomed tabs and single-pane tabs look as before. Teams
   of coding agents spawned side by side (pi-team-panes, Claude Code teammates)
   are readable in one view. Settings › Terminal › "Show every pane of the
-  selected tab" turns it off.
+  selected tab" turns it off, as does Terminal › Show Tab Panes (⇧⌘L).
+- **Keyboard control of herdr panes.** The Terminal menu gains herdr's own
+  splits, Split Pane Right (⌃⇧D) and Split Pane Down (⌃⇧S), which open a shell
+  in the selected pane's directory and move the keyboard into it; Next Pane and
+  Previous Pane (⌃⇧→ / ⌃⇧←) cycle through the tab in reading order; the ⌥⌘
+  arrows that move focus inside the ⌘D split move between herdr panes when that
+  split is closed; Zoom Pane (⇧⌘Z) is herdr's `pane.zoom`, so the TUI zooms the
+  same pane; Close Pane… (⇧⌘W) is the sidebar's confirmed close for the pane
+  that has the keyboard, with the selection moving on to the next pane of the
+  tab.
+
+### Fixed
+- Return confirms the Close agent/terminal dialog. The destructive button had no
+  default-action binding, so Return (and Tab, Return) did nothing and the dialog
+  could only be dismissed with the pointer. Escape still cancels.
 
 ## [0.6.11] - 2026-10-03
 
