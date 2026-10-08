@@ -223,3 +223,56 @@ public enum TabLayoutGeometry {
         }
     }
 }
+
+/// Which way to look for a neighbouring pane; the `pane.focus_direction` values.
+public enum PaneNeighborDirection: String, Sendable {
+    case left, right, up, down
+}
+
+extension TabLayoutGeometry {
+    /// The pane next to `paneID` in `direction`: the nearest one whose edge faces
+    /// it and that shares some of its extent on the other axis; ties go to the one
+    /// overlapping most. Solved on a unit square, so it is independent of the
+    /// window. Nil at the edge of the tab or for an unknown pane.
+    public static func neighbor(of paneID: String, in root: LayoutNode, direction: PaneNeighborDirection) -> String? {
+        let frames = solve(root, in: CGRect(x: 0, y: 0, width: 10_000, height: 10_000), gap: 0).panes
+        guard let origin = frames.first(where: { $0.paneID == paneID })?.rect else { return nil }
+        let epsilon: CGFloat = 1
+        var best: (paneID: String, distance: CGFloat, overlap: CGFloat)?
+        for frame in frames where frame.paneID != paneID {
+            let rect = frame.rect
+            let distance: CGFloat
+            let overlap: CGFloat
+            switch direction {
+            case .left:
+                distance = origin.minX - rect.maxX
+                overlap = verticalOverlap(origin, rect)
+            case .right:
+                distance = rect.minX - origin.maxX
+                overlap = verticalOverlap(origin, rect)
+            case .up:
+                distance = origin.minY - rect.maxY
+                overlap = horizontalOverlap(origin, rect)
+            case .down:
+                distance = rect.minY - origin.maxY
+                overlap = horizontalOverlap(origin, rect)
+            }
+            guard distance >= -epsilon, overlap > 0 else { continue }
+            if let current = best,
+               distance > current.distance + epsilon
+                   || (abs(distance - current.distance) <= epsilon && overlap <= current.overlap) {
+                continue
+            }
+            best = (frame.paneID, distance, overlap)
+        }
+        return best?.paneID
+    }
+
+    private static func verticalOverlap(_ a: CGRect, _ b: CGRect) -> CGFloat {
+        max(0, min(a.maxY, b.maxY) - max(a.minY, b.minY))
+    }
+
+    private static func horizontalOverlap(_ a: CGRect, _ b: CGRect) -> CGFloat {
+        max(0, min(a.maxX, b.maxX) - max(a.minX, b.minX))
+    }
+}

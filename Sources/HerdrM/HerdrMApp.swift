@@ -39,6 +39,12 @@ private struct SplitAxisFocusedValueKey: FocusedValueKey {
     typealias Value = SplitAxis
 }
 
+/// Same reasoning as the split axis: whether a tab layout is on screen travels as
+/// a value so the pane-navigation items enable and disable with it.
+private struct TabLayoutActiveFocusedValueKey: FocusedValueKey {
+    typealias Value = Bool
+}
+
 extension FocusedValues {
     var appModel: AppModel? {
         get { self[AppModelFocusedValueKey.self] }
@@ -48,6 +54,11 @@ extension FocusedValues {
     var splitAxis: SplitAxis? {
         get { self[SplitAxisFocusedValueKey.self] }
         set { self[SplitAxisFocusedValueKey.self] = newValue }
+    }
+
+    var tabLayoutActive: Bool? {
+        get { self[TabLayoutActiveFocusedValueKey.self] }
+        set { self[TabLayoutActiveFocusedValueKey.self] = newValue }
     }
 }
 
@@ -60,6 +71,8 @@ struct HerdrMApp: App {
     @AppStorage(TerminalDefaults.tabLayoutKey) private var tabLayoutEnabled = true
     @FocusedValue(\.appModel) private var focusedModel
     @FocusedValue(\.splitAxis) private var focusedSplitAxis
+    @FocusedValue(\.tabLayoutActive) private var focusedTabLayoutActive
+    private var tabLayoutActive: Bool { focusedTabLayoutActive == true }
 
     private let updaterController: SPUStandardUpdaterController
 
@@ -129,6 +142,27 @@ struct HerdrMApp: App {
                 Button("Zoom Pane") { focusedModel?.toggleSelectedPaneZoom() }
                     .keyboardShortcut("z", modifiers: [.command, .shift])
                     .disabled(focusedModel == nil)
+                // herdr's own splits, next to the local ⌘D shell split above. The new
+                // pane is a shell in the selected pane's directory.
+                Button("Split Pane Right") { focusedModel?.splitSelectedPane(.right) }
+                    .keyboardShortcut("d", modifiers: [.control, .shift])
+                    .disabled(focusedModel?.selectedAttachedEntry == nil)
+                Button("Split Pane Down") { focusedModel?.splitSelectedPane(.down) }
+                    .keyboardShortcut("s", modifiers: [.control, .shift])
+                    .disabled(focusedModel?.selectedAttachedEntry == nil)
+                // Control-shift arrows: no agent CLI binds them (pi takes ctrl-shift
+                // up/down for prompt jumps), and they read as "move over" in a column
+                // of workers, where directional focus would stop at the first one.
+                Button("Next Pane") { focusedModel?.focusPane(offset: 1) }
+                    .keyboardShortcut(.rightArrow, modifiers: [.control, .shift])
+                    .disabled(!tabLayoutActive)
+                Button("Previous Pane") { focusedModel?.focusPane(offset: -1) }
+                    .keyboardShortcut(.leftArrow, modifiers: [.control, .shift])
+                    .disabled(!tabLayoutActive)
+                // The sidebar's confirmed close, for the pane that has the keyboard.
+                Button("Close Pane…") { focusedModel?.requestCloseSelectedPane() }
+                    .keyboardShortcut("w", modifiers: [.command, .shift])
+                    .disabled(focusedModel?.selectedAttachedEntry == nil)
 
                 Divider()
 
@@ -139,28 +173,29 @@ struct HerdrMApp: App {
                 // the arrows stayed frozen on the axis that was current at launch.
                 // Labels name the direction so no two rows read the same.
                 //
-                // Focus is directional and idempotent: the left/top pane is always the
-                // agent, the right/bottom one always the shell.
+                // Focus is directional and idempotent: in the ⌘D split the left/top
+                // pane is always the agent, the right/bottom one always the shell.
+                // Without that split, a tab layout moves to the neighbouring herdr pane.
                 Button("Focus Left Pane") {
-                    if let model = focusedModel { focusSplitSide(.agent, in: model) }
+                    if let model = focusedModel { focusDirection(.left, splitSide: .agent, in: model) }
                 }
                 .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
-                .disabled(focusedSplitAxis != .vertical)
+                .disabled(!(focusedSplitAxis == .vertical || (focusedSplitAxis == nil && tabLayoutActive)))
                 Button("Focus Right Pane") {
-                    if let model = focusedModel { focusSplitSide(.shell, in: model) }
+                    if let model = focusedModel { focusDirection(.right, splitSide: .shell, in: model) }
                 }
                 .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
-                .disabled(focusedSplitAxis != .vertical)
+                .disabled(!(focusedSplitAxis == .vertical || (focusedSplitAxis == nil && tabLayoutActive)))
                 Button("Focus Top Pane") {
-                    if let model = focusedModel { focusSplitSide(.agent, in: model) }
+                    if let model = focusedModel { focusDirection(.up, splitSide: .agent, in: model) }
                 }
                 .keyboardShortcut(.upArrow, modifiers: [.command, .option])
-                .disabled(focusedSplitAxis != .horizontal)
+                .disabled(!(focusedSplitAxis == .horizontal || (focusedSplitAxis == nil && tabLayoutActive)))
                 Button("Focus Bottom Pane") {
-                    if let model = focusedModel { focusSplitSide(.shell, in: model) }
+                    if let model = focusedModel { focusDirection(.down, splitSide: .shell, in: model) }
                 }
                 .keyboardShortcut(.downArrow, modifiers: [.command, .option])
-                .disabled(focusedSplitAxis != .horizontal)
+                .disabled(!(focusedSplitAxis == .horizontal || (focusedSplitAxis == nil && tabLayoutActive)))
 
                 Divider()
 
@@ -223,6 +258,14 @@ struct HerdrMApp: App {
     }
 
     // MARK: - Split commands
+
+    private func focusDirection(_ direction: PaneNeighborDirection, splitSide: SplitSide, in model: AppModel) {
+        if model.shellSplitAxis != nil {
+            focusSplitSide(splitSide, in: model)
+        } else {
+            model.focusNeighbourPane(direction)
+        }
+    }
 
     private func focusSplitSide(_ side: SplitSide, in model: AppModel) {
         guard model.shellSplitAxis != nil else { return }

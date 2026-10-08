@@ -65,6 +65,7 @@ struct RootView: View {
         )
         .focusedSceneValue(\.appModel, model)
         .focusedSceneValue(\.splitAxis, model.shellSplitAxis)
+        .focusedSceneValue(\.tabLayoutActive, model.visibleTabLayout != nil)
         .sheet(isPresented: $model.showSearch) { SearchSheet(model: model) }
         .ignoresSafeArea(.container, edges: .top)
         .frame(minWidth: 980, minHeight: 620)

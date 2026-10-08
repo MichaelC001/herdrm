@@ -126,4 +126,30 @@ final class TabLayoutTests: XCTestCase {
         let vertical = DividerFrame(path: SplitPath([]), direction: .right, rect: .zero, containerRect: bounds)
         XCTAssertEqual(vertical.ratio(at: CGPoint(x: 250, y: 0)), 0.25)
     }
+
+    // MARK: - Neighbours
+
+    func testNeighboursFollowTheGeometry() throws {
+        // p3 | p4 (top right, 30%) / p5 (bottom right, 70%)
+        let root = try decodeExport().root
+        // Both right-hand panes touch p3; the one sharing more of its height wins.
+        XCTAssertEqual(TabLayoutGeometry.neighbor(of: "w1A:p3", in: root, direction: .right), "w1A:p5")
+        XCTAssertNil(TabLayoutGeometry.neighbor(of: "w1A:p3", in: root, direction: .left))
+        XCTAssertEqual(TabLayoutGeometry.neighbor(of: "w1A:p4", in: root, direction: .left), "w1A:p3")
+        XCTAssertEqual(TabLayoutGeometry.neighbor(of: "w1A:p4", in: root, direction: .down), "w1A:p5")
+        XCTAssertEqual(TabLayoutGeometry.neighbor(of: "w1A:p5", in: root, direction: .up), "w1A:p4")
+        XCTAssertEqual(TabLayoutGeometry.neighbor(of: "w1A:p5", in: root, direction: .left), "w1A:p3")
+        XCTAssertNil(TabLayoutGeometry.neighbor(of: "w1A:p5", in: root, direction: .down))
+        XCTAssertNil(TabLayoutGeometry.neighbor(of: "nope", in: root, direction: .down))
+    }
+
+    func testLeftNeighbourPrefersTheOneOverlappingMost() {
+        let root = LayoutNode.split(
+            direction: .right, ratio: 0.5,
+            first: .split(direction: .down, ratio: 0.3, first: .pane(paneID: "tl"), second: .pane(paneID: "bl")),
+            second: .pane(paneID: "r")
+        )
+        XCTAssertEqual(TabLayoutGeometry.neighbor(of: "r", in: root, direction: .left), "bl")
+        XCTAssertEqual(TabLayoutGeometry.neighbor(of: "tl", in: root, direction: .right), "r")
+    }
 }

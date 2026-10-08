@@ -597,6 +597,22 @@ public actor HerdrService {
         ).layout
     }
 
+    /// Splits a pane in herdr's own layout (not the local ⌘D shell): a new shell
+    /// pane to the right of or below `paneID`, in `cwd` when given. Returns the new
+    /// pane id. Focus is left to the caller, as `createTab` does.
+    public func splitPane(paneID: String, direction: SplitDirection, cwd: String?) async throws -> String {
+        var params: [String: JSONValue] = [
+            "target_pane_id": .string(paneID),
+            "direction": .string(direction.rawValue),
+            "focus": .bool(false),
+        ]
+        if let cwd { params["cwd"] = .string(cwd) }
+        let result = try await client().request(method: "pane.split", params: .object(params))
+        guard let newPaneID = result["pane"]?["pane_id"]?.stringValue
+        else { throw HerdrError.malformedResponse("pane.split returned no pane.pane_id") }
+        return newPaneID
+    }
+
     /// Toggles herdr's zoom on a pane: zoomed, the tab shows only that pane, in
     /// the TUI and here alike.
     public func toggleZoom(paneID: String) async throws {

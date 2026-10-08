@@ -673,6 +673,68 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// A new herdr pane next to the selected one, in the same directory, and the
+    /// keyboard moves into it once the snapshot knows it. Turns a single-pane tab
+    /// into a layout, so it also enables the setting's effect for that tab.
+    func splitSelectedPane(_ direction: SplitDirection) {
+        guard let entry = selectedAttachedEntry else { return }
+        let cwd: String?
+        switch entry {
+        case .agent(let agent): cwd = agent.agent.cwd
+        case .terminal(let terminal): cwd = terminal.pane.cwd
+        }
+        let device = entry.device
+        let service = service(for: device)
+        Task { @MainActor [weak self] in
+            do {
+                let newPaneID = try await service.splitPane(paneID: entry.ref.paneID, direction: direction, cwd: cwd)
+                guard let self else { return }
+                await self.refresh(device.id)
+                if let ref = self.selectedTabRef { self.refreshTabLayout(ref) }
+                self.selectedPane = PaneRef(deviceID: device.id, paneID: newPaneID)
+            } catch {
+                self?.actionError = self?.actionErrorMessage(error, device: device)
+            }
+        }
+    }
+
+    /// Keyboard focus to the pane next to the selected one in the shown tab layout.
+    func focusNeighbourPane(_ direction: PaneNeighborDirection) {
+        guard let selected = selectedPane, let layout = visibleTabLayout,
+              let next = TabLayoutGeometry.neighbor(of: selected.paneID, in: layout.root, direction: direction)
+        else { return }
+        selectedPane = PaneRef(deviceID: selected.deviceID, paneID: next)
+    }
+
+    /// Keyboard focus to the next (+1) or previous (-1) pane in the tab's reading
+    /// order, wrapping around.
+    func focusPane(offset: Int) {
+        guard let selected = selectedPane, let layout = visibleTabLayout else { return }
+        let order = layout.root.paneIDs
+        guard let index = order.firstIndex(of: selected.paneID), order.count > 1 else { return }
+        let next = order[((index + offset) % order.count + order.count) % order.count]
+        selectedPane = PaneRef(deviceID: selected.deviceID, paneID: next)
+    }
+
+    /// The sidebar's confirmed close, for the selected pane. In a tab layout the
+    /// selection moves to the next pane of the tab instead of leaving the tab.
+    func requestCloseSelectedPane() {
+        guard let entry = selectedAttachedEntry else { return }
+        var fallback: PaneRef?
+        if let layout = visibleTabLayout {
+            let order = layout.root.paneIDs
+            if let index = order.firstIndex(of: entry.ref.paneID), order.count > 1 {
+                fallback = PaneRef(deviceID: entry.ref.deviceID, paneID: order[(index + 1) % order.count])
+            }
+        }
+        let name: String
+        switch entry {
+        case .agent(let agent): name = agent.title
+        case .terminal(let terminal): name = terminal.title
+        }
+        requestClosePane(entry.ref, name: name, selectAfter: fallback)
+    }
+
     /// The keyboard landed in another pane of the shown tab: make it the selection,
     /// so the sidebar, unread marks and viewport snap follow. Selection stays a
     /// herdrm-side notion; herdr's own focus is left alone, as it is for sidebar clicks.
@@ -1493,7 +1555,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func requestClosePane(_ ref: PaneRef, name: String) {
+    func requestClosePane(_ ref: PaneRef, name: String, selectAfter: PaneRef? = nil) {
         guard let device = device(ref.deviceID) else { return }
         closeRequest = CloseRequest(
             title: String(localized: "Close \"\(name)\"?"),
@@ -1503,7 +1565,7 @@ final class AppModel: ObservableObject {
             Task {
                 do {
                     try await self.service(for: device).closePane(paneID: ref.paneID)
-                    if self.selectedPane == ref { self.selectedPane = nil }
+                    if self.selectedPane == ref { self.selectedPane = selectAfter }
                     await self.refresh(device.id)
                 } catch {
                     self.actionError = self.actionErrorMessage(error, device: device)
