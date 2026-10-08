@@ -123,11 +123,73 @@ public actor SSHTunnel {
 
     /// Deterministic local bridge/forward socket for a target (also used by attach).
     public static func localSocketPath(for target: String) -> String {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("herdrm-tunnels", isDirectory: true)
+        let dir = URL(fileURLWithPath: tunnelDirectory, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         // Keep the path short: sockaddr_un caps at 104 bytes.
         return dir.appendingPathComponent("\(abs(target.hashValue) % 100_000).sock").path
+    }
+
+    static var tunnelDirectory: String {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("herdrm-tunnels", isDirectory: true).path
+    }
+
+    // MARK: - Orphaned forwards
+
+    /// An `ssh -N -L` forward whose HerdrM is gone. A quit tears the tunnels down,
+    /// but a kill (SIGKILL, a crash) gives the app no chance to, and `ssh -N` never
+    /// reads stdin, so it does not notice: it stays up with PPID 1, holding its own
+    /// connection to the host and a socket in `herdrm-tunnels/`.
+    struct OrphanedForward: Equatable {
+        let pid: pid_t
+        let localSocketPath: String
+    }
+
+    /// Picks orphaned forwards out of `ps -axww -o pid=,ppid=,command=` output. Only
+    /// re-parented (PPID 1) `/usr/bin/ssh -N` processes forwarding from the tunnel
+    /// directory qualify, so the live tunnels of another running HerdrM (a debug build
+    /// next to the installed app) are never touched.
+    static func orphanedForwards(inProcessList list: String, tunnelDirectory: String) -> [OrphanedForward] {
+        let forward = "-L \(tunnelDirectory)/"
+        return list.split(separator: "\n").compactMap { line in
+            let fields = line.split(separator: " ", maxSplits: 2)
+            guard fields.count == 3, let pid = pid_t(fields[0]), fields[1] == "1" else { return nil }
+            let command = fields[2]
+            guard command.hasPrefix("/usr/bin/ssh -N "),
+                  let range = command.range(of: " \(forward)") else { return nil }
+            let spec = command[command.index(after: range.lowerBound)...].dropFirst(3)
+            guard let colon = spec.firstIndex(of: ":") else { return nil }
+            // The reaper deletes this path, so accept only the names localSocketPath
+            // generates (`<digits>.sock`): no `..`, no subdirectory, nothing outside.
+            let name = spec[..<colon].dropFirst(tunnelDirectory.count + 1)
+            guard name.hasSuffix(".sock"), name.count > 5,
+                  name.dropLast(5).allSatisfy({ ("0"..."9").contains($0) }) else { return nil }
+            return OrphanedForward(pid: pid, localSocketPath: String(spec[..<colon]))
+        }
+    }
+
+    /// Stops the forwards a killed HerdrM left behind and removes their sockets.
+    /// Called once at launch, before any tunnel of this process is up.
+    @discardableResult
+    public static func reapOrphanedForwards() -> Int {
+        let ps = Process()
+        ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+        ps.arguments = ["-axww", "-o", "pid=,ppid=,command="]
+        let output = Pipe()
+        ps.standardOutput = output
+        ps.standardError = FileHandle.nullDevice
+        do { try ps.run() } catch { return 0 }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        ps.waitUntilExit()
+        let orphans = orphanedForwards(
+            inProcessList: String(decoding: data, as: UTF8.self),
+            tunnelDirectory: tunnelDirectory
+        )
+        for orphan in orphans {
+            kill(orphan.pid, SIGTERM)
+            try? FileManager.default.removeItem(atPath: orphan.localSocketPath)
+        }
+        return orphans.count
     }
 
     /// True when this tunnel serves Windows via `remote-api-bridge` rather than `-L`.
