@@ -279,13 +279,14 @@ final class GrazrAccountsTests: XCTestCase {
         try write("""
         {"name": "work@x", "email": "work@x", "organization": "Acme",
          "accessToken": "sk-SECRET-1",
-         "oauthAccount": {"accountUuid": "uuid-work", "emailAddress": "work@x", "refreshToken": "SECRET-2"},
+         "oauthAccount": {"accountUuid": "uuid-work", "emailAddress": "work@x", "refreshToken": "SECRET-2",
+                          "organizationType": "claude_pro", "organizationRateLimitTier": "default_claude_ai"},
          "snapshot": [
            {"kind": "session", "scope": null, "group": "session", "remaining": 0, "resets_at": "2026-10-01T21:50:00+00:00"},
            {"kind": "weekly_scoped", "scope": "Fable", "group": "weekly", "remaining": 84, "resets_at": "2026-10-04T18:00:00.513830+00:00"}
          ]}
         """, to: accounts.appendingPathComponent("uuid-work.json"))
-        try write(#"{"name": "home@x", "oauthAccount": {"accountUuid": "uuid-home"}, "snapshot": null}"#,
+        try write(#"{"name": "home@x", "oauthAccount": {"accountUuid": "uuid-home", "organizationType": "claude_pro", "organizationRateLimitTier": "default_claude_ai"}, "snapshot": null}"#,
                   to: accounts.appendingPathComponent("uuid-home.json"))
         try write("not json", to: accounts.appendingPathComponent(".grazr-tmp"))
         try write("""
@@ -295,7 +296,7 @@ final class GrazrAccountsTests: XCTestCase {
         """, to: config.appendingPathComponent("config.env"))
         try write(#"{"uuid-home": {"reason": "billing_error", "at": 1, "until": null, "reading": [{"secret": "SECRET-3"}]}}"#,
                   to: state.appendingPathComponent("blocked.json"))
-        try write(#"{"oauthAccount": {"accountUuid": "uuid-work"}, "primaryApiKey": "SECRET-4"}"#,
+        try write(#"{"oauthAccount": {"accountUuid": "uuid-work", "organizationType": "claude_max", "organizationRateLimitTier": "default_claude_max_20x"}, "primaryApiKey": "SECRET-4"}"#,
                   to: home.appendingPathComponent(".claude.json"))
 
         let environment = "HOME='\(home.path)' XDG_STATE_HOME= XDG_CONFIG_HOME= CLAUDE_CONFIG_DIR= "
@@ -313,6 +314,9 @@ final class GrazrAccountsTests: XCTestCase {
         XCTAssertEqual(work.windows.map(\.label), ["5h", "Fable week"])
         XCTAssertEqual(work.windows[0].resetsAt, ISO8601DateFormatter().date(from: "2026-10-01T21:50:00Z"))
         XCTAssertEqual(report.sortedAccounts[1].windows, [])
+        // Claude's own profile for the active account outranks grazr's older
+        // copy (an upgrade since); a parked account has only grazr's.
+        XCTAssertEqual(report.sortedAccounts.map { $0.plan?.label }, ["Max 20x", "Pro"])
     }
 
     /// The refresh script runs `grazr.py refresh` in herdr's plugin
@@ -462,4 +466,29 @@ final class GrazrAccountsTests: XCTestCase {
         XCTAssertFalse(elsewhere.contains("Enrolled"), elsewhere)
     }
     #endif
+
+    func testAPlanReadsAsItsNameAndMultiplier() {
+        XCTAssertEqual(GrazrPlan(type: "claude_pro", tier: "default_claude_ai").label, "Pro")
+        XCTAssertEqual(GrazrPlan(type: "claude_max", tier: "default_claude_max_20x").label, "Max 20x")
+        XCTAssertEqual(GrazrPlan(type: "claude_max", tier: "default_claude_max_5x").label, "Max 5x")
+        // A Team seat's own tier is the one its usage runs on.
+        XCTAssertEqual(GrazrPlan(type: "claude_team", tier: "default_raven", seatTier: "default_claude_max_5x").label, "Team 5x")
+        XCTAssertEqual(GrazrPlan(type: "claude_team", tier: "default_raven").label, "Team")
+        XCTAssertEqual(GrazrPlan(type: "claude_some_new_plan").label, "Some New Plan")
+    }
+
+    func testAReportDecodesAPlanAndItsAbsence() throws {
+        let json = Data("""
+        {"installed": true, "active": "a", "order": [], "settings": {}, "blocked": {}, "accounts": [
+          {"id": "a", "name": "a@x", "organization": null, "windows": [], "updated": 1,
+           "plan": {"type": "claude_max", "tier": "default_claude_max_20x", "seat_tier": null}},
+          {"id": "b", "name": "b@x", "organization": null, "windows": [], "updated": 1, "plan": null},
+          {"id": "c", "name": "c@x", "windows": []}
+        ]}
+        """.utf8)
+
+        let report = try JSONDecoder().decode(GrazrReport.self, from: json)
+
+        XCTAssertEqual(report.accounts.map { $0.plan?.label }, ["Max 20x", nil, nil])
+    }
 }

@@ -8,9 +8,9 @@ public enum Grazr {
     public static let swapActionID = "swap"
 
     /// Prints a `GrazrReport` as JSON. Runs on the device with the python3
-    /// grazr itself needs. Only names, ids and usage readings leave the device:
-    /// the parked credentials live elsewhere, and `.claude.json` contributes
-    /// the active account's id and nothing else.
+    /// grazr itself needs. Only names, ids, plans and usage readings leave the
+    /// device: the parked credentials live elsewhere, and `.claude.json`
+    /// contributes the active account's id and plan and nothing else.
     public static let readerCommand = #"""
     python3 - <<'GRAZR_EOF'
     import glob, json, os
@@ -33,7 +33,18 @@ public enum Grazr {
         except Exception:
             return None
 
+    def plan(oauth):
+        if not oauth.get("organizationType"):
+            return None
+        return {
+            "type": oauth["organizationType"],
+            "tier": oauth.get("organizationRateLimitTier"),
+            "seat_tier": oauth.get("userRateLimitTier"),
+        }
+
+    claude = (load(os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or home, ".claude.json"), {}) or {}).get("oauthAccount") or {}
     report = {"installed": os.path.isdir(state), "accounts": [], "order": [], "settings": {}, "blocked": {}}
+    report["active"] = claude.get("accountUuid")
     for path in sorted(glob.glob(os.path.join(state, "accounts", "*.json"))):
         entry = load(path)
         if not isinstance(entry, dict):
@@ -49,16 +60,18 @@ public enum Grazr {
                     "remaining": int(window["remaining"]),
                     "resets_at": epoch(window.get("resets_at") or ""),
                 })
+        identifier = oauth.get("accountUuid") or os.path.basename(path)[:-5]
         report["accounts"].append({
-            "id": oauth.get("accountUuid") or os.path.basename(path)[:-5],
+            "id": identifier,
             "name": entry.get("name") or entry.get("email") or "",
             "organization": entry.get("organization"),
+            # grazr's copy is the profile at enrolment or the last park, so a
+            # plan changed since shows only on the account Claude is on: its
+            # own copy is fresh. Older enrolments kept no plan at all.
+            "plan": (plan(claude) if identifier == report["active"] else None) or plan(oauth),
             "windows": windows,
             "updated": os.path.getmtime(path),
         })
-
-    claude = load(os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or home, ".claude.json"), {})
-    report["active"] = ((claude or {}).get("oauthAccount") or {}).get("accountUuid")
 
     try:
         with open(config) as handle:
@@ -477,14 +490,21 @@ public struct GrazrAccount: Decodable, Sendable, Equatable, Identifiable {
     public let id: String
     public let name: String
     public let organization: String?
+    /// The subscription: Claude's live profile for the active account,
+    /// otherwise grazr's copy from enrolment or the last park.
+    public let plan: GrazrPlan?
     public let windows: [GrazrWindow]
     /// When grazr last wrote this account's reading (unix seconds).
     public let updated: Double?
 
-    public init(id: String, name: String, organization: String? = nil, windows: [GrazrWindow] = [], updated: Double? = nil) {
+    public init(
+        id: String, name: String, organization: String? = nil, plan: GrazrPlan? = nil,
+        windows: [GrazrWindow] = [], updated: Double? = nil
+    ) {
         self.id = id
         self.name = name
         self.organization = organization
+        self.plan = plan
         self.windows = windows
         self.updated = updated
     }
@@ -519,6 +539,53 @@ public struct GrazrAccount: Decodable, Sendable, Equatable, Identifiable {
     /// The tightest window still open: how close the account is to the wall.
     public func leastLeft(now: Date) -> Int? {
         windows.filter { $0.isOpen(now: now) }.map(\.remaining).min()
+    }
+}
+
+/// An account's Claude subscription, as `oauthAccount` in `.claude.json`
+/// describes it.
+public struct GrazrPlan: Decodable, Sendable, Equatable {
+    /// `organizationType`: "claude_pro", "claude_max", "claude_team", …
+    public let type: String
+    /// `organizationRateLimitTier`: "default_claude_max_20x", …
+    public let tier: String?
+    /// `userRateLimitTier`: a Team seat's own tier ("default_claude_max_5x").
+    public let seatTier: String?
+
+    enum CodingKeys: String, CodingKey {
+        case type, tier
+        case seatTier = "seat_tier"
+    }
+
+    public init(type: String, tier: String? = nil, seatTier: String? = nil) {
+        self.type = type
+        self.tier = tier
+        self.seatTier = seatTier
+    }
+
+    /// "Pro", "Max 20x", "Team 5x": the plan with its usage multiplier, the
+    /// seat's own before the organization's.
+    public var label: String {
+        let name: String
+        switch type {
+        case "claude_pro": name = "Pro"
+        case "claude_max": name = "Max"
+        case "claude_team": name = "Team"
+        case "claude_enterprise": name = "Enterprise"
+        default:
+            name = type.replacingOccurrences(of: "claude_", with: "")
+                .split(separator: "_").map(\.capitalized).joined(separator: " ")
+        }
+        guard let multiplier = Self.multiplier(seatTier) ?? Self.multiplier(tier) else { return name }
+        return "\(name) \(multiplier)"
+    }
+
+    /// "5x" from "default_claude_max_5x".
+    private static func multiplier(_ tier: String?) -> String? {
+        guard let last = tier?.split(separator: "_").last, last.count > 1, last.hasSuffix("x"),
+              last.dropLast().allSatisfy(\.isNumber)
+        else { return nil }
+        return String(last)
     }
 }
 

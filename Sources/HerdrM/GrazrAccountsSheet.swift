@@ -223,6 +223,7 @@ private struct GrazrAccountCard: View {
                     .foregroundStyle(isActive ? Theme.statsAccount : Theme.text)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                if let plan = account.plan { badge(plan.label, color: Theme.textSecondary) }
                 if isActive { badge(String(localized: "Active"), color: Theme.success) }
                 if let block = report.block(for: account, now: now) {
                     badge(String(localized: "Blocked: \(block.reason)"), color: Theme.danger)
