@@ -9,13 +9,12 @@ private func levelColor(_ percent: Double) -> Color {
     return Theme.textSecondary
 }
 
-// MARK: - Status-strip indicator
+// MARK: - Sidebar indicator
 
-/// CPU / RAM / DISK mini meters for the selected pane's host, at the right end
-/// of the strip under the terminal. Clicking opens
-/// `MachineStatsPanel`. Runs the sampler while it is on screen and the window
-/// is visible.
-struct MachineStatsIndicator: View {
+/// CPU / RAM / DISK meters for the selected pane's host, in the sidebar footer
+/// just above the device switcher. Clicking opens `MachineStatsPanel`. Runs the
+/// sampler while it is on screen and the window is visible.
+struct SidebarMachineStats: View {
     @ObservedObject var stats: MachineStatsModel
     let device: Device
     let isOpen: Bool
@@ -30,21 +29,22 @@ struct MachineStatsIndicator: View {
 
     var body: some View {
         Button(action: toggle) {
-            HStack(spacing: 9) {
+            HStack(spacing: 12) {
+                SidebarMeter(label: "CPU", percent: snapshot?.cpuPercent)
+                SidebarMeter(label: "RAM", percent: snapshot.map { $0.memFraction * 100 })
+                SidebarMeter(label: "DISK", percent: snapshot?.fullestDisk.map { $0.fraction * 100 })
                 if case .failed(let message) = stats.state, snapshot == nil {
                     Image(systemName: "exclamationmark.triangle")
                         .font(.system(size: 10.5))
                         .foregroundStyle(Theme.warning)
                         .help(message)
                 }
-                MiniMeter(label: "CPU", percent: snapshot?.cpuPercent)
-                MiniMeter(label: "RAM", percent: snapshot.map { $0.memFraction * 100 })
-                MiniMeter(label: "DISK", percent: snapshot?.fullestDisk.map { $0.fraction * 100 })
             }
-            .padding(.horizontal, 6)
-            .frame(height: 22)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity)
             .background(
-                RoundedRectangle(cornerRadius: 5)
+                RoundedRectangle(cornerRadius: 6)
                     .fill(hovered || isOpen ? AnyShapeStyle(Theme.itemWash) : AnyShapeStyle(.clear))
             )
             .contentShape(Rectangle())
@@ -74,34 +74,39 @@ struct MachineStatsIndicator: View {
     }
 }
 
-/// `CPU ▮▮▯▯ 34%`: four segments, one per quarter, tinted by level.
-private struct MiniMeter: View {
+/// One compact meter column: `CPU … 34%` over a level-tinted bar that fills its
+/// share of the row. Equal-width columns so the block adapts to the sidebar width.
+private struct SidebarMeter: View {
     let label: String
     let percent: Double?
 
     var body: some View {
         let value = percent.map { min(100, max(0, $0)) }
-        let filled = value.map { $0 <= 0 ? 0 : Int(($0 / 25).rounded(.up)) } ?? 0
         let tint = value.map(levelColor) ?? Theme.textGhost
-        HStack(spacing: 4) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .kerning(0.2)
-                .foregroundStyle(Theme.textTertiary)
-            HStack(spacing: 1.5) {
-                ForEach(0..<4, id: \.self) { index in
-                    RoundedRectangle(cornerRadius: 1)
-                        .fill(index < filled ? AnyShapeStyle(tint) : AnyShapeStyle(Theme.textGhost.opacity(0.35)))
-                        .frame(width: 3, height: 9)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Text(label)
+                    .font(.system(size: 9, weight: .semibold))
+                    .kerning(0.2)
+                    .foregroundStyle(Theme.textTertiary)
+                Spacer(minLength: 2)
+                Text(value.map(MachineStatsFormat.percent) ?? "—")
+                    .font(.system(size: 10).monospacedDigit())
+                    .foregroundStyle(value.map { $0 >= 75 ? tint : Theme.textSecondary } ?? Theme.textGhost)
+                    .lineLimit(1)
+            }
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.textGhost.opacity(0.22))
+                    Capsule()
+                        .fill(tint)
+                        .frame(width: max((value ?? 0) > 0 ? 3 : 0, proxy.size.width * (value ?? 0) / 100))
                 }
             }
-            Text(value.map(MachineStatsFormat.percent) ?? "—")
-                .font(.system(size: 10.5).monospacedDigit())
-                .foregroundStyle(value.map { $0 >= 75 ? tint : Theme.textSecondary } ?? Theme.textGhost)
-                // Wide enough for "100%", so the meters don't shift as values change.
-                .frame(width: 34, alignment: .leading)
-                .lineLimit(1)
+            .frame(height: 4)
         }
+        .frame(maxWidth: .infinity)
+        .animation(.easeOut(duration: 0.35), value: value ?? -1)
     }
 }
 

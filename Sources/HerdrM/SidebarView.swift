@@ -170,6 +170,18 @@ struct SidebarView: View {
             .clipped()
 
             Spacer(minLength: 0)
+            if let device = model.statsDevice {
+                Rectangle().fill(Theme.hairline).frame(height: 1)
+                SidebarMachineStats(
+                    stats: model.machineStats,
+                    device: device,
+                    isOpen: model.showMachineStats
+                ) {
+                    model.showMachineStats.toggle()
+                }
+                .padding(.horizontal, 6)
+                .frame(height: SidebarFooterMetrics.statsHeight)
+            }
             footer
         }
         .frame(width: width)
@@ -577,7 +589,7 @@ struct SidebarView: View {
             .focusEffectDisabled()
         }
         .padding(.horizontal, 10)
-        .frame(height: 40)
+        .frame(height: SidebarFooterMetrics.deviceSwitcherHeight)
     }
 
     private var connectionDotColor: Color {

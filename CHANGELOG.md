@@ -7,6 +7,15 @@ the Sparkle update description — a release without a section here fails CI.
 
 ## [Unreleased]
 
+## [0.6.13] - 2026-10-07
+
+### Changed
+- **Machine stats moved to the sidebar.** The CPU / RAM / Disk meters now sit in
+  the bottom-left, just above the device switcher, instead of in a strip under
+  the terminal — so they read as part of the device footer and the terminal
+  keeps its full height. Clicking them opens the same details panel, now from
+  the bottom-left.
+
 ## [0.6.12] - 2026-10-07
 
 ### Added
