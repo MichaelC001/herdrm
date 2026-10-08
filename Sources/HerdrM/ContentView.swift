@@ -98,10 +98,15 @@ struct RootView: View {
                 set: { if !$0 { model.closeRequest = nil } }
             )
         ) {
+            // Destructive buttons get no Return binding by default, which left this
+            // dialog with no default button: Return did nothing and the pointer was the
+            // only way out. The dialog only opens from an explicit close action, and
+            // Escape still cancels, so Return confirming is the expected Mac behaviour.
             Button("Close", role: .destructive) {
                 model.closeRequest?.perform()
                 model.closeRequest = nil
             }
+            .keyboardShortcut(.defaultAction)
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(model.closeRequest?.message ?? "")
