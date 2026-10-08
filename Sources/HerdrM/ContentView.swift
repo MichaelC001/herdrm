@@ -1054,7 +1054,15 @@ struct NewSpaceSheet: View {
 
                 SheetSectionLabel("DIRECTORY")
                 DirectoryPickerField(model: model, device: chosenDevice, path: $directory)
-                if !chosenDevice.isLocal {
+                if chosenDevice.isTailcat {
+                    // A tailcat tunnel carries only the herdr socket: no folder
+                    // listing and no remote $HOME to expand "~" against. The path
+                    // goes to herdr verbatim, so any host's syntax works (/…, C:\…).
+                    Text(String(localized: "Full path on \(chosenDevice.name), e.g. /Users/me/project or C:\\project; folder browsing and ~ aren't available over a tailcat tunnel"))
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if !chosenDevice.isLocal {
                     Text(String(localized: "Path on \(chosenDevice.name); ~ expands to its home directory"))
                         .font(.system(size: 10.5))
                         .foregroundStyle(Theme.textTertiary)
@@ -1081,7 +1089,7 @@ struct NewSpaceSheet: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(directory.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(!canCreate)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -1090,6 +1098,16 @@ struct NewSpaceSheet: View {
         .onAppear {
             deviceID = model.deviceFilter ?? model.devices.first?.id ?? Device.local.id
         }
+        .onChange(of: deviceID) { _, _ in
+            if chosenDevice.isTailcat && directory.hasPrefix("~") { directory = "" }
+        }
+    }
+
+    private var canCreate: Bool {
+        let trimmed = directory.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return false }
+        // "~" needs the remote home, which only a shell (SSH) can tell us.
+        return !(chosenDevice.isTailcat && trimmed.hasPrefix("~"))
     }
 }
 
@@ -1141,9 +1159,13 @@ struct DirectoryPickerField: View {
                     }
                 }
             }
-            browser
+            if !device.isTailcat {
+                browser
+            }
         }
         .task(id: "\(device.id.uuidString)|\(path)") {
+            // A tailcat tunnel can't list folders; there's nothing to browse.
+            guard !device.isTailcat else { return }
             // Debounce: retyping cancels this task before the sleep ends.
             try? await Task.sleep(nanoseconds: 250_000_000)
             guard !Task.isCancelled else { return }
@@ -1302,8 +1324,12 @@ struct NewTerminalSheet: View {
         spaces.first { $0.workspaceID == workspaceID }?.label ?? String(localized: "a Herdr space")
     }
 
+    /// Standalone shells run over SSH; a tailcat tunnel carries only the herdr
+    /// socket, so its terminals must live in a space.
+    private var allowsStandalone: Bool { !chosenDevice.isTailcat }
+
     private var subtitle: String {
-        if isStandalone {
+        if isStandalone && allowsStandalone {
             return chosenDevice.isLocal
                 ? String(localized: "Start a login shell on this Mac")
                 : String(localized: "Connect to \(chosenDevice.name) over SSH")
@@ -1341,15 +1367,24 @@ struct NewTerminalSheet: View {
                 // A herdr space gives a persistent, reattachable server-owned
                 // shell; Standalone is an app-owned process (plain login shell
                 // or ssh) that needs no herdr on the device at all.
-                Picker("", selection: $workspaceID) {
-                    ForEach(spaces) { workspace in
-                        Text(workspace.label).tag(workspace.workspaceID)
+                if !allowsStandalone && spaces.isEmpty {
+                    Text(String(localized: "\(chosenDevice.name) has no spaces yet. Terminals over a tailcat tunnel need a space; create one first."))
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Picker("", selection: $workspaceID) {
+                        ForEach(spaces) { workspace in
+                            Text(workspace.label).tag(workspace.workspaceID)
+                        }
+                        if allowsStandalone {
+                            Text("Standalone (not in a space)").tag("")
+                        }
                     }
-                    Text("Standalone (not in a space)").tag("")
+                    .labelsHidden()
+                    .fixedSize()
                 }
-                .labelsHidden()
-                .fixedSize()
-                if isStandalone {
+                if isStandalone && allowsStandalone {
                     Text("Runs in this app only; closing herdrm ends the shell.")
                         .font(.system(size: 11.5))
                         .foregroundStyle(Theme.textTertiary)
@@ -1374,6 +1409,7 @@ struct NewTerminalSheet: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
                 .keyboardShortcut(.defaultAction)
+                .disabled(isStandalone && !allowsStandalone)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -1393,6 +1429,11 @@ struct NewTerminalSheet: View {
             workspaceID = preferredSpace.flatMap { preferred in
                 spaces.contains { $0.workspaceID == preferred } ? preferred : nil
             } ?? spaces.first?.workspaceID ?? ""
+        }
+        .onChange(of: spaces.map(\.workspaceID)) { _, ids in
+            // Spaces can arrive after the sheet opens; without a Standalone
+            // fallback, select one rather than leave the picker empty.
+            if isStandalone && !allowsStandalone { workspaceID = ids.first ?? "" }
         }
     }
 }
