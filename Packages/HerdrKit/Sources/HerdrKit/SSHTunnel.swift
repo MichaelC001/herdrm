@@ -198,15 +198,12 @@ public actor SSHTunnel {
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
         let authentication = Self.authenticationConfiguration(for: credentialID)
         defer { authentication.discardAuthorization() }
-        proc.arguments = ["-N"] + authentication.arguments + [
-            "-o", "StrictHostKeyChecking=accept-new",
-            "-o", "ConnectTimeout=10",
-            "-o", "ExitOnForwardFailure=yes",
-            "-o", "ServerAliveInterval=15",
-            "-o", "StreamLocalBindUnlink=yes",
-            "-L", "\(localSock):\(remoteSock)",
-            Self.sshDestination(target),
-        ]
+        proc.arguments = Self.forwardArguments(
+            localSock: localSock,
+            remoteSock: remoteSock,
+            target: target,
+            authenticationArguments: authentication.arguments
+        )
         proc.environment = ProcessInfo.processInfo.environment.merging(authentication.environment) { _, new in new }
         let errorOutput = Pipe()
         let errorBuffer = SSHErrorBuffer()
@@ -251,6 +248,31 @@ public actor SSHTunnel {
         process = nil
         resetErrorCapture()
         throw HerdrError.tunnelFailed("timed out waiting for forwarded socket")
+    }
+
+    /// The `ssh -N -L` argv for the stream-local forward. It always opens its own
+    /// connection: with `ControlMaster auto` in the user's ssh config, a forward
+    /// requested through an existing master (another HerdrM session, Mutagen, a
+    /// terminal) is set up inside that master's process and our ssh exits 0 at once.
+    /// The tunnel then reads as failed ("ssh exited 0"), and `tearDown()` could not
+    /// close a forward living in someone else's process anyway.
+    static func forwardArguments(
+        localSock: String,
+        remoteSock: String,
+        target: String,
+        authenticationArguments: [String]
+    ) -> [String] {
+        ["-N"] + authenticationArguments + [
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "ConnectTimeout=10",
+            "-o", "ExitOnForwardFailure=yes",
+            "-o", "ServerAliveInterval=15",
+            "-o", "StreamLocalBindUnlink=yes",
+            "-o", "ControlMaster=no",
+            "-o", "ControlPath=none",
+            "-L", "\(localSock):\(remoteSock)",
+            sshDestination(target),
+        ]
     }
 
     public func tearDown() {
