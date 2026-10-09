@@ -237,8 +237,14 @@ final class AppModel: ObservableObject {
     /// and after pane topology changes. Missing means single-pane mode.
     @Published var tabLayouts: [TabRef: TabLayoutDescription] = [:]
     /// Ratios of dividers being dragged, applied over the server's tree until
-    /// `layout.set_split_ratio` has confirmed the drop.
-    @Published var splitRatioOverrides: [SplitPath: Double] = [:]
+    /// `layout.set_split_ratio` has confirmed the drop. Scoped by tab: a path
+    /// like `[]` (the root split) repeats across tabs, so a drag in flight on one
+    /// tab must not shift the same-path divider of another tab the user switches to.
+    @Published var splitRatioOverrides: [TabRef: [SplitPath: Double]] = [:]
+    /// The latest `layout.export` / `set_split_ratio` request per tab. A response
+    /// whose generation is no longer current is dropped, so a slow export can't
+    /// clobber a ratio a newer drop already committed.
+    private var tabLayoutFetchGen: [TabRef: Int] = [:]
     /// Finished agents the user has not opened since they flipped to `done`.
     @Published private(set) var unreadAgents: Set<AgentUnreadKey> = []
 
@@ -655,12 +661,29 @@ final class AppModel: ObservableObject {
         refreshTabLayout(ref)
     }
 
+    /// Divider overrides for the tab on screen. A stale entry left in the dict for
+    /// another tab (its RPC still in flight) never reaches the solver this way.
+    var visibleSplitOverrides: [SplitPath: Double] {
+        guard let ref = selectedTabRef else { return [:] }
+        return splitRatioOverrides[ref] ?? [:]
+    }
+
+    /// Bumps and returns the current generation for a tab's layout fetch, so a
+    /// response can check it is still the newest before it writes `tabLayouts`.
+    private func nextTabLayoutGen(_ ref: TabRef) -> Int {
+        let gen = (tabLayoutFetchGen[ref] ?? 0) + 1
+        tabLayoutFetchGen[ref] = gen
+        return gen
+    }
+
     func refreshTabLayout(_ ref: TabRef) {
         guard showsTabLayout, let device = device(ref.deviceID) else { return }
         let service = service(for: device)
+        let gen = nextTabLayoutGen(ref)
         Task { @MainActor [weak self] in
             guard let layout = try? await service.exportLayout(tabID: ref.tabID),
-                  let self
+                  let self,
+                  self.tabLayoutFetchGen[ref] == gen
             else { return }
             self.tabLayouts[ref] = layout
             self.noteVisibleAttachSessions()
@@ -682,26 +705,28 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// A divider is being dragged: preview the ratio locally.
+    /// A divider is being dragged: preview the ratio locally, on the shown tab.
     func updateSplitDrag(path: SplitPath, ratio: Double) {
-        splitRatioOverrides[path] = TabLayoutGeometry.clampRatio(ratio)
+        guard let ref = selectedTabRef else { return }
+        splitRatioOverrides[ref, default: [:]][path] = TabLayoutGeometry.clampRatio(ratio)
     }
 
     /// The divider was dropped: hand the ratio to herdr, keep the preview until
     /// it answers, then let the server's tree take over again.
     func endSplitDrag(path: SplitPath, ratio: Double) {
+        guard let ref = selectedTabRef, let device = device(ref.deviceID) else { return }
         let clamped = TabLayoutGeometry.clampRatio(ratio)
-        splitRatioOverrides[path] = clamped
-        guard let ref = selectedTabRef, let device = device(ref.deviceID) else {
-            splitRatioOverrides[path] = nil
-            return
-        }
+        splitRatioOverrides[ref, default: [:]][path] = clamped
         let service = service(for: device)
+        let gen = nextTabLayoutGen(ref)
         Task { @MainActor [weak self] in
             let layout = try? await service.setSplitRatio(tabID: ref.tabID, path: path, ratio: clamped)
             guard let self else { return }
-            if let layout { self.tabLayouts[ref] = layout }
-            self.splitRatioOverrides[path] = nil
+            // The commit's own tree wins only while it is still the newest request;
+            // a later drop or a `layout.updated` refetch supersedes it.
+            if let layout, self.tabLayoutFetchGen[ref] == gen { self.tabLayouts[ref] = layout }
+            self.splitRatioOverrides[ref]?[path] = nil
+            if self.splitRatioOverrides[ref]?.isEmpty == true { self.splitRatioOverrides[ref] = nil }
         }
     }
 

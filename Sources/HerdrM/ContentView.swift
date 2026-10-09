@@ -687,7 +687,7 @@ struct DetailView: View {
             let bounds = CGRect(origin: .zero, size: proxy.size)
             let solved = model.visibleTabLayout.map {
                 TabLayoutGeometry.solve(
-                    $0.root, in: bounds, gap: Self.paneGap, overrides: model.splitRatioOverrides
+                    $0.root, in: bounds, gap: Self.paneGap, overrides: model.visibleSplitOverrides
                 )
             }
             let frames = Dictionary(
@@ -880,7 +880,9 @@ private struct PaneDivider: View {
             .background(Theme.terminalBackground)
             .contentShape(Rectangle())
             .gesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .named(coordinateSpace))
+                // A small threshold so a plain click on the gap does not begin a
+                // drag and fire a no-op `set_split_ratio` on release.
+                DragGesture(minimumDistance: 2, coordinateSpace: .named(coordinateSpace))
                     .onChanged { value in
                         dragging = true
                         onDrag(divider.ratio(at: value.location))
