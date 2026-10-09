@@ -390,6 +390,8 @@ final class LineBreakTerminalView: AppTerminalView {
     /// `AppTerminalView.surface` is internal, so selection queries come in here.
     weak var attachedSurface: TerminalSurface?
     weak var processHost: TerminalProcessHost?
+    /// Lazily created by `showFind()`; lives in TerminalFindBar.swift.
+    var findBar: TerminalFindBar?
 
     /// Routes each press, drag and release so a gesture cannot split between
     /// the TUI and Ghostty's local selection.
@@ -1066,6 +1068,7 @@ final class LineBreakTerminalView: AppTerminalView {
     // local only when Ghostty owns a selection; otherwise the physical key is
     // sent to the TUI now that its global copy binding is unbound above.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.type == .keyDown, handleFindKey(event) { return true }
         guard event.type == .keyDown,
               window?.firstResponder === self
         else {
@@ -1085,6 +1088,12 @@ final class LineBreakTerminalView: AppTerminalView {
         }
         if modifiers == .command, event.charactersIgnoringModifiers?.lowercased() == "v" {
             handlePaste()
+            return true
+        }
+        // Ghostty's default ⌘F is start_search, which the embedding wrapper
+        // never surfaces; HerdrM draws its own find bar instead.
+        if modifiers == .command, event.charactersIgnoringModifiers?.lowercased() == "f" {
+            showFind()
             return true
         }
         // Ghostty consumes its default bindings before AppKit reaches the menu.

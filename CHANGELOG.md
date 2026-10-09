@@ -7,6 +7,12 @@ the Sparkle update description — a release without a section here fails CI.
 
 ## [Unreleased]
 
+### Added
+- **Find in terminal (⌘F).** Opens a find bar over the focused pane that
+  searches the pane's output and highlights matches. Return / ⇧Return (or
+  ⌘G / ⇧⌘G) step down / up through matches, Esc closes it and returns to the
+  terminal.
+
 ## [0.6.14] - 2026-10-08
 
 ### Added
