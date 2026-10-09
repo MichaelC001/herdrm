@@ -578,6 +578,58 @@ public actor HerdrService {
         _ = try await client().request(method: "pane.close", params: .object(["pane_id": .string(paneID)]))
     }
 
+    // MARK: - Tab layout
+
+    /// The split tree of a tab, as `layout.export` reports it.
+    public func exportLayout(tabID: String) async throws -> TabLayoutDescription {
+        struct Envelope: Codable { let layout: TabLayoutDescription }
+        return try await client().request(
+            method: "layout.export",
+            params: .object(["tab_id": .string(tabID)]),
+            as: Envelope.self
+        ).layout
+    }
+
+    /// Sets the first child's share of one split; `path` addresses it from the
+    /// root (`false` first, `true` second). Returns the layout after the change.
+    public func setSplitRatio(tabID: String, path: SplitPath, ratio: Double) async throws -> TabLayoutDescription {
+        struct Envelope: Codable { let layout: TabLayoutDescription }
+        return try await client().request(
+            method: "layout.set_split_ratio",
+            params: .object([
+                "tab_id": .string(tabID),
+                "path": .array(path.steps.map { .bool($0) }),
+                "ratio": .number(ratio),
+            ]),
+            as: Envelope.self
+        ).layout
+    }
+
+    /// Splits a pane in herdr's own layout (not the local ⌘D shell): a new shell
+    /// pane to the right of or below `paneID`, in `cwd` when given. Returns the new
+    /// pane id. Focus is left to the caller, as `createTab` does.
+    public func splitPane(paneID: String, direction: SplitDirection, cwd: String?) async throws -> String {
+        var params: [String: JSONValue] = [
+            "target_pane_id": .string(paneID),
+            "direction": .string(direction.rawValue),
+            "focus": .bool(false),
+        ]
+        if let cwd { params["cwd"] = .string(cwd) }
+        let result = try await client().request(method: "pane.split", params: .object(params))
+        guard let newPaneID = result["pane"]?["pane_id"]?.stringValue
+        else { throw HerdrError.malformedResponse("pane.split returned no pane.pane_id") }
+        return newPaneID
+    }
+
+    /// Toggles herdr's zoom on a pane: zoomed, the tab shows only that pane, in
+    /// the TUI and here alike.
+    public func toggleZoom(paneID: String) async throws {
+        _ = try await client().request(
+            method: "pane.zoom",
+            params: .object(["pane_id": .string(paneID), "mode": .string("toggle")])
+        )
+    }
+
     public func closeWorkspace(workspaceID: String) async throws {
         _ = try await client().request(
             method: "workspace.close",

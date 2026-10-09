@@ -10,6 +10,8 @@ enum TerminalDefaults {
     static let thinStrokesKey = "terminal.thinStrokes"
     static let fontWeightKey = "terminal.fontWeight"
     static let lineSpacingKey = "terminal.lineSpacing"
+    /// Show every pane of the selected tab, arranged like the herdr TUI.
+    static let tabLayoutKey = "terminal.tabLayout"
     static let defaultFontSize: Double = 12.5
     /// `NSFont.Weight` rawValue; 0 is `.regular`. Only the system monospaced font
     /// has selectable weights — named families ship fixed faces and ignore this.
@@ -1611,6 +1613,14 @@ enum AttachViewRegistry {
         lock.lock()
         defer { lock.unlock() }
         return views[id]?.view
+    }
+
+    /// The attach session whose terminal is `view`, for mapping a first
+    /// responder back to a pane of the shown tab.
+    static func id(for view: NSView) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return views.first { $0.value.view === view }?.key
     }
 
     /// Every live attach view. Only the selected one is visible/focusable, so "the

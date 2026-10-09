@@ -131,6 +131,9 @@ final class SplitFocusTracker {
     /// go stale the moment the selection switched while the old view was still first
     /// responder — the exact staleness the class comment above warns against.
     var isAgentView: (NSView) -> Bool = { _ in false }
+    /// Called with the attach view that now holds the keyboard, so a click into
+    /// another pane of a tab layout can move the selection there.
+    var onAttachViewFocused: ((NSView) -> Void)?
     weak var shellView: LineBreakTerminalView?
 
     private var keyWindowObservation: NSKeyValueObservation?
@@ -158,7 +161,11 @@ final class SplitFocusTracker {
         guard let responder = NSApp.keyWindow?.firstResponder as? NSView else { return }
         var view: NSView? = responder
         while let current = view {
-            if isAgentView(current) { onSideChanged?(.agent); return }
+            if isAgentView(current) {
+                onSideChanged?(.agent)
+                onAttachViewFocused?(current)
+                return
+            }
             if current === shellView { onSideChanged?(.shell); return }
             view = current.superview
         }

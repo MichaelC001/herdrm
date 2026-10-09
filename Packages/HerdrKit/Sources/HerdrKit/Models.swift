@@ -331,6 +331,7 @@ public struct HerdrEvent: Sendable {
 
     public static let subscriptionStartedKind = "subscription.started"
     public static let agentStatusChangedKind = "pane.agent_status_changed"
+    public static let layoutUpdatedKind = "layout.updated"
 
     /// All parameterless (globally subscribable) lifecycle kinds.
     /// `pane.agent_status_changed` is pane-scoped and appended separately for

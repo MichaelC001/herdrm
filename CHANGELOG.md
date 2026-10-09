@@ -7,6 +7,32 @@ the Sparkle update description — a release without a section here fails CI.
 
 ## [Unreleased]
 
+### Added
+- **Split tabs show every pane.** When the selected pane's herdr tab is split,
+  herdrm now lays out all of its panes the way the herdr TUI does, each one a
+  live attach sized to its share of the window, instead of showing one pane at a
+  time. Dividers drag the real herdr split ratio (`layout.set_split_ratio`), the
+  layout follows `layout.updated` and pane open/close events, and clicking into a
+  pane moves the selection (sidebar row, unread mark) there. A thin accent ring
+  marks the selected pane. Zoomed tabs and single-pane tabs look as before. Teams
+  of coding agents spawned side by side (pi-team-panes, Claude Code teammates)
+  are readable in one view. Settings › Terminal › "Show every pane of the
+  selected tab" turns it off, as does Terminal › Show Tab Panes (⇧⌘L).
+- **Keyboard control of herdr panes.** The Terminal menu gains herdr's own
+  splits, Split Pane Right (⌃⇧D) and Split Pane Down (⌃⇧S), which open a shell
+  in the selected pane's directory and move the keyboard into it; Next Pane and
+  Previous Pane (⌃⇧→ / ⌃⇧←) cycle through the tab in reading order; the ⌥⌘
+  arrows that move focus inside the ⌘D split move between herdr panes when that
+  split is closed; Zoom Pane (⇧⌘Z) is herdr's `pane.zoom`, so the TUI zooms the
+  same pane; Close Pane… (⇧⌘W) is the sidebar's confirmed close for the pane
+  that has the keyboard, with the selection moving on to the next pane of the
+  tab. (#123, thanks @dulvac!)
+
+### Fixed
+- Return confirms the Close agent/terminal dialog. The destructive button had no
+  default-action binding, so Return (and Tab, Return) did nothing and the dialog
+  could only be dismissed with the pointer. Escape still cancels. (#123)
+
 ## [0.6.13] - 2026-10-07
 
 ### Changed
