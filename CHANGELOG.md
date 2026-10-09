@@ -7,6 +7,8 @@ the Sparkle update description — a release without a section here fails CI.
 
 ## [Unreleased]
 
+## [0.6.14] - 2026-10-08
+
 ### Added
 - **Split tabs show every pane.** When the selected pane's herdr tab is split,
   herdrm now lays out all of its panes the way the herdr TUI does, each one a
@@ -27,6 +29,12 @@ the Sparkle update description — a release without a section here fails CI.
   same pane; Close Pane… (⇧⌘W) is the sidebar's confirmed close for the pane
   that has the keyboard, with the selection moving on to the next pane of the
   tab. (#123, thanks @dulvac!)
+- **Each account's Claude plan in the Accounts sheet.** A badge next to every
+  email shows the subscription — Pro, Max 5x, Max 20x, Team 5x, … — read from
+  the plan fields grazr already stores. The active account prefers Claude's own
+  live profile (so a plan changed since enrolment still shows), parked accounts
+  use grazr's copy, and older enrolments without the fields show no badge. No
+  credentials are read. (#125, thanks @senadaruc!)
 
 ### Fixed
 - Return confirms the Close agent/terminal dialog. The destructive button had no
