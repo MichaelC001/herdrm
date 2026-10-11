@@ -1861,8 +1861,9 @@ final class AppModel: ObservableObject {
         workspaceID: String?,
         kind: String
     ) async throws -> String {
+        let label = newAgentLabel(device: device, workspaceID: workspaceID, kind: kind)
         do {
-            return try await service.createTab(workspaceID: workspaceID, cwd: nil, label: kind)
+            return try await service.createTab(workspaceID: workspaceID, cwd: nil, label: label)
         } catch HerdrError.rpc(let code, _) where code == "workspace_not_found" && workspaceID == nil {
             let created = try await service.createWorkspace(
                 label: nil,
@@ -1871,6 +1872,18 @@ final class AppModel: ObservableObject {
             if let rootPaneID = created.rootPaneID { return rootPaneID }
             return try await service.createTab(workspaceID: created.workspaceID, cwd: nil, label: kind)
         }
+    }
+
+    /// The new agent is named after its space (the project), numbered when
+    /// the space already has an agent of that name.
+    private func newAgentLabel(device: Device, workspaceID: String?, kind: String) -> String {
+        let state = session(device.id)
+        let space = workspaceID.map { id in state.workspaces.first { $0.workspaceID == id } }
+            ?? state.workspaces.first { $0.focused == true }
+        let taken = Set(state.agents.map { agent in
+            agent.title(tabLabel: state.tabs.first { $0.tabID == agent.tabID }?.customLabel)
+        })
+        return NewAgentLabel.make(spaceLabel: space?.label, kind: kind, taken: taken)
     }
 
     // MARK: - Closing
