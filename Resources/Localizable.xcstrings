@@ -4145,18 +4145,34 @@
         }
       }
     },
-    "Claude stops and asks once an account’s weekly Fable allowance is spent and usage credits are off. herdrm answers “Switch to … and continue”, so agents keep working. It never spends credits. Applies to every device with grazr, while herdrm is open.": {
+    "Agents keep working on the fallback model. Never spends credits.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Claude stops and asks once an account’s weekly Fable allowance is spent and usage credits are off. herdrm answers “Switch to … and continue”, so agents keep working. It never spends credits. Applies to every device with grazr, while herdrm is open."
+            "value": "Agents keep working on the fallback model. Never spends credits."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当某个账号本周的 Fable 额度用完且未开启使用额度时，Claude 会停下来询问。herdrm 会选择“Switch to … and continue”，让 Agent 继续工作。它绝不会花费额度。对所有运行 grazr 的设备生效，前提是 herdrm 处于打开状态。"
+            "value": "Agent 在备用模型上继续工作。绝不花费额度。"
+          }
+        }
+      }
+    },
+    "When an account’s weekly Fable allowance is spent and usage credits are off, Claude stops and asks. herdrm answers “Switch to … and continue”. Applies to every device with grazr, while herdrm is open.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When an account’s weekly Fable allowance is spent and usage credits are off, Claude stops and asks. herdrm answers “Switch to … and continue”. Applies to every device with grazr, while herdrm is open."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当某个账号本周的 Fable 额度用完且未开启使用额度时，Claude 会停下来询问。herdrm 会选择“Switch to … and continue”。对所有运行 grazr 的设备生效，前提是 herdrm 处于打开状态。"
           }
         }
       }

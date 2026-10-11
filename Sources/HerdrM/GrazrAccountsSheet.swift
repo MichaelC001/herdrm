@@ -106,14 +106,14 @@ struct GrazrAccountsSheet: View {
         Toggle(isOn: $autoModelSwitch) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("When Fable runs out, switch model and continue")
-                Text("Claude stops and asks once an account’s weekly Fable allowance is spent and usage credits are off. herdrm answers “Switch to … and continue”, so agents keep working. It never spends credits. Applies to every device with grazr, while herdrm is open.")
+                Text("Agents keep working on the fallback model. Never spends credits.")
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .toggleStyle(.switch)
         .controlSize(.small)
+        .help("When an account’s weekly Fable allowance is spent and usage credits are off, Claude stops and asks. herdrm answers “Switch to … and continue”. Applies to every device with grazr, while herdrm is open.")
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
     }
