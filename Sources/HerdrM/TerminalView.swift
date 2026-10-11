@@ -403,10 +403,29 @@ final class LineBreakTerminalView: AppTerminalView {
     /// kitty report-events applications otherwise receive a release-only key.
     private var locallyConsumedCopyKeyCode: UInt16?
 
+    // MARK: Pane history scroll
+
+    /// The herdr pane an agent attach shows. `herdr agent attach` draws in the
+    /// alternate screen, so unless the pane app asks for the mouse, Ghostty
+    /// turns the wheel into ↑/↓ keys (alternate scroll) and Claude's prompt
+    /// walks its input history while the transcript stays put. With a pane id
+    /// the wheel scrolls herdr's pane history instead (`pane.scroll`), as
+    /// herdr's own client does; typing into the pane snaps it back.
+    var historyScrollPaneID: String?
+    /// Points per terminal row, to turn trackpad deltas into rows.
+    var scrollRowHeight: CGFloat = 17
+    private var historyTarget = 0
+    private var historySent = 0
+    private var historyMax: Int?
+    private var historyRemainder: CGFloat = 0
+    private var historyTask: Task<Void, Never>?
+
     // MARK: Keyboard
 
     override func keyDown(with event: NSEvent) {
         hideLinkPopup()
+        // herdr returns a scrolled pane to the bottom on input.
+        forgetHistoryScroll()
         locallyConsumedCopyKeyCode = nil
         if hasMarkedText() {
             // Command/Control chords must stay with the IME until composition
@@ -684,12 +703,67 @@ final class LineBreakTerminalView: AppTerminalView {
 
     override func scrollWheel(with event: NSEvent) {
         hideLinkPopup()
+        if scrollPaneHistory(event) { return }
         super.scrollWheel(with: event)
+    }
+
+    /// True when the wheel went to herdr's pane history: an agent attach whose
+    /// pane app has not asked for the mouse (with mouse reporting the app gets
+    /// the wheel itself, e.g. Claude's fullscreen renderer).
+    private func scrollPaneHistory(_ event: NSEvent) -> Bool {
+        guard historyScrollPaneID != nil, attachmentService != nil, !isMouseCaptured else { return false }
+        let rows = event.hasPreciseScrollingDeltas
+            ? event.scrollingDeltaY / max(scrollRowHeight, 1)
+            : event.scrollingDeltaY * 3
+        historyRemainder += rows
+        let whole = historyRemainder.rounded(.towardZero)
+        guard whole != 0 else { return true }
+        historyRemainder -= whole
+        let target = max(0, min(historyTarget + Int(whole), historyMax ?? Int.max))
+        guard target != historyTarget else { return true }
+        historyTarget = target
+        flushHistoryScroll()
+        return true
+    }
+
+    /// One `pane.scroll` in flight at a time; a gesture's later deltas fold
+    /// into the next request instead of queueing one per event.
+    private func flushHistoryScroll() {
+        guard historyTask == nil, let paneID = historyScrollPaneID, let service = attachmentService else { return }
+        historyTask = Task { @MainActor [weak self] in
+            while let self, self.historySent != self.historyTarget {
+                let offset = self.historyTarget
+                let landed = try? await service.scrollPane(paneID: paneID, offsetFromBottom: offset)
+                self.historySent = offset
+                if let landed {
+                    self.historyMax = landed.max
+                    if self.historyTarget == offset, landed.offset != offset {
+                        self.historyTarget = landed.offset
+                        self.historySent = landed.offset
+                    }
+                }
+            }
+            self?.historyTask = nil
+        }
+    }
+
+    private func forgetHistoryScroll() {
+        historyTarget = 0
+        historySent = 0
+        historyRemainder = 0
     }
 
     override func setSurfaceVisible(_ visible: Bool) {
         super.setSurfaceVisible(visible)
-        if !visible { hideLinkPopup() }
+        if !visible {
+            hideLinkPopup()
+            // Leaving a pane scrolled up would freeze its sidebar stats:
+            // status-line plugins skip updates while herdr's viewport is up.
+            if historyTarget > 0 {
+                historyTarget = 0
+                flushHistoryScroll()
+            }
+        }
         guard visible != acceptsDrops else { return }
         acceptsDrops = visible
         updateDragRegistration()
@@ -1461,6 +1535,7 @@ struct AttachTerminalView: NSViewRepresentable {
 
         let service = HerdrService(device: device)
         view.attachmentService = service
+        if case .agent(let paneID) = target { view.historyScrollPaneID = paneID }
         let command = service.attachCommand(target: target, serverVersion: serverVersion)
         context.coordinator.authorizationID = command.authorizationID
         context.coordinator.scheduleAuthorizationCleanup()
@@ -1587,6 +1662,7 @@ func applyTerminalAppearance(
         copyOnSelect: copyOnSelect
     )
     view.mouseReportingEnabled = mouseReporting
+    view.scrollRowHeight = CGFloat(fontSize * lineSpacing * 1.3)
     // Colors are theme-only; keep the rest above this early return.
     guard view.appliedDarkAppearance != dark else { return }
     view.appliedDarkAppearance = dark
