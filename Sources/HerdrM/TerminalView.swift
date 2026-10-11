@@ -412,6 +412,10 @@ final class LineBreakTerminalView: AppTerminalView {
     /// the wheel scrolls herdr's pane history instead (`pane.scroll`), as
     /// herdr's own client does; typing into the pane snaps it back.
     var historyScrollPaneID: String?
+    /// HerdrM's connected service for the pane's device. Not
+    /// `attachmentService`: that one only stages uploads and never connects,
+    /// so every RPC through it fails with "not connected".
+    var historyService: HerdrService?
     /// Points per terminal row, to turn trackpad deltas into rows.
     var scrollRowHeight: CGFloat = 17
     private var historyTarget = 0
@@ -711,7 +715,7 @@ final class LineBreakTerminalView: AppTerminalView {
     /// pane app has not asked for the mouse (with mouse reporting the app gets
     /// the wheel itself, e.g. Claude's fullscreen renderer).
     private func scrollPaneHistory(_ event: NSEvent) -> Bool {
-        guard historyScrollPaneID != nil, attachmentService != nil, !isMouseCaptured else { return false }
+        guard historyScrollPaneID != nil, historyService != nil, !isMouseCaptured else { return false }
         let rows = event.hasPreciseScrollingDeltas
             ? event.scrollingDeltaY / max(scrollRowHeight, 1)
             : event.scrollingDeltaY * 3
@@ -729,7 +733,7 @@ final class LineBreakTerminalView: AppTerminalView {
     /// One `pane.scroll` in flight at a time; a gesture's later deltas fold
     /// into the next request instead of queueing one per event.
     private func flushHistoryScroll() {
-        guard historyTask == nil, let paneID = historyScrollPaneID, let service = attachmentService else { return }
+        guard historyTask == nil, let paneID = historyScrollPaneID, let service = historyService else { return }
         historyTask = Task { @MainActor [weak self] in
             while let self, self.historySent != self.historyTarget {
                 let offset = self.historyTarget
@@ -1502,6 +1506,9 @@ struct AttachTerminalView: NSViewRepresentable {
     /// frames for it (output is still parsed), so busy background agents do
     /// not cost full-window Metal renders.
     var isVisible: Bool = true
+    /// HerdrM's connected service for `device`: the wheel scrolls the agent
+    /// pane's history through it when the pane app leaves the mouse alone.
+    var historyService: HerdrService? = nil
     var onAttachmentError: (String) -> Void = { _ in }
     var onAttachmentUploadingChanged: (Bool) -> Void = { _ in }
     /// Called on the main queue when the attach process exits: the pane was taken
@@ -1536,6 +1543,7 @@ struct AttachTerminalView: NSViewRepresentable {
         let service = HerdrService(device: device)
         view.attachmentService = service
         if case .agent(let paneID) = target { view.historyScrollPaneID = paneID }
+        view.historyService = historyService
         let command = service.attachCommand(target: target, serverVersion: serverVersion)
         context.coordinator.authorizationID = command.authorizationID
         context.coordinator.scheduleAuthorizationCleanup()
@@ -1557,6 +1565,7 @@ struct AttachTerminalView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: LineBreakTerminalView, context: Context) {
+        nsView.historyService = historyService
         configurePasteHandling(nsView)
         context.coordinator.onExit = onExit
         configureAppearance(nsView)
