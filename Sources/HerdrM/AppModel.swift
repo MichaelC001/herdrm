@@ -1640,6 +1640,7 @@ final class AppModel: ObservableObject {
                 workspaces: snapshot.workspaces
             )
             sessions[deviceID]?.panes = snapshot.ordinaryTerminalPanes
+            seedRecentLaunches(deviceID: deviceID)
             let paneIDs = Set((snapshot.panes ?? []).map(\.paneID))
                 .union(snapshot.agents.map(\.paneID))
             // Drop kept-alive attaches whose pane is gone (closed). A pane only taken
@@ -2309,6 +2310,31 @@ final class AppModel: ObservableObject {
             arguments: arguments, grazrAccountID: grazrAccount?.id, date: Date()
         )
         recentLaunches = RecentAgentLaunches.recording(launch, into: recentLaunches)
+        RecentAgentLaunches.save(recentLaunches)
+    }
+
+    /// Devices whose running agents were offered to the Recent list this run.
+    private var recentSeededDevices: Set<UUID> = []
+
+    /// Once per device and run: agents already running there join the Recent
+    /// list (behind recorded launches), with the kind's default arguments.
+    private func seedRecentLaunches(deviceID: UUID) {
+        guard !recentSeededDevices.contains(deviceID) else { return }
+        recentSeededDevices.insert(deviceID)
+        let state = session(deviceID)
+        let running = state.agents.compactMap { agent -> RecentAgentLaunch? in
+            guard let kind = agent.agentKindRaw,
+                  let space = state.workspaces.first(where: { $0.workspaceID == agent.workspaceID })
+            else { return nil }
+            return RecentAgentLaunch(
+                deviceID: deviceID, kind: kind, spaceLabel: space.label, directory: agent.cwd,
+                arguments: (try? AgentLaunchArguments.tokenize(AgentLaunchArgsStore.resolved(for: kind))) ?? [],
+                grazrAccountID: nil, date: Date()
+            )
+        }
+        let seeded = RecentAgentLaunches.seeding(running, into: recentLaunches)
+        guard seeded != recentLaunches else { return }
+        recentLaunches = seeded
         RecentAgentLaunches.save(recentLaunches)
     }
 

@@ -40,6 +40,17 @@ public enum RecentAgentLaunches {
         Array(([launch] + list.filter { $0.id != launch.id }).prefix(limit))
     }
 
+    /// Adds agents already running, after the recorded launches and only
+    /// where their device, agent and space are not listed yet, so the list
+    /// is useful before anything was started from New Agent.
+    public static func seeding(_ running: [RecentAgentLaunch], into list: [RecentAgentLaunch]) -> [RecentAgentLaunch] {
+        var result = list
+        for launch in running where result.count < limit && !result.contains(where: { $0.id == launch.id }) {
+            result.append(launch)
+        }
+        return result
+    }
+
     public static func load(from defaults: UserDefaults = .standard) -> [RecentAgentLaunch] {
         guard let data = defaults.data(forKey: defaultsKey),
               let list = try? JSONDecoder().decode([RecentAgentLaunch].self, from: data)

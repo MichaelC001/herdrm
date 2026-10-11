@@ -44,6 +44,18 @@ final class RecentAgentLaunchesTests: XCTestCase {
         XCTAssertEqual(list.last?.spaceLabel, "s4")
     }
 
+    func testSeedsRunningAgentsAfterRecordedLaunches() {
+        let list = [launch("a", at: 5)]
+        let seeded = RecentAgentLaunches.seeding([launch("a", at: 9), launch("b"), launch("b"), launch("c")], into: list)
+        XCTAssertEqual(seeded.map(\.spaceLabel), ["a", "b", "c"])
+        XCTAssertEqual(seeded.first?.date, Date(timeIntervalSince1970: 5))
+    }
+
+    func testSeedingStopsAtTheLimit() {
+        let full = (0..<RecentAgentLaunches.limit).map { launch("s\($0)") }
+        XCTAssertEqual(RecentAgentLaunches.seeding([launch("extra")], into: full), full)
+    }
+
     func testRoundTripsThroughDefaults() throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "RecentAgentLaunchesTests"))
         defaults.removePersistentDomain(forName: "RecentAgentLaunchesTests")
