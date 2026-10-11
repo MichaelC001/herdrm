@@ -352,7 +352,6 @@ struct AgentsSettingsView: View {
     @State private var drafts: [String: String] = AgentBinaryOverrides.load()
     @State private var argDrafts: [String: String] = [:]
     @State private var yoloMode = AgentLaunchArgsStore.yoloMode()
-    @AppStorage(AppModel.autoModelSwitchKey) private var autoModelSwitch = false
 
     /// Kinds herdr ships manifests for (plus OMP, which starts through its
     /// lifecycle extension). Kinds a connected server advertises beyond these
@@ -405,24 +404,6 @@ struct AgentsSettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-            }
-
-            Section {
-                Toggle(isOn: $autoModelSwitch) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Switch model when Fable needs usage credits")
-                        Text("When a Claude agent’s weekly Fable allowance runs out and usage credits are off, Claude stops and asks. herdrm answers with “Switch to … and continue”, so the agent keeps working on the fallback model. It never picks an option that spends credits.")
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            } header: {
-                Text("grazr")
-            } footer: {
-                Text("Applies on devices that run the grazr plugin, while herdrm is open. grazr moves Claude between accounts; this covers the model limit it cannot see.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
             }
 
             Section {

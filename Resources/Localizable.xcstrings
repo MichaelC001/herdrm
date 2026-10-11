@@ -4097,70 +4097,6 @@
         }
       }
     },
-    "Switch model when Fable needs usage credits": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Switch model when Fable needs usage credits"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Fable 需要使用额度时自动切换模型"
-          }
-        }
-      }
-    },
-    "When a Claude agent’s weekly Fable allowance runs out and usage credits are off, Claude stops and asks. herdrm answers with “Switch to … and continue”, so the agent keeps working on the fallback model. It never picks an option that spends credits.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "When a Claude agent’s weekly Fable allowance runs out and usage credits are off, Claude stops and asks. herdrm answers with “Switch to … and continue”, so the agent keeps working on the fallback model. It never picks an option that spends credits."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "当 Claude Agent 本周的 Fable 额度用完且未开启使用额度时，Claude 会停下来询问。herdrm 会选择“Switch to … and continue”，让 Agent 在备用模型上继续工作。它绝不会选择会花费额度的选项。"
-          }
-        }
-      }
-    },
-    "grazr": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "grazr"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "grazr"
-          }
-        }
-      }
-    },
-    "Applies on devices that run the grazr plugin, while herdrm is open. grazr moves Claude between accounts; this covers the model limit it cannot see.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Applies on devices that run the grazr plugin, while herdrm is open. grazr moves Claude between accounts; this covers the model limit it cannot see."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "仅在运行 grazr 插件的设备上、且 herdrm 打开时生效。grazr 负责在账号之间切换 Claude；此选项处理它看不到的模型额度限制。"
-          }
-        }
-      }
-    },
     "grazr: %@ switched to %@": {
       "localizations": {
         "en": {
@@ -4189,6 +4125,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "它的 Fable 额度已用完且未开启使用额度，因此改用 %@ 继续工作。"
+          }
+        }
+      }
+    },
+    "When Fable runs out, switch model and continue": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When Fable runs out, switch model and continue"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fable 用完时切换模型并继续"
+          }
+        }
+      }
+    },
+    "Claude stops and asks once an account’s weekly Fable allowance is spent and usage credits are off. herdrm answers “Switch to … and continue”, so agents keep working. It never spends credits. Applies to every device with grazr, while herdrm is open.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude stops and asks once an account’s weekly Fable allowance is spent and usage credits are off. herdrm answers “Switch to … and continue”, so agents keep working. It never spends credits. Applies to every device with grazr, while herdrm is open."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当某个账号本周的 Fable 额度用完且未开启使用额度时，Claude 会停下来询问。herdrm 会选择“Switch to … and continue”，让 Agent 继续工作。它绝不会花费额度。对所有运行 grazr 的设备生效，前提是 herdrm 处于打开状态。"
           }
         }
       }
