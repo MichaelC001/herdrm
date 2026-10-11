@@ -247,6 +247,8 @@ final class AppModel: ObservableObject {
     private var tabLayoutFetchGen: [TabRef: Int] = [:]
     /// Finished agents the user has not opened since they flipped to `done`.
     @Published private(set) var unreadAgents: Set<AgentUnreadKey> = []
+    /// New Agent's Recent list: the last launches, newest first.
+    @Published private(set) var recentLaunches: [RecentAgentLaunch] = RecentAgentLaunches.load()
 
     @Published var showAddDevice = false
     @Published var showNewAgent = false
@@ -2225,7 +2227,9 @@ final class AppModel: ObservableObject {
         kind: String,
         workspaceID: String?,
         args: [String],
-        grazrAccount: GrazrAccount? = nil
+        grazrAccount: GrazrAccount? = nil,
+        recordedArguments: [String]? = nil,
+        closingPane: String? = nil
     ) {
         Task {
             // An account not signed in for pinned agents yet is signed in
@@ -2270,13 +2274,80 @@ final class AppModel: ObservableObject {
                         waitForShell: true
                     )
                 }
+                if let closingPane {
+                    try? await service.closePane(paneID: closingPane)
+                }
                 await refresh(device.id)
+                recordLaunch(
+                    device: device, kind: kind, paneID: pane,
+                    arguments: recordedArguments ?? args, grazrAccount: grazrAccount
+                )
                 isFileManagerActive = false
                 selectedPane = PaneRef(deviceID: device.id, paneID: pane)
             } catch {
                 if let createdPane {
                     try? await service.closePane(paneID: createdPane)
                 }
+                actionError = actionErrorMessage(error, device: device)
+            }
+        }
+    }
+
+    // MARK: - Recent launches
+
+    /// Remembers a launch for New Agent's Recent list, by its space's name
+    /// and folder, read once the new pane shows up in the snapshot.
+    private func recordLaunch(
+        device: Device, kind: String, paneID: String, arguments: [String], grazrAccount: GrazrAccount?
+    ) {
+        let state = session(device.id)
+        guard let agent = state.agents.first(where: { $0.paneID == paneID }),
+              let space = state.workspaces.first(where: { $0.workspaceID == agent.workspaceID })
+        else { return }
+        let launch = RecentAgentLaunch(
+            deviceID: device.id, kind: kind, spaceLabel: space.label, directory: agent.cwd,
+            arguments: arguments, grazrAccountID: grazrAccount?.id, date: Date()
+        )
+        recentLaunches = RecentAgentLaunches.recording(launch, into: recentLaunches)
+        RecentAgentLaunches.save(recentLaunches)
+    }
+
+    func forgetRecentLaunch(_ launch: RecentAgentLaunch) {
+        recentLaunches.removeAll { $0.id == launch.id }
+        RecentAgentLaunches.save(recentLaunches)
+    }
+
+    /// Starts a remembered launch again: same device, agent, arguments and
+    /// account, in the space of that name. A space that was closed since is
+    /// opened again in the agent's folder. `continueConversation` adds
+    /// Claude's `--continue`, which resumes the folder's last conversation.
+    func startRecentLaunch(_ launch: RecentAgentLaunch, continueConversation: Bool = false) {
+        guard let device = device(launch.deviceID) else { return }
+        let state = session(device.id)
+        let account = launch.grazrAccountID.flatMap { id in state.grazrReport?.accounts.first { $0.id == id } }
+        let args = launch.arguments + (continueConversation ? ["--continue"] : [])
+        if let space = state.workspaces.first(where: { $0.label == launch.spaceLabel }) {
+            startNewAgent(
+                device: device, kind: launch.kind, workspaceID: space.workspaceID, args: args,
+                grazrAccount: account, recordedArguments: launch.arguments
+            )
+            return
+        }
+        guard let directory = launch.directory else {
+            actionError = String(localized: "The space \(launch.spaceLabel) is gone and its folder is unknown.")
+            return
+        }
+        Task {
+            do {
+                let created = try await service(for: device).createWorkspace(label: launch.spaceLabel, cwd: directory)
+                await refresh(device.id)
+                // The new space's first pane is a plain shell; the agent gets
+                // its own tab, and that shell is closed once it runs.
+                startNewAgent(
+                    device: device, kind: launch.kind, workspaceID: created.workspaceID, args: args,
+                    grazrAccount: account, recordedArguments: launch.arguments, closingPane: created.rootPaneID
+                )
+            } catch {
                 actionError = actionErrorMessage(error, device: device)
             }
         }
