@@ -4096,6 +4096,38 @@
           }
         }
       }
+    },
+    "Jump to bottom": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jump to bottom"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跳到底部"
+          }
+        }
+      }
+    },
+    "Back to the live end; typing also returns there": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back to the live end; typing also returns there"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回到最新内容；输入任意内容也会返回"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

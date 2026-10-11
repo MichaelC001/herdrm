@@ -423,6 +423,9 @@ final class LineBreakTerminalView: AppTerminalView {
     private var historyMax: Int?
     private var historyRemainder: CGFloat = 0
     private var historyTask: Task<Void, Never>?
+    /// While the pane sits up its history, Claude's prompt and status bar are
+    /// below the view, as in any scrollback; this offers the way back.
+    private var jumpPill: JumpToBottomPill?
 
     // MARK: Keyboard
 
@@ -727,7 +730,41 @@ final class LineBreakTerminalView: AppTerminalView {
         guard target != historyTarget else { return true }
         historyTarget = target
         flushHistoryScroll()
+        updateJumpPill()
         return true
+    }
+
+    /// Back to the live bottom: the pill's click.
+    func jumpHistoryToBottom() {
+        historyRemainder = 0
+        guard historyTarget > 0 else { return updateJumpPill() }
+        historyTarget = 0
+        flushHistoryScroll()
+        updateJumpPill()
+    }
+
+    private func updateJumpPill() {
+        guard historyTarget > 0 else {
+            jumpPill?.removeFromSuperview()
+            jumpPill = nil
+            return
+        }
+        let pill = jumpPill ?? JumpToBottomPill { [weak self] in self?.jumpHistoryToBottom() }
+        if pill.superview == nil { addSubview(pill) }
+        jumpPill = pill
+        placeJumpPill()
+    }
+
+    private func placeJumpPill() {
+        guard let pill = jumpPill else { return }
+        let size = pill.fittingSize
+        let margin: CGFloat = 12
+        pill.frame = NSRect(
+            x: ((bounds.width - size.width) / 2).rounded(),
+            y: isFlipped ? bounds.height - size.height - margin : margin,
+            width: size.width,
+            height: size.height
+        )
     }
 
     /// One `pane.scroll` in flight at a time; a gesture's later deltas fold
@@ -744,6 +781,7 @@ final class LineBreakTerminalView: AppTerminalView {
                     if self.historyTarget == offset, landed.offset != offset {
                         self.historyTarget = landed.offset
                         self.historySent = landed.offset
+                        self.updateJumpPill()
                     }
                 }
             }
@@ -755,6 +793,7 @@ final class LineBreakTerminalView: AppTerminalView {
         historyTarget = 0
         historySent = 0
         historyRemainder = 0
+        updateJumpPill()
     }
 
     override func setSurfaceVisible(_ visible: Bool) {
@@ -763,10 +802,7 @@ final class LineBreakTerminalView: AppTerminalView {
             hideLinkPopup()
             // Leaving a pane scrolled up would freeze its sidebar stats:
             // status-line plugins skip updates while herdr's viewport is up.
-            if historyTarget > 0 {
-                historyTarget = 0
-                flushHistoryScroll()
-            }
+            if historyTarget > 0 { jumpHistoryToBottom() }
         }
         guard visible != acceptsDrops else { return }
         acceptsDrops = visible
@@ -776,6 +812,7 @@ final class LineBreakTerminalView: AppTerminalView {
     override func setFrameSize(_ newSize: NSSize) {
         if newSize != frame.size { hideLinkPopup() }
         super.setFrameSize(newSize)
+        placeJumpPill()
     }
 
     private func updateLinkPopup() {
@@ -1923,6 +1960,58 @@ struct TerminalLink: Equatable {
 }
 
 /// The small Copy button shown over a link the pointer rests on.
+/// "Jump to bottom", shown while an agent pane is scrolled up its history.
+final class JumpToBottomPill: NSVisualEffectView {
+    private let onJump: () -> Void
+
+    init(onJump: @escaping () -> Void) {
+        self.onJump = onJump
+        super.init(frame: .zero)
+        material = .popover
+        blendingMode = .withinWindow
+        state = .active
+        wantsLayer = true
+        layer?.cornerRadius = 11
+        layer?.borderWidth = 0.5
+        layer?.borderColor = NSColor.separatorColor.cgColor
+
+        let button = NSButton(title: String(localized: "Jump to bottom"), target: nil, action: nil)
+        button.isBordered = false
+        button.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
+        button.image = NSImage(systemSymbolName: "arrow.down", accessibilityDescription: nil)
+        button.imagePosition = .imageTrailing
+        button.imageHugsTitle = true
+        button.contentTintColor = .labelColor
+        button.toolTip = String(localized: "Back to the live end; typing also returns there")
+        button.target = self
+        button.action = #selector(jumpClicked)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(button)
+        NSLayoutConstraint.activate([
+            button.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            button.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            button.topAnchor.constraint(equalTo: topAnchor, constant: 3),
+            button.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -3),
+        ])
+        setAccessibilityLabel(String(localized: "Jump to bottom"))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    // The terminal under the button must not see the click.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func updateLayer() {
+        super.updateLayer()
+        layer?.borderColor = NSColor.separatorColor.cgColor
+    }
+
+    @objc private func jumpClicked() {
+        onJump()
+    }
+}
+
 final class LinkCopyPopup: NSVisualEffectView {
     let link: TerminalLink
     private let onCopy: (TerminalLink) -> Void
