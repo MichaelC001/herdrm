@@ -92,6 +92,21 @@ struct RootView: View {
         .ignoresSafeArea(.container, edges: .top)
         .frame(minWidth: 980, minHeight: 620)
         .onAppear { model.start() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didHideNotification)) { _ in
+            model.refreshConversationHistoryVisibility()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didUnhideNotification)) { _ in
+            model.refreshConversationHistoryVisibility()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didMiniaturizeNotification)) { _ in
+            model.refreshConversationHistoryVisibility()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didDeminiaturizeNotification)) { _ in
+            model.refreshConversationHistoryVisibility()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            model.refreshConversationHistoryVisibility()
+        }
         .sheet(isPresented: $model.showAddDevice) { AddDeviceSheet(model: model) }
         .newItemSheets(model: model)
         .sheet(item: $model.spaceToRename) { entry in RenameSpaceSheet(model: model, entry: entry) }
@@ -565,6 +580,17 @@ struct DetailView: View {
                 // down: its content survives the round trip. Do not key this on the
                 // selection; that rebuild-on-switch is exactly what this removes.
                 tabLayoutArea(selected: entry)
+                    .overlay {
+                        if model.isClaudeHistorySelected {
+                            ConversationHistoryOverlay(controller: model.conversationHistory) {
+                                if let selected = model.selectedAttachedEntry {
+                                    AttachViewRegistry.focus(selected.id)
+                                }
+                            }
+                            .onAppear { model.setConversationHistoryVisible(true) }
+                            .onDisappear { model.setConversationHistoryVisible(false) }
+                        }
+                    }
             } second: {
                 ShellTerminalView(
                     fontName: terminalFontName,

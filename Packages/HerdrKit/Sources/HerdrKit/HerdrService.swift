@@ -6,6 +6,7 @@ public actor HerdrService {
     public let device: Device
     private var tunnel: SSHTunnel?
     private var rpc: SocketRPC?
+    private var conversationCapabilities: ConversationServerCapabilities?
     /// nil for remote devices and when auto-start is off; remotes are the user's to run.
     private let localServer: LocalHerdrServer?
     /// Auto-start is for a server that was never there, not for one that went away: see
@@ -71,6 +72,7 @@ public actor HerdrService {
             throw HerdrError.incompatibleProtocol(pong.protocolVersion)
         }
         rpc = client
+        conversationCapabilities = pong.capabilities
         everConnected = true
         return pong
     }
@@ -133,6 +135,7 @@ public actor HerdrService {
 
     public func disconnect() async {
         rpc = nil
+        conversationCapabilities = nil
         if let tunnel { await tunnel.tearDown() }
         if device.isTailcat { await TailcatBridgeManager.shared.tearDown(deviceID: device.id) }
     }
@@ -143,6 +146,28 @@ public actor HerdrService {
     }
 
     // MARK: - Reads
+
+    public func conversation(target: String, expectedSessionID: String, window: ConversationWindow, limits: ConversationLimits = .init()) async throws -> ConversationPage {
+        guard rpc != nil else { throw ConversationHistoryError.disconnected }
+        guard conversationCapabilities?.agentConversationRead == true else { throw ConversationHistoryError.unsupportedServer }
+        do {
+            return try await client().request(method: "agent.conversation.read", params: .object([
+                "target": .string(target), "expected_session_id": .string(expectedSessionID),
+                "window": window.json, "limit": .number(Double(limits.limit)), "max_bytes": .number(Double(limits.maxBytes))
+            ]), as: ConversationPage.self)
+        } catch { throw ConversationHistoryError.map(error) }
+    }
+
+    public func conversationBlock(target: String, expectedSessionID: String, blockCursor: String, maxBytes: Int = 1_048_576) async throws -> BlockPage {
+        guard rpc != nil else { throw ConversationHistoryError.disconnected }
+        guard conversationCapabilities?.agentConversationBlockRead == true else { throw ConversationHistoryError.unsupportedServer }
+        do {
+            return try await client().request(method: "agent.conversation.block.read", params: .object([
+                "target": .string(target), "expected_session_id": .string(expectedSessionID),
+                "block_cursor": .string(blockCursor), "max_bytes": .number(Double(min(1_048_576, max(1024, maxBytes))))
+            ]), as: BlockPage.self)
+        } catch { throw ConversationHistoryError.map(error) }
+    }
 
     public func snapshot() async throws -> SessionSnapshot {
         struct Envelope: Codable { let snapshot: SessionSnapshot }

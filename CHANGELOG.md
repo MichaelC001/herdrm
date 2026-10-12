@@ -5,6 +5,17 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
+## [Unreleased]
+
+### Added
+- **Claude conversation history (⇧⌘H).** A chronological prompt rail previews
+  sent messages and opens the full saved conversation, including Claude's
+  replies, in an overlay. Search, older/newer paging, expandable tool activity,
+  and complete-message reading/copying use a read-only API on the device
+  running Claude. Requires a matching herdr daemon with the history capability;
+  older servers keep normal terminal access. History browsing preserves the
+  running terminal and never resends a message.
+
 ## [0.6.15] - 2026-10-10
 
 ### Added

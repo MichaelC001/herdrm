@@ -171,7 +171,11 @@ final class AppModel: ObservableObject {
         }
     }
     private static let deviceFilterKey = "device.filter"
-    @Published var sessions: [UUID: DeviceSessionState] = [:]
+    @Published var sessions: [UUID: DeviceSessionState] = [:] {
+        didSet { synchronizeConversationHistory() }
+    }
+    let conversationHistory = ConversationHistoryController()
+    private var isConversationHistoryVisible = false
     @Published var selectedSpace: SpaceRef?
     @Published var selectedPane: PaneRef? {
         didSet {
@@ -185,6 +189,7 @@ final class AppModel: ObservableObject {
                 snapPaneViewportToBottom(pane)
                 refreshSelectedTabLayout()
             }
+            synchronizeConversationHistory()
         }
     }
 
@@ -253,7 +258,9 @@ final class AppModel: ObservableObject {
     @Published var showNewTerminal = false
     @Published var showNewSpace = false
     @Published var showSearch = false
-    @Published var isFileManagerActive = false
+    @Published var isFileManagerActive = false {
+        didSet { synchronizeConversationHistory() }
+    }
     @Published var shellSplitAxis: SplitAxis?
     /// Set by `reveal` when a jump lands while the ⌘D split is open, and consumed once the
     /// main window is key again. Only an actual jump sets it: dismissing the search with
@@ -282,7 +289,9 @@ final class AppModel: ObservableObject {
     /// Standalone terminals. Their views stay alive while deselected —
     /// unlike agents, a local shell has no server side to reattach to.
     @Published var shellSessions: [ShellSession] = []
-    @Published var selectedShellID: UUID?
+    @Published var selectedShellID: UUID? {
+        didSet { synchronizeConversationHistory() }
+    }
     /// In-window device panel (NSPopover crashes in ViewBridge on macOS 26+ betas).
     @Published var showDevicePanel = false
     /// Machine stats under the terminal: the sampler state lives in its own object so its
@@ -607,6 +616,48 @@ final class AppModel: ObservableObject {
         if let selectedEntry { return .agent(selectedEntry) }
         if let selectedTerminalEntry { return .terminal(selectedTerminalEntry) }
         return nil
+    }
+
+    var isClaudeHistorySelected: Bool {
+        guard !isFileManagerActive, selectedShellID == nil,
+              let entry = selectedEntry else { return false }
+        return ["claude", "claude-code"].contains(entry.agent.agent.lowercased())
+    }
+
+    func setConversationHistoryVisible(_ visible: Bool) {
+        isConversationHistoryVisible = visible
+        synchronizeConversationHistory()
+    }
+
+    func refreshConversationHistoryVisibility() {
+        synchronizeConversationHistory()
+    }
+
+    private var conversationWindowIsVisible: Bool {
+        guard isConversationHistoryVisible, !NSApplication.shared.isHidden else { return false }
+        let window = selectedAttachedEntry.flatMap { AttachViewRegistry.view(for: $0.id)?.window }
+            ?? NSApplication.shared.mainWindow
+        return window.map { $0.isVisible && !$0.isMiniaturized } ?? false
+    }
+
+    /// History follows the live agent reference, including a new Claude session
+    /// reported in a pane whose selection has not changed.
+    private func synchronizeConversationHistory() {
+        guard isClaudeHistorySelected, let entry = selectedEntry else {
+            conversationHistory.stop()
+            return
+        }
+        conversationHistory.select(
+            deviceID: entry.device.id,
+            paneID: entry.agent.paneID,
+            session: entry.agent.agentSession,
+            provider: ClaudeHistoryProvider(service: service(for: entry.device))
+        )
+        if case .connected = session(entry.device.id).connection {
+            conversationHistory.setVisible(conversationWindowIsVisible)
+        } else {
+            conversationHistory.setVisible(false)
+        }
     }
 
     /// The tab holding the selected pane.
@@ -956,6 +1007,9 @@ final class AppModel: ObservableObject {
     // MARK: - Lifecycle
 
     func start() {
+        // Hosted UI tests use fixture models; never attach their app host to
+        // the user's running agents merely because a window appears.
+        guard ProcessInfo.processInfo.environment["HERDRM_TEST_MODE"] != "1" else { return }
         NotificationManager.shared.setup(model: self)
         // Finder-launched apps have launchd's PATH. Capture the login +
         // interactive shell environment on a background thread once; New Agent
@@ -1376,6 +1430,7 @@ final class AppModel: ObservableObject {
     /// Tears down every live tunnel. Awaited from the app's terminate hook — `stopSession`
     /// fires its disconnect in a detached `Task`, which never runs when the process is exiting.
     func shutdownAllSessions() async {
+        conversationHistory.stop()
         let live = services
         services.removeAll()
         sessionTasks.values.forEach { $0.cancel() }
