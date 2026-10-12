@@ -11,6 +11,12 @@ private func levelColor(_ percent: Double) -> Color {
 
 // MARK: - Sidebar indicator
 
+/// Whether the sidebar shows the meters (View ▸ Show Machine Stats). Off also
+/// stops the sampler, since the sampler only runs while the meters are on screen.
+enum MachineStatsDefaults {
+    static let showKey = "sidebar.showMachineStats"
+}
+
 /// CPU / RAM / DISK meters for the selected pane's host, in the sidebar footer
 /// just above the device switcher. Clicking opens `MachineStatsPanel`. Runs the
 /// sampler while it is on screen and the window is visible.
@@ -54,6 +60,7 @@ struct SidebarMachineStats: View {
         .onHover { hovered = $0 }
         .help(String(localized: "\(device.name) health — click for details"))
         .accessibilityLabel(accessibilityText)
+        .accessibilityIdentifier("sidebar.machineStats")
         .background(WindowVisibilityReader(isVisible: $windowVisible))
         .task(id: WatchKey(device: device, visible: windowVisible)) {
             guard windowVisible else { return }

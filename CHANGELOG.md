@@ -5,6 +5,13 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
+## [Unreleased]
+
+### Added
+- **Hide the machine stats.** View › Show Machine Stats turns the CPU / RAM /
+  DISK meters in the sidebar footer off and on. While they are hidden their
+  sampler stops too, so a remote host no longer runs the stats loop over ssh.
+
 ## [0.6.15] - 2026-10-10
 
 ### Added
