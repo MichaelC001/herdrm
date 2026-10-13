@@ -55,7 +55,7 @@ struct SidebarView: View {
                     model.showNewAgent = true
                 }
                 // Terminals — herdr-owned or standalone — are listed under
-                // TERMINALS below; the ⌘D split beside an agent is separate.
+                // TERMINALS below; the local-shell split (⌃⇧D) beside an agent is separate.
                 actionRow(icon: "terminal", label: "New Terminal") {
                     model.showNewTerminal = true
                 }

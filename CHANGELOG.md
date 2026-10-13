@@ -7,6 +7,17 @@ the Sparkle update description — a release without a section here fails CI.
 
 ## [Unreleased]
 
+### Changed
+- **⌘D splits the herdr pane.** ⌘D and ⇧⌘D now add a herdr pane to the right
+  of or below the selected one, as they would in the herdr TUI: the new shell
+  opens in the selected pane's directory, joins the tab layout, shows in the
+  sidebar under its pane, and the pane keys reach it. Until now ⌘D opened
+  herdrm's own local shell beside the terminal area, which was in no tab, in no
+  sidebar row, stayed on screen whichever pane was selected, and could only be
+  reached with the ⌥⌘ arrows. That local shell is still there as Terminal ›
+  Split with Local Shell Right / Down (⌃⇧D / ⌃⇧S), the keys the herdr splits
+  had in 0.6.14.
+
 ### Added
 - **Claude conversation history.** A thin, compact chronological prompt rail floats
   over the terminal edge, softly blurred when idle and clear on hover. It enlarges
