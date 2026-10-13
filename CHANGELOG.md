@@ -8,6 +8,19 @@ the Sparkle update description — a release without a section here fails CI.
 ## [Unreleased]
 
 ### Added
+- **Split panes nest in the sidebar.** A pane split off another lists indented
+  under its tab's main pane (the oldest pane of the tab) with a split-pane
+  glyph, in the main pane's section: a shell split off an agent sits under
+  that agent in Agents. Once a tab is split, each pane shows its own title
+  instead of the tab label, so a `cd` or herdr's auto-title renaming the tab
+  no longer renames every pane of it.
+- **Group the sidebar by space.** Off by default. Each space row gets a
+  disclosure and lists its panes under it, a tab's main pane then the panes
+  split off it, so a team of agents reads as one unit. Agents and Terminals
+  stay as sections and collapse while grouping is on. Toggle from the sidebar
+  strip, View › Group Sidebar by Space, or Settings › Appearance.
+
+### Added
 - **Claude conversation history.** A thin, compact chronological prompt rail floats
   over the terminal edge, softly blurred when idle and clear on hover. It enlarges
   nearby marks on hover and shows a compact prompt/reply preview. Clicking a mark
