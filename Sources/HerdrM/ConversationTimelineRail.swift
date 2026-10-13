@@ -144,6 +144,9 @@ struct ConversationTimelineRail: View {
     @State private var isHovered = false
     @State private var previewHeight: CGFloat = 148
     @FocusState private var railFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var isActive: Bool { isHovered || railFocused }
 
     private var selectedIndex: Int? {
         ConversationRailSelection.index(messageID: controller.selectedMessageID, turns: controller.turns, messages: controller.messages)
@@ -162,6 +165,12 @@ struct ConversationTimelineRail: View {
                                  with: .color(mark.isSelected || hovered ? Theme.text : Theme.textGhost.opacity(0.7)))
                 }
             }
+            // The quiet rail lives over the terminal. Only its painted marks
+            // soften; pointer tracking, keyboard actions and the preview card
+            // remain sharp and keep the same navigation bounds.
+            .blur(radius: isActive ? 0 : 0.65)
+            .opacity(isActive ? 1 : 0.35)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isActive)
             .overlay {
                 let resting = ConversationRailGeometry(count: controller.turns.count, height: proxy.size.height)
                 ConversationRailPointerSurface(

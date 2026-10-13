@@ -93,7 +93,8 @@ macOS window on top of it, and it's grown well past "attach to a terminal":
 
 ### Files, search, and staying in the loop
 - **Claude conversation history** — select a Claude agent. The thin left timeline
-  keeps the message marks closely packed. Hover to grow the nearby marks and see a compact
+  floats over the terminal edge with closely packed, faint blurred marks. Hover to
+  reveal crisp marks at full color, grow the nearby marks and see a compact
   prompt/reply preview; click a mark to locate the rendered exchange in the
   existing terminal. The arrow at the bottom returns to live output. The bubble
   button or **⇧⌘H** opens the secondary full-conversation reader with search,

@@ -8,7 +8,8 @@ the Sparkle update description — a release without a section here fails CI.
 ## [Unreleased]
 
 ### Added
-- **Claude conversation history.** A thin, compact chronological prompt rail enlarges
+- **Claude conversation history.** A thin, compact chronological prompt rail floats
+  over the terminal edge, softly blurred when idle and clear on hover. It enlarges
   nearby marks on hover and shows a compact prompt/reply preview. Clicking a mark
   locates its supported rendered exchange in the existing terminal; a return-to-live
   control restores current output. The secondary reader (⇧⌘H) includes Claude's
