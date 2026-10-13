@@ -501,6 +501,17 @@ final class AppModel: ObservableObject {
             case .terminal(let entry): return .terminal(terminalID: entry.terminalID)
             }
         }
+
+    }
+
+    /// The pane's working directory as the latest snapshot has it, for
+    /// resolving relative file paths printed in it. Read from the live session
+    /// state, not the kept-alive attach entry: that entry is a value captured
+    /// when the pane was first shown, and a `cd` since then would be missed.
+    func workingDirectory(for ref: PaneRef) -> String? {
+        let state = session(ref.deviceID)
+        if let agent = state.agents.first(where: { $0.paneID == ref.paneID }) { return agent.cwd }
+        return state.panes.first(where: { $0.paneID == ref.paneID })?.cwd
     }
 
     struct SpaceEntry: Identifiable {

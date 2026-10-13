@@ -7,6 +7,16 @@ the Sparkle update description — a release without a section here fails CI.
 
 ## [Unreleased]
 
+### Added
+- **⌘-click a file path to open it.** Paths printed in a pane open the way
+  URLs do: `README.md` and `src/index.ts:42:7` resolve against the pane's
+  working directory as herdr reports it, `~/notes.txt` and absolute paths as
+  written, `file://` links too. Files open in their default app, folders in
+  Finder; anything that would run (an app, a package, an executable) is
+  revealed in Finder instead. Only paths that exist on this Mac become links,
+  so "see README.md" in prose stays text and panes on remote devices are left
+  alone. Hovering shows the same Copy button as for URLs.
+
 ### Fixed
 - Links work again: hovering a URL shows the Copy button and ⌘-click opens it.
   herdr's attach client keeps mouse reporting on, so herdrm maps the pointer to

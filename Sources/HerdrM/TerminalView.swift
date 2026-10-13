@@ -394,6 +394,11 @@ final class LineBreakTerminalView: AppTerminalView {
     /// `viewport` (from the PTY resize callback) carries columns, rows and the
     /// surface size but no cell size, so this is where cell pixels come from.
     var gridMetrics: TerminalGridMetrics?
+    /// Where printed file paths resolve: the pane's working directory, and
+    /// whether the pane's files are on this Mac at all. Nil disables path
+    /// links (an app shell has no herdr cwd to anchor relative paths, but its
+    /// absolute paths still resolve when `isLocal`).
+    var pathContext: TerminalPathContext?
     /// Lazily created by `showFind()`; lives in TerminalFindBar.swift.
     var findBar: TerminalFindBar?
 
@@ -605,6 +610,7 @@ final class LineBreakTerminalView: AppTerminalView {
         let row = Int(((fromTop - Self.gridPadding) / cellHeight).rounded(.down))
         let lines = text.components(separatedBy: "\n")
         guard let link = Self.link(in: lines, row: row, column: column, columns: Int(viewport.columns))
+            ?? fileLink(in: lines, row: row, column: column, columns: Int(viewport.columns))
         else { return nil }
         let rowTop = Self.gridPadding + CGFloat(row) * cellHeight
         let rowRect = NSRect(
@@ -643,6 +649,26 @@ final class LineBreakTerminalView: AppTerminalView {
     /// The link printed at a cell: `text` exactly as shown (rows rejoined, no
     /// line breaks) for copying, `url` normalized for opening.
     static func link(in lines: [String], row: Int, column: Int, columns: Int) -> TerminalLink? {
+        guard let (joined, clickOffset) = joinedRow(in: lines, row: row, column: column, columns: columns),
+              let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        else { return nil }
+        let range = NSRange(joined.startIndex..., in: joined)
+        for match in detector.matches(in: joined, range: range)
+        where NSLocationInRange(clickOffset, match.range) {
+            // Bare words the detector promotes (README.md, foo.io) are not links.
+            let matched = (joined as NSString).substring(with: match.range)
+            guard matched.contains("://") || matched.hasPrefix("mailto:"),
+                  let url = match.url
+            else { return nil }
+            return TerminalLink(text: matched, url: url.absoluteString)
+        }
+        return nil
+    }
+
+    /// The clicked row with the rows it soft-wraps into rejoined, and the UTF-16
+    /// offset of the clicked cell in that text. Nil when the click is past the
+    /// end of the row.
+    static func joinedRow(in lines: [String], row: Int, column: Int, columns: Int) -> (text: String, offset: Int)? {
         guard lines.indices.contains(row), column >= 0 else { return nil }
         let isFull = { (line: String) in displayWidth(line) >= columns }
         var first = row
@@ -665,20 +691,25 @@ final class LineBreakTerminalView: AppTerminalView {
             }
             joined += lines[index]
         }
-        guard let clickOffset,
-              let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        guard let clickOffset else { return nil }
+        return (joined, clickOffset)
+    }
+
+    /// A file path printed at the cell, if it names something on this Mac.
+    /// Relative paths resolve against the pane's working directory from herdr,
+    /// which is what lets `src/index.ts:42` in a compiler message open. Only
+    /// paths that exist count, so prose like "README.md" stays plain text, and
+    /// nothing resolves for a pane on another machine.
+    private func fileLink(in lines: [String], row: Int, column: Int, columns: Int) -> TerminalLink? {
+        guard let context = pathContext, context.isLocal,
+              let (joined, clickOffset) = Self.joinedRow(in: lines, row: row, column: column, columns: columns),
+              let candidate = TerminalFilePaths.candidate(in: joined, at: clickOffset),
+              let resolved = TerminalFilePaths.resolve(
+                  path: candidate.path, cwd: context.workingDirectory, home: NSHomeDirectory()
+              ),
+              FileManager.default.fileExists(atPath: resolved)
         else { return nil }
-        let range = NSRange(joined.startIndex..., in: joined)
-        for match in detector.matches(in: joined, range: range)
-        where NSLocationInRange(clickOffset, match.range) {
-            // Bare words the detector promotes (README.md, foo.io) are not links.
-            let matched = (joined as NSString).substring(with: match.range)
-            guard matched.contains("://") || matched.hasPrefix("mailto:"),
-                  let url = match.url
-            else { return nil }
-            return TerminalLink(text: matched, url: url.absoluteString)
-        }
-        return nil
+        return TerminalLink(text: candidate.text, url: URL(fileURLWithPath: resolved).absoluteString)
     }
 
     private static func displayWidth(_ line: String) -> Int {
@@ -1083,10 +1114,34 @@ final class LineBreakTerminalView: AppTerminalView {
     /// mail schemes are opened.
     static func openClickedLink(_ string: String) {
         guard let url = URL(string: string),
-              let scheme = url.scheme?.lowercased(),
-              ["http", "https", "mailto"].contains(scheme)
+              let scheme = url.scheme?.lowercased()
         else { return }
-        NSWorkspace.shared.open(url)
+        if scheme == "file" {
+            openLocalFile(url)
+        } else if ["http", "https", "mailto"].contains(scheme) {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// A file link, from a printed path that exists on this Mac or an OSC 8
+    /// `file://` target. Folders open in Finder; files open in their default
+    /// app, except anything that would run: an app bundle, a package or an
+    /// executable is revealed in Finder instead, since the path came from
+    /// terminal output and a click should never launch what it names.
+    static func openLocalFile(_ url: URL) {
+        let path = url.path
+        guard !path.isEmpty else { return }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else { return }
+        let fileURL = URL(fileURLWithPath: path)
+        let values = try? fileURL.resourceValues(forKeys: [.isPackageKey, .isExecutableKey, .isApplicationKey])
+        let runs = values?.isPackage == true || values?.isApplication == true
+            || (isDirectory.boolValue == false && values?.isExecutable == true)
+        if runs {
+            NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+        } else {
+            NSWorkspace.shared.open(fileURL)
+        }
     }
 
     @objc private func copyLinkFromMenu(_ sender: NSMenuItem) {
@@ -1569,6 +1624,8 @@ struct AttachTerminalView: NSViewRepresentable {
     /// Registry identity (the `AttachedEntry.id`), so the view stays addressable for
     /// focus while kept alive in the background. nil when not tracked.
     var sessionID: String? = nil
+    /// The pane's working directory from herdr, for printed relative paths.
+    var workingDirectory: String? = nil
     /// The device's herdr server version, so attach picks a matching CLI binary.
     var serverVersion: String?
     /// nil when the server or active manifest does not advertise attachment support.
@@ -1654,6 +1711,7 @@ struct AttachTerminalView: NSViewRepresentable {
         configurePasteHandling(nsView)
         context.coordinator.onExit = onExit
         configureAppearance(nsView)
+        nsView.pathContext = TerminalPathContext(workingDirectory: workingDirectory, isLocal: device.isLocal)
         nsView.setSurfaceVisible(isVisible)
     }
 
@@ -1926,6 +1984,7 @@ struct ShellTerminalView: NSViewRepresentable {
         context.coordinator.onExit = onExit
         nsView.onAttachmentError = onAttachmentError
         nsView.onAttachmentUploadingChanged = onAttachmentUploadingChanged
+        nsView.pathContext = TerminalPathContext(workingDirectory: nil, isLocal: device.isLocal)
         nsView.setSurfaceVisible(isVisible)
         applyTerminalAppearance(
             nsView,
@@ -2009,6 +2068,14 @@ struct ShellTerminalView: NSViewRepresentable {
 }
 
 // MARK: - Link copy popup
+
+/// Where a pane's printed file paths resolve.
+struct TerminalPathContext: Equatable {
+    /// The pane's working directory as herdr reports it; nil for an app shell.
+    var workingDirectory: String?
+    /// The pane runs on this Mac, so its paths can be checked and opened here.
+    var isLocal: Bool
+}
 
 /// A link printed in the terminal: `text` exactly as shown, rows rejoined,
 /// and `url` normalized for opening.
