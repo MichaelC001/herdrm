@@ -248,6 +248,11 @@ final class ConversationHistoryDrawerTests: XCTestCase {
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         let content = try XCTUnwrap(hosted.contentView)
         let pointer = try XCTUnwrap(descendants(content).compactMap { $0 as? ConversationRailPointerView }.first)
+        let railFrame = pointer.convert(pointer.bounds, to: terminal)
+        XCTAssertLessThanOrEqual(railFrame.height, terminal.bounds.height * 0.75,
+                                 "Long histories must not stretch the rail over the whole terminal")
+        XCTAssertGreaterThanOrEqual(railFrame.minY, terminal.bounds.height * 0.2,
+                                    "The rail leaves the lower terminal input and status area clear")
         XCTAssertFalse(pointer.acceptsFirstResponder)
         XCTAssertTrue(pointer.acceptsFirstMouse(for: nil))
         XCTAssertFalse(pointer.isAccessibilityElement())

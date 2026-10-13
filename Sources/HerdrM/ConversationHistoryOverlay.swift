@@ -25,10 +25,12 @@ private struct ConversationOverlayContent: View {
     @State private var noticeDismissed = false
     var body: some View {
         GeometryReader { geometry in
+            let railViewport = ConversationRailViewport(height: geometry.size.height)
             ZStack(alignment: .topTrailing) {
                 HStack(spacing: 0) {
                     VStack(spacing: 6) {
                         ConversationTimelineRail(controller: controller, previewWidth: min(320, max(0, geometry.size.width - 76)), onJump: onJump)
+                            .frame(height: railViewport.height)
                         ProgressView().controlSize(.mini).frame(height: 18)
                             .opacity(controller.isJumping ? 1 : 0)
                             .allowsHitTesting(false).accessibilityHidden(!controller.isJumping)
@@ -39,7 +41,10 @@ private struct ConversationOverlayContent: View {
                             .accessibilityLabel("Return to live terminal")
                             .accessibilityIdentifier("history.returnToLive")
                     }
-                    .frame(width: 36).padding(.vertical, 12)
+                    .frame(width: 36)
+                    .padding(.top, railViewport.topInset)
+                    .padding(.bottom, 12)
+                    .frame(maxHeight: .infinity, alignment: .top)
                     Spacer(minLength: 0)
                 }
                 if controller.isPresented {
