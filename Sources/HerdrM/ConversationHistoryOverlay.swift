@@ -1,8 +1,10 @@
 import SwiftUI
 
 /// Only the rail, navigation controls and visible drawer receive pointer events.
-/// The terminal beneath keeps its original frame and retained surface identity.
+/// The rail uses a reserved leading column; opening the drawer keeps the retained
+/// terminal's frame and surface identity stable.
 struct ConversationHistoryOverlay: View {
+    static let gutterWidth: CGFloat = 36
     @ObservedObject var controller: ConversationHistoryController
     var onClose: (() -> Void)? = nil
     var onJump: ((String) -> Void)? = nil
@@ -41,7 +43,7 @@ private struct ConversationOverlayContent: View {
                             .accessibilityLabel("Return to live terminal")
                             .accessibilityIdentifier("history.returnToLive")
                     }
-                    .frame(width: 36)
+                    .frame(width: ConversationHistoryOverlay.gutterWidth)
                     .padding(.top, railViewport.topInset)
                     .padding(.bottom, 12)
                     .frame(maxHeight: .infinity, alignment: .top)

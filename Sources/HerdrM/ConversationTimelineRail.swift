@@ -177,7 +177,7 @@ struct ConversationTimelineRail: View {
                                  with: .color(mark.isSelected || hovered ? Theme.text : Theme.textGhost.opacity(0.7)))
                 }
             }
-            // The quiet rail lives over the terminal. Only its painted marks
+            // The quiet rail lives beside the terminal. Only its painted marks
             // soften; pointer tracking, keyboard actions and the preview card
             // remain sharp and keep the same navigation bounds.
             .blur(radius: isActive ? 0 : 0.65)
@@ -259,7 +259,7 @@ struct ConversationTimelineRail: View {
                 }
             }
         }
-        .frame(width: 36)
+        .frame(width: ConversationHistoryOverlay.gutterWidth)
         .onChange(of: controller.turns.count) { _, count in
             if let index = previewIndex, index >= count { previewIndex = count > 0 ? count - 1 : nil }
         }
