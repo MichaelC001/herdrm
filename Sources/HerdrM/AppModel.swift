@@ -59,6 +59,9 @@ struct DeviceSessionState {
     /// grazr's accounts, for the menu's Switch to Account list. Nil until
     /// read, or when the device runs no grazr.
     var grazrReport: GrazrReport?
+    /// The device runs grazr (its plugin is installed), read with the plugin
+    /// actions. Gates the automatic model switch.
+    var usesGrazr = false
 }
 
 struct SSHAuthenticationRequest: Identifiable {
@@ -321,6 +324,10 @@ final class AppModel: ObservableObject {
     private var refreshRequested: Set<UUID> = []
     private var statusGenerations: [UUID: UInt64] = [:]
     private var previousStatuses: [UUID: [String: AgentStatus]] = [:]
+    /// Claude panes already checked for the usage-credits dialog during their
+    /// current blocked spell, per device. A pane leaves when it stops being
+    /// blocked, so a later spell is checked again.
+    private var modelSwitchChecked: [UUID: Set<String>] = [:]
 
     init() {
         let loaded = DeviceStore().load()
@@ -1133,6 +1140,12 @@ final class AppModel: ObservableObject {
         // An older server without plugin RPCs keeps an empty menu section.
         guard let actions = try? await service.pluginActions() else { return }
         sessions[deviceID]?.pluginActions = PluginActionGroup.menu(actions)
+        sessions[deviceID]?.usesGrazr = actions.contains(where: { $0.pluginID == Grazr.pluginID })
+        // The first snapshot came before this, so a pane already waiting on
+        // the usage-credits dialog when herdrm connected is checked now.
+        if let device = device(deviceID) {
+            autoSwitchModels(device: device, agents: session(deviceID).agents)
+        }
         if actions.contains(where: { $0.pluginID == Grazr.pluginID }) {
             // Not awaited: an SSH round trip must not hold up the connect.
             Task { await loadGrazrReport(deviceID: deviceID) }
@@ -1628,6 +1641,7 @@ final class AppModel: ObservableObject {
                 workspaces: snapshot.workspaces,
                 tabs: snapshot.tabs ?? []
             )
+            autoSwitchModels(device: device, agents: snapshot.agents)
             previousStatuses[deviceID] = Dictionary(
                 uniqueKeysWithValues: snapshot.agents.map { ($0.paneID, $0.status) }
             )
@@ -1747,6 +1761,7 @@ final class AppModel: ObservableObject {
             workspaces: state.workspaces,
             tabs: state.tabs
         )
+        autoSwitchModels(device: device, agents: state.agents)
         var nextStatuses = previous
         nextStatuses[paneID] = status
         previousStatuses[deviceID] = nextStatuses
@@ -1792,6 +1807,81 @@ final class AppModel: ObservableObject {
                 spaceName: workspaces.first { $0.workspaceID == agent.workspaceID }?.label ?? agent.workspaceID
             )
         }
+    }
+
+    // MARK: - Automatic model switch (grazr)
+
+    /// Settings › Agents: answer Claude's usage-credits dialog by switching model.
+    static let autoModelSwitchKey = "grazr.autoModelSwitch"
+
+    /// When the week's Fable allowance is spent, Claude Code stops before its
+    /// next request and asks whether to switch to its fallback model or pay
+    /// for Fable with usage credits. No request fails, so grazr never hears of
+    /// it, and an unattended agent waits on the dialog. herdr reports the pane
+    /// as blocked; with the setting on, on a device that runs grazr, each
+    /// Claude pane that turns blocked is read once and answered with the
+    /// switch, so the agent keeps working.
+    private func autoSwitchModels(device: Device, agents: [AgentInfo]) {
+        let blocked = Set(agents.filter { $0.status == .blocked && $0.agent == "claude" }.map(\.paneID))
+        let checked = modelSwitchChecked[device.id, default: []].intersection(blocked)
+        modelSwitchChecked[device.id] = checked
+        guard UserDefaults.standard.bool(forKey: Self.autoModelSwitchKey),
+              session(device.id).usesGrazr
+        else { return }
+        for paneID in blocked.subtracting(checked) {
+            modelSwitchChecked[device.id, default: []].insert(paneID)
+            Task { await self.answerModelSwitchPrompt(paneID: paneID, device: device) }
+        }
+    }
+
+    /// Presses Enter on the dialog, only while its focused option is the switch
+    /// to another model, the one choice that spends nothing. The dialog first
+    /// checks the credit balance and ignores keys for a moment after each step
+    /// appears, so the option must read the same on two looks a second apart
+    /// before a key goes in, and a key it swallowed is sent again.
+    private func answerModelSwitchPrompt(paneID: String, device: Device) async {
+        var lastSeen: String?
+        var presses = 0
+        var target: String?
+        for _ in 0..<12 {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard let service = services[device.id],
+                  let screen = try? await service.readPaneText(paneID: paneID)
+            else { return }
+            guard ModelSwitchPrompt.isShowing(in: screen) else {
+                if let target { reportModelSwitch(to: target, paneID: paneID, device: device) }
+                return
+            }
+            guard let seen = ModelSwitchPrompt.switchTarget(in: screen) else {
+                lastSeen = nil
+                continue
+            }
+            guard seen == lastSeen, presses < 3 else {
+                lastSeen = seen
+                continue
+            }
+            do {
+                try await service.sendKeys(paneID: paneID, keys: ["enter"])
+            } catch {
+                return
+            }
+            presses += 1
+            target = seen
+            // A key the dialog swallowed is sent again, after two more looks.
+            lastSeen = nil
+        }
+    }
+
+    private func reportModelSwitch(to model: String, paneID: String, device: Device) {
+        let state = session(device.id)
+        let agent = state.agents.first { $0.paneID == paneID }
+        let tabLabel = agent.flatMap { agent in state.tabs.first { $0.tabID == agent.tabID }?.customLabel }
+        let name = agent?.title(tabLabel: tabLabel) ?? paneID
+        NotificationManager.shared.postPluginResult(
+            title: String(localized: "grazr: \(name) switched to \(model)"),
+            body: String(localized: "Its Fable allowance ran out and usage credits are off, so it continues on \(model)."),
+            deviceName: device.name
+        )
     }
 
     /// Sniffs the device OS once (for the OS brand icon) and persists it.

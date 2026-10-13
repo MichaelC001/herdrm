@@ -534,6 +534,23 @@ public actor HerdrService {
         return (text, revision)
     }
 
+    /// Reads the pane's visible screen as plain text, without ANSI, for matching
+    /// what a pane shows.
+    public func readPaneText(paneID: String) async throws -> String {
+        let result = try await client().request(
+            method: "pane.read",
+            params: .object([
+                "pane_id": .string(paneID),
+                "source": .string("visible"),
+                "format": .string("text"),
+            ])
+        )
+        guard let text = result["read"]?["text"]?.stringValue else {
+            throw HerdrError.malformedResponse("pane.read returned no text")
+        }
+        return text
+    }
+
     /// Sends literal text (herdr wraps it in bracketed paste when the app enables it —
     /// right for pastes, wrong for keystrokes; use sendKeys for those).
     public func sendInput(paneID: String, text: String) async throws {
