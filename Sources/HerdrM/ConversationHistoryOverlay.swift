@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Only the rail, entry button and visible drawer receive pointer events.
+/// Only the rail, navigation controls and visible drawer receive pointer events.
 /// The terminal beneath keeps its original frame and retained surface identity.
 struct ConversationHistoryOverlay: View {
     @ObservedObject var controller: ConversationHistoryController
@@ -38,12 +38,6 @@ private struct ConversationOverlayContent: View {
                             .help("Return to live terminal")
                             .accessibilityLabel("Return to live terminal")
                             .accessibilityIdentifier("history.returnToLive")
-                        Button { controller.open() } label: { Image(systemName: "text.bubble") }
-                            .buttonStyle(.plain).foregroundStyle(Theme.textTertiary)
-                            .keyboardShortcut("h", modifiers: [.command, .shift])
-                            .help("Read full conversation (⇧⌘H)")
-                            .accessibilityLabel("Read full conversation")
-                            .accessibilityIdentifier("history.open")
                     }
                     .frame(width: 36).padding(.vertical, 12)
                     Spacer(minLength: 0)

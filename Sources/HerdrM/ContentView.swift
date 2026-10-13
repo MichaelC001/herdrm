@@ -88,6 +88,7 @@ struct RootView: View {
         .focusedSceneValue(\.appModel, model)
         .focusedSceneValue(\.splitAxis, model.shellSplitAxis)
         .focusedSceneValue(\.tabLayoutActive, model.visibleTabLayout != nil)
+        .focusedSceneValue(\.claudeHistorySelected, model.isClaudeHistorySelected)
         .sheet(isPresented: $model.showSearch) { SearchSheet(model: model) }
         .ignoresSafeArea(.container, edges: .top)
         .frame(minWidth: 980, minHeight: 620)

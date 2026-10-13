@@ -11,6 +11,8 @@ enum AccessibilityProbe {
         /// What VoiceOver reads: the description, else the title.
         let name: String?
         let identifier: String?
+        /// Screen coordinates reported by accessibility (origin at top left).
+        let frame: CGRect?
         fileprivate let ref: AXUIElement
     }
 
@@ -46,10 +48,23 @@ enum AccessibilityProbe {
             role: attribute(element, kAXRoleAttribute) as? String ?? "",
             name: name,
             identifier: attribute(element, kAXIdentifierAttribute) as? String,
+            frame: frame(of: element),
             ref: element
         ))
         for child in attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? [] {
             walk(child, into: &out, depth: depth + 1)
         }
+    }
+
+    private static func frame(of element: AXUIElement) -> CGRect? {
+        guard let position = attribute(element, kAXPositionAttribute),
+              let size = attribute(element, kAXSizeAttribute),
+              CFGetTypeID(position as CFTypeRef) == AXValueGetTypeID(),
+              CFGetTypeID(size as CFTypeRef) == AXValueGetTypeID() else { return nil }
+        var point = CGPoint.zero
+        var dimensions = CGSize.zero
+        guard AXValueGetValue(position as! AXValue, .cgPoint, &point),
+              AXValueGetValue(size as! AXValue, .cgSize, &dimensions) else { return nil }
+        return CGRect(origin: point, size: dimensions)
     }
 }
