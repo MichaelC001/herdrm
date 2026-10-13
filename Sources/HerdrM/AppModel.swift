@@ -628,12 +628,18 @@ final class AppModel: ObservableObject {
         )
     }
 
-    private func attachedEntry(for leaf: SidebarTree.Leaf, device: Device) -> AttachedEntry {
+    /// The row entry for a pane. A tab label names the tab, which the main pane
+    /// stands for; a child pane keeps its own title (OSC title, then cwd), or
+    /// every pane of a tab would rename together whenever the tab does, as it
+    /// did with herdr's auto-title following a `cd` in one of them.
+    private func attachedEntry(for leaf: SidebarTree.Leaf, device: Device, isChild: Bool = false) -> AttachedEntry {
         switch leaf {
         case .agent(let agent):
-            return .agent(agentEntry(device: device, agent: agent))
+            return .agent(isChild
+                ? AgentEntry(device: device, agent: agent, tabLabel: nil)
+                : agentEntry(device: device, agent: agent))
         case .terminal(let pane):
-            let tab = session(device.id).tabs.first { $0.tabID == pane.tabID }
+            let tab = isChild ? nil : session(device.id).tabs.first { $0.tabID == pane.tabID }
             // `ordinaryTerminalPanes` only keeps panes with a terminal id.
             return .terminal(TerminalEntry(device: device, pane: pane, tab: tab, terminalID: pane.terminalID ?? ""))
         }
@@ -663,7 +669,7 @@ final class AppModel: ObservableObject {
                         if case .agent = child.leaf { childIsAgent = true } else { childIsAgent = false }
                         guard childIsAgent == wantAgents else { continue }
                         rows.append(SidebarRow(
-                            entry: attachedEntry(for: child.leaf, device: device),
+                            entry: attachedEntry(for: child.leaf, device: device, isChild: true),
                             indent: mainBelongs ? 1 : 0,
                             isChild: mainBelongs
                         ))
@@ -693,7 +699,7 @@ final class AppModel: ObservableObject {
         for tab in space.tabs {
             rows.append(SidebarRow(entry: attachedEntry(for: tab.main.leaf, device: entry.device), indent: 1, isChild: false))
             for child in tab.main.children {
-                rows.append(SidebarRow(entry: attachedEntry(for: child.leaf, device: entry.device), indent: 2, isChild: true))
+                rows.append(SidebarRow(entry: attachedEntry(for: child.leaf, device: entry.device, isChild: true), indent: 2, isChild: true))
             }
         }
         return rows
