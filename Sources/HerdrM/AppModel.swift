@@ -250,6 +250,8 @@ final class AppModel: ObservableObject {
     private var tabLayoutFetchGen: [TabRef: Int] = [:]
     /// Finished agents the user has not opened since they flipped to `done`.
     @Published private(set) var unreadAgents: Set<AgentUnreadKey> = []
+    /// New Agent's Recent list: the last launches, newest first.
+    @Published private(set) var recentLaunches: [RecentAgentLaunch] = RecentAgentLaunches.load()
 
     @Published var showAddDevice = false
     @Published var showNewAgent = false
@@ -1652,6 +1654,7 @@ final class AppModel: ObservableObject {
                 workspaces: snapshot.workspaces
             )
             sessions[deviceID]?.panes = snapshot.ordinaryTerminalPanes
+            seedRecentLaunches(deviceID: deviceID)
             let paneIDs = Set((snapshot.panes ?? []).map(\.paneID))
                 .union(snapshot.agents.map(\.paneID))
             // Drop kept-alive attaches whose pane is gone (closed). A pane only taken
@@ -1951,8 +1954,9 @@ final class AppModel: ObservableObject {
         workspaceID: String?,
         kind: String
     ) async throws -> String {
+        let label = newAgentLabel(device: device, workspaceID: workspaceID, kind: kind)
         do {
-            return try await service.createTab(workspaceID: workspaceID, cwd: nil, label: kind)
+            return try await service.createTab(workspaceID: workspaceID, cwd: nil, label: label)
         } catch HerdrError.rpc(let code, _) where code == "workspace_not_found" && workspaceID == nil {
             let created = try await service.createWorkspace(
                 label: nil,
@@ -1961,6 +1965,18 @@ final class AppModel: ObservableObject {
             if let rootPaneID = created.rootPaneID { return rootPaneID }
             return try await service.createTab(workspaceID: created.workspaceID, cwd: nil, label: kind)
         }
+    }
+
+    /// The new agent is named after its space (the project), numbered when
+    /// the space already has an agent of that name.
+    private func newAgentLabel(device: Device, workspaceID: String?, kind: String) -> String {
+        let state = session(device.id)
+        let space = workspaceID.map { id in state.workspaces.first { $0.workspaceID == id } }
+            ?? state.workspaces.first { $0.focused == true }
+        let taken = Set(state.agents.map { agent in
+            agent.title(tabLabel: state.tabs.first { $0.tabID == agent.tabID }?.customLabel)
+        })
+        return NewAgentLabel.make(spaceLabel: space?.label, kind: kind, taken: taken)
     }
 
     // MARK: - Closing
@@ -2302,7 +2318,9 @@ final class AppModel: ObservableObject {
         kind: String,
         workspaceID: String?,
         args: [String],
-        grazrAccount: GrazrAccount? = nil
+        grazrAccount: GrazrAccount? = nil,
+        recordedArguments: [String]? = nil,
+        closingPane: String? = nil
     ) {
         Task {
             // An account not signed in for pinned agents yet is signed in
@@ -2347,13 +2365,105 @@ final class AppModel: ObservableObject {
                         waitForShell: true
                     )
                 }
+                if let closingPane {
+                    try? await service.closePane(paneID: closingPane)
+                }
                 await refresh(device.id)
+                recordLaunch(
+                    device: device, kind: kind, paneID: pane,
+                    arguments: recordedArguments ?? args, grazrAccount: grazrAccount
+                )
                 isFileManagerActive = false
                 selectedPane = PaneRef(deviceID: device.id, paneID: pane)
             } catch {
                 if let createdPane {
                     try? await service.closePane(paneID: createdPane)
                 }
+                actionError = actionErrorMessage(error, device: device)
+            }
+        }
+    }
+
+    // MARK: - Recent launches
+
+    /// Remembers a launch for New Agent's Recent list, by its space's name
+    /// and folder, read once the new pane shows up in the snapshot.
+    private func recordLaunch(
+        device: Device, kind: String, paneID: String, arguments: [String], grazrAccount: GrazrAccount?
+    ) {
+        let state = session(device.id)
+        guard let agent = state.agents.first(where: { $0.paneID == paneID }),
+              let space = state.workspaces.first(where: { $0.workspaceID == agent.workspaceID })
+        else { return }
+        let launch = RecentAgentLaunch(
+            deviceID: device.id, kind: kind, spaceLabel: space.label, directory: agent.cwd,
+            arguments: arguments, grazrAccountID: grazrAccount?.id, date: Date()
+        )
+        recentLaunches = RecentAgentLaunches.recording(launch, into: recentLaunches)
+        RecentAgentLaunches.save(recentLaunches)
+    }
+
+    /// Devices whose running agents were offered to the Recent list this run.
+    private var recentSeededDevices: Set<UUID> = []
+
+    /// Once per device and run: agents already running there join the Recent
+    /// list (behind recorded launches), with the kind's default arguments.
+    private func seedRecentLaunches(deviceID: UUID) {
+        guard !recentSeededDevices.contains(deviceID) else { return }
+        recentSeededDevices.insert(deviceID)
+        let state = session(deviceID)
+        let running = state.agents.compactMap { agent -> RecentAgentLaunch? in
+            guard let kind = agent.agentKindRaw,
+                  let space = state.workspaces.first(where: { $0.workspaceID == agent.workspaceID })
+            else { return nil }
+            return RecentAgentLaunch(
+                deviceID: deviceID, kind: kind, spaceLabel: space.label, directory: agent.cwd,
+                arguments: (try? AgentLaunchArguments.tokenize(AgentLaunchArgsStore.resolved(for: kind))) ?? [],
+                grazrAccountID: nil, date: Date()
+            )
+        }
+        let seeded = RecentAgentLaunches.seeding(running, into: recentLaunches)
+        guard seeded != recentLaunches else { return }
+        recentLaunches = seeded
+        RecentAgentLaunches.save(recentLaunches)
+    }
+
+    func forgetRecentLaunch(_ launch: RecentAgentLaunch) {
+        recentLaunches.removeAll { $0.id == launch.id }
+        RecentAgentLaunches.save(recentLaunches)
+    }
+
+    /// Starts a remembered launch again: same device, agent, arguments and
+    /// account, in the space of that name. A space that was closed since is
+    /// opened again in the agent's folder. `continueConversation` adds
+    /// Claude's `--continue`, which resumes the folder's last conversation.
+    func startRecentLaunch(_ launch: RecentAgentLaunch, continueConversation: Bool = false) {
+        guard let device = device(launch.deviceID) else { return }
+        let state = session(device.id)
+        let account = launch.grazrAccountID.flatMap { id in state.grazrReport?.accounts.first { $0.id == id } }
+        let args = launch.arguments + (continueConversation ? ["--continue"] : [])
+        if let space = state.workspaces.first(where: { $0.label == launch.spaceLabel }) {
+            startNewAgent(
+                device: device, kind: launch.kind, workspaceID: space.workspaceID, args: args,
+                grazrAccount: account, recordedArguments: launch.arguments
+            )
+            return
+        }
+        guard let directory = launch.directory else {
+            actionError = String(localized: "The space \(launch.spaceLabel) is gone and its folder is unknown.")
+            return
+        }
+        Task {
+            do {
+                let created = try await service(for: device).createWorkspace(label: launch.spaceLabel, cwd: directory)
+                await refresh(device.id)
+                // The new space's first pane is a plain shell; the agent gets
+                // its own tab, and that shell is closed once it runs.
+                startNewAgent(
+                    device: device, kind: launch.kind, workspaceID: created.workspaceID, args: args,
+                    grazrAccount: account, recordedArguments: launch.arguments, closingPane: created.rootPaneID
+                )
+            } catch {
                 actionError = actionErrorMessage(error, device: device)
             }
         }

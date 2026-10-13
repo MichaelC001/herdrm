@@ -4097,6 +4097,86 @@
         }
       }
     },
+    "RECENT": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RECENT"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最近"
+          }
+        }
+      }
+    },
+    "Start %@ in %@ again": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start %1$@ in %2$@ again"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 %2$@ 中再次启动 %1$@"
+          }
+        }
+      }
+    },
+    "Continue the last conversation in this folder (claude --continue)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue the last conversation in this folder (claude --continue)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "继续此文件夹中的上一次对话（claude --continue）"
+          }
+        }
+      }
+    },
+    "Remove from Recent": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove from Recent"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从最近中移除"
+          }
+        }
+      }
+    },
+    "The space %@ is gone and its folder is unknown.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The space %@ is gone and its folder is unknown."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "空间 %@ 已不存在，且其文件夹未知。"
+          }
+        }
+      }
+    },
     "grazr: %@ switched to %@": {
       "localizations": {
         "en": {
