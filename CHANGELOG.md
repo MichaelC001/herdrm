@@ -8,6 +8,11 @@ the Sparkle update description — a release without a section here fails CI.
 ## [Unreleased]
 
 ### Added
+- **Scroll an agent pane's history with the wheel.** Scrolling up in an attached
+  agent pane now walks herdr's pane scrollback (`pane.scroll`), the way herdr's
+  own client does, instead of sending the wheel to the agent's prompt. A "Jump
+  to bottom" pill returns to the live end, and any input — typing, Return, a
+  paste or a drop — snaps back there too. (#130, thanks @senadaruc!)
 - **Hide the machine stats.** View › Show Machine Stats turns the CPU / RAM /
   DISK meters in the sidebar footer off and on. While they are hidden their
   sampler stops too, so a remote host no longer runs the stats loop over ssh.

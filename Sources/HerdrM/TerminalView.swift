@@ -431,21 +431,28 @@ final class LineBreakTerminalView: AppTerminalView {
 
     override func keyDown(with event: NSEvent) {
         hideLinkPopup()
-        // herdr returns a scrolled pane to the bottom on input.
-        forgetHistoryScroll()
         locallyConsumedCopyKeyCode = nil
         if hasMarkedText() {
             // Command/Control chords must stay with the IME until composition
             // ends; other keys still reach Ghostty so preedit can update.
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             if modifiers.contains(.command) || modifiers.contains(.control) { return }
+            forgetHistoryScroll()
             super.keyDown(with: event)
             return
         }
         if let payload = Self.ptyBytes(forMacEditingKey: event) {
+            // ⌘-editing keys send ^U/^A/^E/^K to the pane, so herdr snaps it back.
+            forgetHistoryScroll()
             processHost?.session.sendInput(Data(payload.utf8))
             return
         }
+        // herdr returns a scrolled pane to the bottom only when it gets input.
+        // Command chords are app/menu shortcuts (⌘C copy, ⌘± font size, ⌥⌘ split
+        // focus) that never reach the pane, so they must not reset the local
+        // scroll state and strand the viewport; text, control chords, arrows and
+        // Return all feed the pane and snap it back to the live end.
+        if !event.modifierFlags.contains(.command) { forgetHistoryScroll() }
         super.keyDown(with: event)
     }
 
@@ -726,7 +733,18 @@ final class LineBreakTerminalView: AppTerminalView {
         let whole = historyRemainder.rounded(.towardZero)
         guard whole != 0 else { return true }
         historyRemainder -= whole
-        let target = max(0, min(historyTarget + Int(whole), historyMax ?? Int.max))
+        let ceiling: Int
+        if let historyMax {
+            ceiling = historyMax
+        } else {
+            // Until the first pane.scroll reply reports the real top, bound the
+            // over-scroll to one page past the last confirmed offset, so a fast
+            // flick before the reply lands can't shoot far past the top and
+            // leave the user scrolling back down a phantom distance.
+            let pageRows = max(1, Int((bounds.height / max(scrollRowHeight, 1)).rounded()))
+            ceiling = historySent + pageRows
+        }
+        let target = max(0, min(historyTarget + Int(whole), ceiling))
         guard target != historyTarget else { return true }
         historyTarget = target
         flushHistoryScroll()
@@ -1128,7 +1146,7 @@ final class LineBreakTerminalView: AppTerminalView {
             return false
         }
         window?.makeFirstResponder(self)
-        paste(text: text)
+        sendPastedText(text)
         return true
     }
 
@@ -1197,6 +1215,9 @@ final class LineBreakTerminalView: AppTerminalView {
                 locallyConsumedCopyKeyCode = event.keyCode
                 copyLocalSelection()
             } else {
+                // No selection: the physical ⌘C goes to the TUI as input, so
+                // herdr snaps the pane back — drop our scroll state to match.
+                forgetHistoryScroll()
                 keyDown(with: event)
             }
             return true
@@ -1269,6 +1290,7 @@ final class LineBreakTerminalView: AppTerminalView {
 
     private func pastePasteboardText() {
         guard let text = NSPasteboard.general.string(forType: .string) else { return }
+        forgetHistoryScroll()
         paste(text: text)
     }
 
@@ -1298,6 +1320,7 @@ final class LineBreakTerminalView: AppTerminalView {
     /// Ask the remote program to paste from its own clipboard with a literal
     /// ^V byte — the "native clipboard" delivery path.
     private func forwardNativeClipboardPaste() {
+        forgetHistoryScroll()
         processHost?.session.sendInput(Data([0x16]))
     }
 
@@ -1359,6 +1382,7 @@ final class LineBreakTerminalView: AppTerminalView {
     /// Ghostty's text path wraps the payload in bracketed-paste markers when
     /// the program asked for them.
     private func sendPastedText(_ text: String) {
+        forgetHistoryScroll()
         paste(text: text)
     }
 
