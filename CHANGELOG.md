@@ -7,6 +7,14 @@ the Sparkle update description — a release without a section here fails CI.
 
 ## [Unreleased]
 
+### Fixed
+- Links work again: hovering a URL shows the Copy button and ⌘-click opens it.
+  herdr's attach client keeps mouse reporting on, so herdrm maps the pointer to
+  a cell itself, and the cell size it read from the session viewport was always
+  0 with the current libghostty (the PTY resize callback does not carry it).
+  The cell size now comes from Ghostty's grid resize delegate, with a fallback
+  derived from the surface size.
+
 ### Added
 - **Claude conversation history.** A thin, compact chronological prompt rail floats
   over the terminal edge, softly blurred when idle and clear on hover. It enlarges
