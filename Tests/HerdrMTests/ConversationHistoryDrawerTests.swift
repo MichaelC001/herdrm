@@ -233,6 +233,64 @@ final class ConversationHistoryDrawerTests: XCTestCase {
         controller.stop()
     }
 
+    func testNativeRailHoverAndCoordinateClickSelectTurnWithoutTerminalInput() async throws {
+        let provider = HistoryViewFixtureProvider()
+        let controller = makeController(provider: provider)
+        await waitReady(controller)
+        let terminal = HistoryMouseTerminal()
+        var jumps: [String] = []
+        let hosted = show(HistoryTerminalFixture(terminal: terminal, controller: controller, onJump: { jumps.append($0) }), width: 800, height: 500)
+        XCTAssertTrue(hosted.acceptsMouseMovedEvents, "The production rail enables pointer-move delivery itself")
+        hosted.makeKeyAndOrderFront(nil)
+        hosted.makeFirstResponder(terminal)
+        settle()
+
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        let content = try XCTUnwrap(hosted.contentView)
+        let pointer = try XCTUnwrap(descendants(content).compactMap { $0 as? ConversationRailPointerView }.first)
+        XCTAssertFalse(pointer.acceptsFirstResponder)
+        XCTAssertTrue(pointer.acceptsFirstMouse(for: nil))
+        XCTAssertFalse(pointer.isAccessibilityElement())
+        let resting = ConversationRailGeometry(count: controller.turns.count, height: pointer.bounds.height)
+        let location = pointer.convert(NSPoint(x: pointer.bounds.midX, y: resting.position(of: 0)), to: nil)
+        XCTAssertTrue(content.hitTest(location) === pointer, "The real native hit-test chain owns a coordinate click on a mark")
+        let before = await provider.readWindows()
+        let tickRect = pointer.convert(NSRect(x: 0, y: resting.position(of: 0) - 2, width: pointer.bounds.width, height: 4), to: content)
+        func tickPixels() throws -> Data {
+            let bitmap = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: tickRect))
+            content.cacheDisplay(in: tickRect, to: bitmap)
+            return Data(bytes: try XCTUnwrap(bitmap.bitmapData), count: bitmap.bytesPerRow * bitmap.pixelsHigh)
+        }
+        let restingPixels = try tickPixels()
+        var hoverPoints: [NSPoint?] = []
+        let nativeHover = pointer.onHover
+        pointer.onHover = { hoverPoints.append($0); nativeHover($0) }
+        let hover = try XCTUnwrap(NSEvent.mouseEvent(with: .mouseMoved, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: hosted.windowNumber, context: nil, eventNumber: 3, clickCount: 0, pressure: 0))
+        // AppKit synthesizes tracking callbacks from WindowServer motion;
+        // sendEvent alone does not synthesize them for an injected event.
+        // Exercise that native tracking owner using the same window point.
+        pointer.mouseMoved(with: hover)
+        settle()
+        XCTAssertEqual(try XCTUnwrap(hoverPoints.last), NSPoint(x: pointer.bounds.midX, y: resting.position(of: 0)))
+        XCTAssertNotEqual(try tickPixels(), restingPixels, "Hover must visibly grow the tick in the rendered rail")
+        XCTAssertTrue(hosted.firstResponder === terminal)
+        let afterHover = await provider.readWindows()
+        XCTAssertEqual(afterHover, before, "Hover uses cached prompt/reply previews")
+
+        let click = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: hosted.windowNumber, context: nil, eventNumber: 4, clickCount: 1, pressure: 1))
+        hosted.sendEvent(click)
+        settle()
+        XCTAssertEqual(jumps, ["turn-1"], "A physical point on the first tick invokes exactly that turn's jump callback")
+        XCTAssertEqual(terminal.clicks, 0, "Rail navigation must not deliver a click or input to the retained terminal")
+        XCTAssertTrue(hosted.firstResponder === terminal)
+        XCTAssertFalse(controller.isPresented)
+
+        pointer.mouseExited(with: hover)
+        settle()
+        XCTAssertEqual(try tickPixels(), restingPixels, "Leaving the rail restores the compact tick")
+        controller.stop()
+    }
+
     private func waitReady(_ controller: ConversationHistoryController) async {
         for _ in 0..<100 where controller.state != .ready { await Task.yield() }
         XCTAssertEqual(controller.state, .ready)
@@ -365,7 +423,8 @@ private actor ForwardPagedHistoryFixtureProvider: ConversationHistoryProviding {
 private struct HistoryTerminalFixture: View {
     let terminal: NSView
     let controller: ConversationHistoryController
-    var body: some View { HistoryNativeTerminal(view: terminal).frame(maxWidth: .infinity, maxHeight: .infinity).overlay { ConversationHistoryOverlay(controller: controller) } }
+    var onJump: ((String) -> Void)? = nil
+    var body: some View { HistoryNativeTerminal(view: terminal).frame(maxWidth: .infinity, maxHeight: .infinity).overlay { ConversationHistoryOverlay(controller: controller, onJump: onJump) } }
 }
 private struct HistoryNativeTerminal: NSViewRepresentable {
     let view: NSView

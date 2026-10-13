@@ -162,34 +162,14 @@ struct ConversationTimelineRail: View {
                                  with: .color(mark.isSelected || hovered ? Theme.text : Theme.textGhost.opacity(0.7)))
                 }
             }
-            .contentShape(Rectangle())
-            .onContinuousHover { phase in
-                switch phase {
-                case .active(let point):
-                    isHovered = true
-                    let resting = ConversationRailGeometry(count: controller.turns.count, height: proxy.size.height)
-                    guard point.y >= resting.inset - 10, point.y <= resting.inset + resting.span + 10 else {
-                        hoverAnchorIndex = nil
-                        if !railFocused { previewIndex = nil }
-                        return
-                    }
-                    if hoverAnchorIndex == nil {
-                        hoverAnchorIndex = resting.index(at: point.y)
-                    }
-                    let zoomed = ConversationRailGeometry(count: controller.turns.count, height: proxy.size.height, zoomedIndex: hoverAnchorIndex)
-                    previewIndex = zoomed.index(at: point.y)
-                case .ended:
-                    isHovered = false; hoverAnchorIndex = nil
-                    if !railFocused { previewIndex = nil }
-                }
+            .overlay {
+                let resting = ConversationRailGeometry(count: controller.turns.count, height: proxy.size.height)
+                ConversationRailPointerSurface(
+                    activeRange: controller.turns.isEmpty ? nil : (resting.inset - 10)...(resting.inset + resting.span + 10),
+                    onHover: { updatePointer($0, height: proxy.size.height) },
+                    onClick: { selectPointer($0, height: proxy.size.height) }
+                )
             }
-            .gesture(SpatialTapGesture().onEnded { value in
-                guard value.location.y >= geometry.inset - 10, value.location.y <= geometry.inset + geometry.span + 10 else { return }
-                if let index = geometry.index(at: value.location.y), controller.turns.indices.contains(index) {
-                    previewIndex = index
-                    onJump?(controller.turns[index].id)
-                }
-            })
             .focusable(!controller.turns.isEmpty)
             .focused($railFocused)
             .focusEffectDisabled()
@@ -280,6 +260,29 @@ struct ConversationTimelineRail: View {
 
     private func navigate(_ delta: Int) {
         previewIndex = ConversationRailGeometry.adjacent(previewIndex ?? selectedIndex, delta: delta, count: controller.turns.count)
+    }
+    private func updatePointer(_ point: CGPoint?, height: CGFloat) {
+        guard let point else {
+            isHovered = false; hoverAnchorIndex = nil
+            if !railFocused { previewIndex = nil }
+            return
+        }
+        isHovered = true
+        let resting = ConversationRailGeometry(count: controller.turns.count, height: height)
+        guard point.y >= resting.inset - 10, point.y <= resting.inset + resting.span + 10 else {
+            hoverAnchorIndex = nil
+            if !railFocused { previewIndex = nil }
+            return
+        }
+        if hoverAnchorIndex == nil { hoverAnchorIndex = resting.index(at: point.y) }
+        let zoomed = ConversationRailGeometry(count: controller.turns.count, height: height, zoomedIndex: hoverAnchorIndex)
+        previewIndex = zoomed.index(at: point.y)
+    }
+    private func selectPointer(_ point: CGPoint, height: CGFloat) {
+        let geometry = ConversationRailGeometry(count: controller.turns.count, height: height, zoomedIndex: hoverAnchorIndex ?? previewIndex)
+        guard let index = geometry.index(at: point.y), controller.turns.indices.contains(index) else { return }
+        previewIndex = index
+        onJump?(controller.turns[index].id)
     }
     private func openPreview() {
         if let index = previewIndex ?? selectedIndex ?? controller.turns.indices.last, controller.turns.indices.contains(index) {
