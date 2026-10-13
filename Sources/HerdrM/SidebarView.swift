@@ -34,12 +34,24 @@ struct SidebarView: View {
     @State private var agentsExpanded = true
     @State private var terminalsExpanded = true
     @AppStorage(MachineStatsDefaults.showKey) private var showsMachineStats = true
+    /// Grouped mode: the Spaces section lists each space's panes as a tree.
+    /// Turning it on collapses Agents and Terminals (they stay available),
+    /// turning it off expands them again.
+    @AppStorage(SidebarDefaults.groupBySpaceKey) private var groupBySpace = false
 
     var body: some View {
         VStack(spacing: 0) {
             // 28pt titlebar strip: traffic lights on the left, collapse toggle on the right
-            HStack {
+            HStack(spacing: 2) {
                 Spacer()
+                TitlebarIconButton(
+                    systemName: "list.bullet.indent",
+                    help: groupBySpace ? "Ungroup Sidebar" : "Group Sidebar by Space",
+                    active: groupBySpace
+                ) {
+                    groupBySpace.toggle()
+                }
+                .accessibilityIdentifier("sidebar.groupBySpace")
                 TitlebarIconButton(systemName: "sidebar.left", help: "Hide Sidebar (⌘B)") {
                     collapsed = true
                 }
@@ -47,6 +59,8 @@ struct SidebarView: View {
             .padding(.horizontal, 10)
             .frame(height: TitlebarMetrics.height)
             .windowTitlebarInteraction()
+            .onAppear { applyGrouping(groupBySpace, collapseSections: false) }
+            .onChange(of: groupBySpace) { _, grouped in applyGrouping(grouped, collapseSections: true) }
 
             Spacer().frame(height: 8)
 
@@ -97,9 +111,15 @@ struct SidebarView: View {
                                 SpaceRowView(
                                     entry: entry,
                                     model: model,
+                                    grouped: groupBySpace,
                                     draggingSpaceID: $draggingSpaceID,
                                     spaceDrop: $spaceDrop
                                 )
+                                if groupBySpace, model.isSpaceExpanded(entry) {
+                                    ForEach(model.spaceTreeRows(entry)) { row in
+                                        treeRow(row)
+                                    }
+                                }
                             }
                         }
                         Spacer().frame(height: 10)
@@ -121,13 +141,18 @@ struct SidebarView: View {
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(8)
                             }
-                            ForEach(model.visibleAgents) { entry in
-                                AgentRowView(
-                                    entry: entry,
-                                    model: model,
-                                    draggingAgentID: $draggingAgentID,
-                                    agentDrop: $agentDrop
-                                )
+                            ForEach(model.agentSectionRows) { row in
+                                if let entry = row.agent {
+                                    AgentRowView(
+                                        entry: entry,
+                                        model: model,
+                                        indent: row.indent,
+                                        showsPaneGlyph: row.isChild,
+                                        draggable: row.indent == 0,
+                                        draggingAgentID: $draggingAgentID,
+                                        agentDrop: $agentDrop
+                                    )
+                                }
                             }
                         }
                         if terminalsSectionVisible {
@@ -145,13 +170,18 @@ struct SidebarView: View {
                             .accessibilityIdentifier("sidebar.section.terminals")
                         } content: {
                             if terminalsExpanded {
-                                ForEach(model.visibleTerminals) { entry in
-                                    TerminalRowView(
-                                        entry: entry,
-                                        model: model,
-                                        draggingTerminalID: $draggingTerminalID,
-                                        terminalDrop: $terminalDrop
-                                    )
+                                ForEach(model.terminalSectionRows) { row in
+                                    if let entry = row.terminal {
+                                        TerminalRowView(
+                                            entry: entry,
+                                            model: model,
+                                            indent: row.indent,
+                                            showsPaneGlyph: row.isChild,
+                                            draggable: row.indent == 0,
+                                            draggingTerminalID: $draggingTerminalID,
+                                            terminalDrop: $terminalDrop
+                                        )
+                                    }
                                 }
                                 ForEach(model.shellSessions) { session in
                                     shellRow(session)
@@ -195,6 +225,46 @@ struct SidebarView: View {
 
     private var terminalsSectionVisible: Bool {
         !model.visibleTerminals.isEmpty || !model.shellSessions.isEmpty
+    }
+
+    private func applyGrouping(_ grouped: Bool, collapseSections: Bool) {
+        model.groupSidebarBySpace = grouped
+        guard collapseSections else { return }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            agentsExpanded = !grouped
+            terminalsExpanded = !grouped
+        }
+    }
+
+    /// A pane row inside a space's tree: the same agent/terminal rows as the
+    /// sections, indented, without the space line (the space is the parent),
+    /// and without drag (tab order is edited in the sections).
+    @ViewBuilder
+    private func treeRow(_ row: AppModel.SidebarRow) -> some View {
+        switch row.entry {
+        case .agent(let entry):
+            AgentRowView(
+                entry: entry,
+                model: model,
+                indent: row.indent,
+                showsPaneGlyph: row.isChild,
+                showsSpace: false,
+                draggable: false,
+                draggingAgentID: $draggingAgentID,
+                agentDrop: $agentDrop
+            )
+        case .terminal(let entry):
+            TerminalRowView(
+                entry: entry,
+                model: model,
+                indent: row.indent,
+                showsPaneGlyph: row.isChild,
+                showsSpace: false,
+                draggable: false,
+                draggingTerminalID: $draggingTerminalID,
+                terminalDrop: $terminalDrop
+            )
+        }
     }
 
     private var emptyAgentsHint: String {
@@ -291,6 +361,13 @@ struct SidebarView: View {
     private struct TerminalRowView: View {
         let entry: AppModel.TerminalEntry
         @ObservedObject var model: AppModel
+        /// Depth in the pane tree; each level indents the content, not the wash.
+        var indent = 0
+        /// Secondary pane of its tab.
+        var showsPaneGlyph = false
+        /// Off inside a space's tree, where the space is the parent row.
+        var showsSpace = true
+        var draggable = true
         @Binding var draggingTerminalID: String?
         @Binding var terminalDrop: (id: String, after: Bool)?
         @State private var hovered = false
@@ -301,6 +378,7 @@ struct SidebarView: View {
                 && model.selectedShellID == nil
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
+                    if showsPaneGlyph { PaneChildGlyph() }
                     Image(systemName: "terminal")
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.textTertiary)
@@ -311,19 +389,22 @@ struct SidebarView: View {
                     Spacer(minLength: 0)
                 }
                 HStack(spacing: 5) {
-                    Image(systemName: "folder")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(Theme.textTertiary)
-                    Text(model.spaceName(deviceID: entry.device.id, workspaceID: entry.pane.workspaceID))
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.textTertiary)
-                        .lineLimit(1)
+                    if showsSpace {
+                        Image(systemName: "folder")
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(Theme.textTertiary)
+                        Text(model.spaceName(deviceID: entry.device.id, workspaceID: entry.pane.workspaceID))
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Theme.textTertiary)
+                            .lineLimit(1)
+                    }
                     Spacer(minLength: 0)
                     if model.showsRowDeviceBadges {
                         DeviceChip(device: entry.device)
                     }
                 }
             }
+            .padding(.leading, SidebarDefaults.indentWidth * CGFloat(indent))
             .padding(.horizontal, 8)
             .padding(.vertical, 7)
             .frame(height: 51)
@@ -341,6 +422,7 @@ struct SidebarView: View {
             .overlay {
                 TerminalRowDragHost(
                     entryID: entry.id,
+                    allowsDrag: draggable,
                     onClick: { model.selectAgent(entry.ref) },
                     onRename: { model.terminalToRename = entry },
                     onClose: { model.requestClosePane(entry.ref, name: entry.title) },
@@ -350,8 +432,10 @@ struct SidebarView: View {
                         terminalDrop = nil
                     },
                     onDropHover: { after in
+                        // Top-level rows stand for tabs; "after" one means before
+                        // the next top-level row, skipping that tab's children.
                         terminalDrop = sidebarDropTarget(
-                            onto: entry.id, after: after, items: model.visibleTerminals
+                            onto: entry.id, after: after, items: model.draggableTerminals
                         )
                     },
                     onHoverExit: {
@@ -414,6 +498,13 @@ struct SidebarView: View {
     private struct AgentRowView: View {
     let entry: AppModel.AgentEntry
     @ObservedObject var model: AppModel
+    /// Depth in the pane tree; each level indents the content, not the wash.
+    var indent = 0
+    /// Secondary pane of its tab.
+    var showsPaneGlyph = false
+    /// Off inside a space's tree, where the space is the parent row.
+    var showsSpace = true
+    var draggable = true
     @Binding var draggingAgentID: String?
     @Binding var agentDrop: (id: String, after: Bool)?
     @State private var hovered = false
@@ -426,6 +517,7 @@ struct SidebarView: View {
         let unread = model.isUnread(entry)
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
+                if showsPaneGlyph { PaneChildGlyph() }
                 Text(entry.title)
                     .font(.system(size: 13.5))
                     .foregroundStyle(Theme.text)
@@ -435,16 +527,18 @@ struct SidebarView: View {
             }
             HStack(spacing: 5) {
                 AgentKindBadge(kind: agent.agent)
-                Text("·")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Theme.textGhost)
-                Image(systemName: "folder")
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(Theme.textTertiary)
-                Text(model.spaceName(deviceID: entry.device.id, workspaceID: agent.workspaceID))
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Theme.textTertiary)
-                    .lineLimit(1)
+                if showsSpace {
+                    Text("·")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.textGhost)
+                    Image(systemName: "folder")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(Theme.textTertiary)
+                    Text(model.spaceName(deviceID: entry.device.id, workspaceID: agent.workspaceID))
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                }
                 Spacer(minLength: 0)
                 if agent.status == .blocked {
                     Text("needs input")
@@ -473,6 +567,7 @@ struct SidebarView: View {
                 .foregroundStyle(AgentStatsStyle.color(for: line.kind))
             }
         }
+        .padding(.leading, SidebarDefaults.indentWidth * CGFloat(indent))
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
         .frame(minHeight: 51)
@@ -494,6 +589,7 @@ struct SidebarView: View {
                 isClaude: entry.agent.agent == "claude",
                 pluginActions: model.session(entry.device.id).pluginActions,
                 grazrReport: model.session(entry.device.id).grazrReport,
+                allowsDrag: draggable,
                 onClick: { model.selectAgent(entry.ref) },
                 onRename: { model.agentToRename = entry },
                 onPluginAction: { model.runPluginAction($0, for: entry) },
@@ -515,8 +611,10 @@ struct SidebarView: View {
                     agentDrop = nil
                 },
                     onDropHover: { after in
+                        // Top-level rows stand for tabs; "after" one means before
+                        // the next top-level row, skipping that tab's children.
                         agentDrop = sidebarDropTarget(
-                            onto: entry.id, after: after, items: model.visibleAgents
+                            onto: entry.id, after: after, items: model.draggableAgents
                         )
                     },
                 onHoverExit: {
@@ -627,6 +725,23 @@ struct SidebarView: View {
 /// The small "new" button at the right end of a section header; same icon as
 /// the matching New … action row above the list. `title` is the tooltip and
 /// what VoiceOver reads (an icon alone is read by its symbol name).
+enum SidebarDefaults {
+    /// Group the Spaces section as space > tab main pane > children.
+    static let groupBySpaceKey = "sidebar.groupBySpace"
+    /// Leading inset per level of the pane tree.
+    static let indentWidth: CGFloat = 14
+}
+
+/// Marks a row as a secondary pane of its tab, split off the pane above it.
+struct PaneChildGlyph: View {
+    var body: some View {
+        Image(systemName: "rectangle.split.2x1")
+            .font(.system(size: 10))
+            .foregroundStyle(Theme.textTertiary)
+            .accessibilityLabel("Split pane")
+    }
+}
+
 struct SidebarHeaderButton: View {
     let systemName: String
     let title: LocalizedStringKey
@@ -651,6 +766,8 @@ struct SidebarHeaderButton: View {
 struct TitlebarIconButton: View {
     let systemName: String
     let help: LocalizedStringKey
+    /// A toggle that is on: accent glyph on a wash, so the state reads at a glance.
+    var active = false
     let action: () -> Void
     @State private var hovered = false
 
@@ -658,11 +775,11 @@ struct TitlebarIconButton: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 12))
-                .foregroundStyle(Theme.textTertiary)
+                .foregroundStyle(active ? Theme.accent : Theme.textTertiary)
                 .frame(width: 24, height: 22)
                 .background(
                     RoundedRectangle(cornerRadius: 5)
-                        .fill(hovered ? AnyShapeStyle(Theme.itemWash) : AnyShapeStyle(.clear))
+                        .fill(hovered || active ? AnyShapeStyle(Theme.itemWash) : AnyShapeStyle(.clear))
                 )
                 .contentShape(Rectangle())
         }
@@ -898,13 +1015,34 @@ struct SidebarRowButtonStyle: ButtonStyle {
 private struct SpaceRowView: View {
     let entry: AppModel.SpaceEntry
     @ObservedObject var model: AppModel
+    /// Grouped mode: the row heads a tree of its panes and gets a disclosure.
+    var grouped = false
     @Binding var draggingSpaceID: String?
     @Binding var spaceDrop: (id: String, after: Bool)?
     @State private var hovered = false
 
     var body: some View {
         let selected = model.selectedSpace == entry.ref
+        let expanded = model.isSpaceExpanded(entry)
         HStack(spacing: 8) {
+            if grouped {
+                // Its own button so the chevron folds the tree while the rest of
+                // the row keeps selecting the space, as it always has.
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { model.toggleSpaceExpanded(entry) }
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Theme.textGhost)
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                        .frame(width: 12, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(expanded ? "Collapse space" : "Expand space")
+                // Above the drag host overlay, or the click would select the space instead.
+                .zIndex(1)
+            }
             Image(systemName: "folder")
                 .font(.system(size: 11.5))
                 .foregroundStyle(selected ? Theme.textSecondary : Theme.textTertiary)

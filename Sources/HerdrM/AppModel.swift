@@ -579,6 +579,126 @@ final class AppModel: ObservableObject {
         unreadAgents.contains(AgentUnreadKey(deviceID: entry.device.id, paneID: entry.agent.paneID))
     }
 
+    // MARK: - Sidebar tree
+
+    /// One sidebar row: an agent or terminal entry at a depth in the pane tree.
+    /// `isChild` marks a secondary pane of its tab (drawn with a pane glyph).
+    struct SidebarRow: Identifiable {
+        let entry: AttachedEntry
+        let indent: Int
+        let isChild: Bool
+
+        var id: String { entry.id }
+        var agent: AgentEntry? { if case .agent(let agent) = entry { return agent } else { return nil } }
+        var terminal: TerminalEntry? { if case .terminal(let terminal) = entry { return terminal } else { return nil } }
+    }
+
+    /// Group the sidebar's Spaces section as a tree (space, tab main pane,
+    /// children). Persisted by SidebarView's `@AppStorage`; mirrored here so the
+    /// sections' expansion can react to it.
+    @Published var groupSidebarBySpace = false
+
+    /// Spaces the user collapsed in grouped mode, by `SpaceEntry.id`. Stored
+    /// inverted so every space starts expanded.
+    @Published var collapsedSpaces: Set<String> =
+        Set(UserDefaults.standard.stringArray(forKey: AppModel.collapsedSpacesKey) ?? [])
+    {
+        didSet { UserDefaults.standard.set(Array(collapsedSpaces).sorted(), forKey: AppModel.collapsedSpacesKey) }
+    }
+    static let collapsedSpacesKey = "sidebar.collapsedSpaces"
+
+    func isSpaceExpanded(_ entry: SpaceEntry) -> Bool { !collapsedSpaces.contains(entry.id) }
+
+    func toggleSpaceExpanded(_ entry: SpaceEntry) {
+        if collapsedSpaces.contains(entry.id) {
+            collapsedSpaces.remove(entry.id)
+        } else {
+            collapsedSpaces.insert(entry.id)
+        }
+    }
+
+    /// One device's panes grouped as the sidebar shows them.
+    func sidebarTree(for device: Device) -> [SidebarTree.SpaceGroup] {
+        let state = session(device.id)
+        return SidebarTree.build(
+            agents: state.agents,
+            terminalPanes: state.panes,
+            tabs: state.tabs,
+            workspaces: state.workspaces
+        )
+    }
+
+    private func attachedEntry(for leaf: SidebarTree.Leaf, device: Device) -> AttachedEntry {
+        switch leaf {
+        case .agent(let agent):
+            return .agent(agentEntry(device: device, agent: agent))
+        case .terminal(let pane):
+            let tab = session(device.id).tabs.first { $0.tabID == pane.tabID }
+            // `ordinaryTerminalPanes` only keeps panes with a terminal id.
+            return .terminal(TerminalEntry(device: device, pane: pane, tab: tab, terminalID: pane.terminalID ?? ""))
+        }
+    }
+
+    /// Rows of one section of the flat list. A tab's children indent under its
+    /// main pane when that pane belongs to the same section; otherwise they sit
+    /// at the top level, since there is nothing in this section to hang them on.
+    /// Rows never cross sections.
+    private func sectionRows(agents wantAgents: Bool) -> [SidebarRow] {
+        var rows: [SidebarRow] = []
+        for device in devicesInScope {
+            for space in sidebarTree(for: device) {
+                if let selected = selectedSpace,
+                   selected.deviceID != device.id || selected.workspaceID != space.workspaceID {
+                    continue
+                }
+                for tab in space.tabs {
+                    let mainIsAgent: Bool
+                    if case .agent = tab.main.leaf { mainIsAgent = true } else { mainIsAgent = false }
+                    let mainBelongs = mainIsAgent == wantAgents
+                    if mainBelongs {
+                        rows.append(SidebarRow(entry: attachedEntry(for: tab.main.leaf, device: device), indent: 0, isChild: false))
+                    }
+                    for child in tab.main.children {
+                        let childIsAgent: Bool
+                        if case .agent = child.leaf { childIsAgent = true } else { childIsAgent = false }
+                        guard childIsAgent == wantAgents else { continue }
+                        rows.append(SidebarRow(
+                            entry: attachedEntry(for: child.leaf, device: device),
+                            indent: mainBelongs ? 1 : 0,
+                            isChild: mainBelongs
+                        ))
+                    }
+                }
+            }
+        }
+        return rows
+    }
+
+    /// The Agents section, children indented under their tab's main agent.
+    var agentSectionRows: [SidebarRow] { sectionRows(agents: true) }
+    /// The Terminals section, children indented under their tab's main terminal.
+    var terminalSectionRows: [SidebarRow] { sectionRows(agents: false) }
+
+    /// Top-level agent entries of the Agents section, the drag reorder list:
+    /// each one stands for its tab, which is what `tab.move` moves.
+    var draggableAgents: [AgentEntry] { agentSectionRows.filter { $0.indent == 0 }.compactMap(\.agent) }
+    var draggableTerminals: [TerminalEntry] { terminalSectionRows.filter { $0.indent == 0 }.compactMap(\.terminal) }
+
+    /// Grouped mode: every pane of a space, each tab's main at indent 1 and its
+    /// children at indent 2, in tab order.
+    func spaceTreeRows(_ entry: SpaceEntry) -> [SidebarRow] {
+        guard let space = sidebarTree(for: entry.device).first(where: { $0.workspaceID == entry.workspace.workspaceID })
+        else { return [] }
+        var rows: [SidebarRow] = []
+        for tab in space.tabs {
+            rows.append(SidebarRow(entry: attachedEntry(for: tab.main.leaf, device: entry.device), indent: 1, isChild: false))
+            for child in tab.main.children {
+                rows.append(SidebarRow(entry: attachedEntry(for: child.leaf, device: entry.device), indent: 2, isChild: true))
+            }
+        }
+        return rows
+    }
+
     func attention(in entry: SpaceEntry) -> SpaceAttention {
         let agents = session(entry.device.id).agents.filter {
             $0.workspaceID == entry.workspace.workspaceID
