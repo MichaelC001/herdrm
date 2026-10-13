@@ -169,6 +169,18 @@ public actor HerdrService {
         } catch { throw ConversationHistoryError.map(error) }
     }
 
+    public func conversationJump(target: String, expectedSessionID: String, expectedGeneration: String, messageID: String, messageRevision: String) async throws -> ConversationJumpResult {
+        guard rpc != nil else { throw ConversationJumpNotice.disconnected }
+        guard conversationCapabilities?.agentConversationJump == true else { throw ConversationJumpNotice.unsupportedServer }
+        do {
+            return try await client().request(method: "agent.conversation.jump", params: .object([
+                "target": .string(target), "expected_session_id": .string(expectedSessionID),
+                "expected_generation": .string(expectedGeneration), "message_id": .string(messageID),
+                "message_revision": .string(messageRevision)
+            ]), as: ConversationJumpResult.self)
+        } catch { throw ConversationJumpNotice.map(error) }
+    }
+
     public func snapshot() async throws -> SessionSnapshot {
         struct Envelope: Codable { let snapshot: SessionSnapshot }
         return try await client().request(method: "session.snapshot", as: Envelope.self).snapshot
@@ -584,9 +596,14 @@ public actor HerdrService {
     /// script) skip every metadata update while it is scrolled up, which
     /// silently freezes the sidebar stats lines.
     public func scrollToBottom(paneID: String) async throws {
+        try await scrollPane(paneID: paneID, offsetFromBottom: 0)
+    }
+
+    /// Changes the source viewport without sending input to the running agent.
+    public func scrollPane(paneID: String, offsetFromBottom: UInt64) async throws {
         _ = try await client().request(
             method: "pane.scroll",
-            params: .object(["pane_id": .string(paneID), "offset_from_bottom": .number(0)])
+            params: .object(["pane_id": .string(paneID), "offset_from_bottom": .number(Double(offsetFromBottom))])
         )
     }
 

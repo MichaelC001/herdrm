@@ -92,15 +92,19 @@ macOS window on top of it, and it's grown well past "attach to a terminal":
   of freezing on the last frame; mixed-version `herdr` binaries no longer break attach.
 
 ### Files, search, and staying in the loop
-- **Claude conversation history** — select a Claude agent and click History or
-  press **⇧⌘H**. Hover a mark on the left timeline to preview a message you sent;
-  click it to read that turn and Claude's replies. Search saved messages, load
-  older/newer pages, expand tool activity, and read or copy complete messages.
-  History opens over the existing terminal and does not resend prompts.
-  This requires a herdr daemon advertising `agent.conversation.read` and a
+- **Claude conversation history** — select a Claude agent. The thin left timeline
+  keeps the message marks closely packed. Hover to grow the nearby marks and see a compact
+  prompt/reply preview; click a mark to locate the rendered exchange in the
+  existing terminal. The arrow at the bottom returns to live output. The bubble
+  button or **⇧⌘H** opens the secondary full-conversation reader with search,
+  older/newer paging, collapsed tools and complete-message reading/copying.
+  Terminal jumps require a uniquely matched complete prompt and supported reply
+  context still retained in source scrollback; unavailable matches leave it alone.
+  This requires a herdr daemon advertising the history read/jump methods and a
   session binding from Claude's integration hook. Older daemons keep normal
   terminal access and show a history update notice. Saved data stays on the
-  device running Claude; source retention and deletion still apply.
+  device running Claude; source retention and deletion still apply. Navigation
+  moves only the existing viewport and does not resend prompts.
 - **Two-pane file manager** — browse Local and any configured SSH device side by side, then
   upload or download regular files with progress, cancellation, and explicit Replace / Keep
   Both conflict handling. Transfers use the same OpenSSH config, agent, host-key, and Keychain

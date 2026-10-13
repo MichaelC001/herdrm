@@ -299,6 +299,118 @@ public struct ConversationLimits: Sendable, Equatable {
 public protocol ConversationHistoryProviding: Sendable {
     func read(target: String, expectedSessionID: String, window: ConversationWindow, limits: ConversationLimits) async throws -> ConversationPage
     func readBlock(target: String, expectedSessionID: String, blockCursor: String, maxBytes: Int) async throws -> BlockPage
+    func jump(target: String, expectedSessionID: String, expectedGeneration: String, messageID: String, messageRevision: String) async throws -> ConversationJumpResult
+}
+
+extension ConversationHistoryProviding {
+    /// Legacy providers keep ordinary transcript reading available.
+    public func jump(target: String, expectedSessionID: String, expectedGeneration: String, messageID: String, messageRevision: String) async throws -> ConversationJumpResult {
+        throw ConversationJumpNotice.unsupportedServer
+    }
+}
+
+/// A source-terminal viewport move acknowledged for one exact transcript message.
+public struct ConversationJumpResult: Codable, Sendable, Equatable {
+    public let binding: ConversationBinding
+    public let messageID: String
+    public let messageRevision: String
+    public let contentSeq: UInt64
+    public let sourceRow: UInt64
+    public let offsetFromBottom: UInt64
+    public init(binding: ConversationBinding, messageID: String, messageRevision: String, contentSeq: UInt64, sourceRow: UInt64, offsetFromBottom: UInt64) {
+        self.binding = binding; self.messageID = messageID; self.messageRevision = messageRevision
+        self.contentSeq = contentSeq; self.sourceRow = sourceRow; self.offsetFromBottom = offsetFromBottom
+    }
+    enum CodingKeys: String, CodingKey {
+        case binding
+        case messageID = "message_id"
+        case messageRevision = "message_revision"
+        case contentSeq = "content_seq"
+        case sourceRow = "source_row"
+        case offsetFromBottom = "offset_from_bottom"
+    }
+}
+
+/// Jump failures describe the source terminal without changing transcript availability.
+public enum ConversationJumpNotice: Error, LocalizedError, Sendable, Equatable {
+    case unsupportedServer, sessionChanged, messageChanged, ambiguous, notFound, unavailable
+    case alternateScreen, contentChanged, geometryChanged, terminalChanged, scanLimit
+    case sourceChanged, sourceMissing, accessDenied, disconnected
+    case other(code: String)
+    public var code: String {
+        switch self {
+        case .unsupportedServer: return "unsupported_server"
+        case .sessionChanged: return "session_changed"
+        case .messageChanged: return "message_changed"
+        case .ambiguous: return "jump_ambiguous"
+        case .notFound: return "jump_not_found"
+        case .unavailable: return "jump_unavailable"
+        case .alternateScreen: return "alternate_screen"
+        case .contentChanged: return "content_changed"
+        case .geometryChanged: return "geometry_changed"
+        case .terminalChanged: return "terminal_changed"
+        case .scanLimit: return "scan_limit"
+        case .sourceChanged: return "source_changed"
+        case .sourceMissing: return "source_missing"
+        case .accessDenied: return "access_denied"
+        case .disconnected: return "disconnected"
+        case .other(let code): return code
+        }
+    }
+    public var message: String {
+        switch self {
+        case .unsupportedServer: return "Update herdr on this device to jump to messages in the terminal."
+        case .sessionChanged: return "The selected Claude session changed. Try again."
+        case .messageChanged: return "This saved message changed. Refresh history and try again."
+        case .ambiguous: return "This message appears more than once. The terminal position cannot be identified reliably."
+        case .notFound: return "This message is no longer visible in the terminal scrollback."
+        case .unavailable: return "This message cannot be located reliably in the terminal."
+        case .alternateScreen: return "Leave the terminal's full-screen view before jumping to history."
+        case .contentChanged, .geometryChanged, .terminalChanged: return "The terminal changed while locating the message. Try again."
+        case .scanLimit: return "The retained terminal history is too large to locate this message safely."
+        case .sourceChanged: return "Saved conversation history changed. Refresh and try again."
+        case .sourceMissing: return "The saved conversation file is unavailable on this device."
+        case .accessDenied: return "herdr cannot read the saved conversation file on this device."
+        case .disconnected: return "Reconnect this device before jumping to history."
+        case .other: return "The terminal could not jump to this message. Try again."
+        }
+    }
+    public var errorDescription: String? { message }
+    public static func map(_ error: Error) -> Self {
+        if let notice = error as? Self { return notice }
+        if let history = error as? ConversationHistoryError {
+            switch history {
+            case .unsupportedServer: return .unsupportedServer
+            case .sessionChanged: return .sessionChanged
+            case .disconnected: return .disconnected
+            case .contentChanged: return .messageChanged
+            default: return .sourceChanged
+            }
+        }
+        guard let error = error as? HerdrError else { return .other(code: "jump_failed") }
+        switch error {
+        case .rpc(let code, _):
+            switch code {
+            case "unknown_method", "method_not_found", "unsupported_method": return .unsupportedServer
+            case "session_changed": return .sessionChanged
+            case "message_changed": return .messageChanged
+            case "jump_ambiguous": return .ambiguous
+            case "jump_not_found": return .notFound
+            case "jump_unavailable": return .unavailable
+            case "alternate_screen": return .alternateScreen
+            case "content_changed": return .contentChanged
+            case "geometry_changed": return .geometryChanged
+            case "terminal_changed": return .terminalChanged
+            case "scan_limit": return .scanLimit
+            case "source_changed", "cursor_expired": return .sourceChanged
+            case "source_missing": return .sourceMissing
+            case "access_denied": return .accessDenied
+            default: return .other(code: code)
+            }
+        case .connectionFailed, .socketUnavailable, .remoteHerdrDown, .tunnelFailed, .tailcatBridgeFailed: return .disconnected
+        default: return .other(code: "jump_failed")
+        }
+    }
 }
 
 public enum ConversationHistoryError: Error, LocalizedError, Sendable, Equatable {

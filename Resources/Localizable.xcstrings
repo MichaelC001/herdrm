@@ -5048,6 +5048,397 @@
           }
         }
       }
+    },
+    "Use arrow keys to preview a turn and Return to jump to it in the terminal.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use arrow keys to preview a turn and Return to jump to it in the terminal."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用方向键预览消息，按回车键跳转到终端中的对应位置。"
+          }
+        }
+      }
+    },
+    "Jump to message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jump to message"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跳转到消息"
+          }
+        }
+      }
+    },
+    "Loading saved messages…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading saved messages…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在加载已保存的消息…"
+          }
+        }
+      }
+    },
+    "No sent messages in this conversation yet.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No sent messages in this conversation yet."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此对话中还没有已发送的消息。"
+          }
+        }
+      }
+    },
+    "Read full conversation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Read full conversation"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "阅读完整对话"
+          }
+        }
+      }
+    },
+    "Read full conversation (⇧⌘H)": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Read full conversation (⇧⌘H)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "阅读完整对话（⇧⌘H）"
+          }
+        }
+      }
+    },
+    "Return to live terminal": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Return to live terminal"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "返回实时终端"
+          }
+        }
+      }
+    },
+    "Terminal jump unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminal jump unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法跳转到终端位置"
+          }
+        }
+      }
+    },
+    "Dismiss notice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dismiss notice"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭提示"
+          }
+        }
+      }
+    },
+    "Update herdr on this device to jump to messages in the terminal.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Update herdr on this device to jump to messages in the terminal."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请更新此设备上的 herdr，以便跳转到终端中的消息。"
+          }
+        }
+      }
+    },
+    "The selected Claude session changed. Try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected Claude session changed. Try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选 Claude 会话已更改，请重试。"
+          }
+        }
+      }
+    },
+    "This saved message changed. Refresh history and try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This saved message changed. Refresh history and try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此已保存的消息已更改，请刷新历史记录后重试。"
+          }
+        }
+      }
+    },
+    "This message appears more than once. The terminal position cannot be identified reliably.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This message appears more than once. The terminal position cannot be identified reliably."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此消息出现了多次，无法可靠确定其终端位置。"
+          }
+        }
+      }
+    },
+    "This message is no longer visible in the terminal scrollback.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This message is no longer visible in the terminal scrollback."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此消息已不在终端回滚历史中。"
+          }
+        }
+      }
+    },
+    "This message cannot be located reliably in the terminal.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This message cannot be located reliably in the terminal."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法在终端中可靠定位此消息。"
+          }
+        }
+      }
+    },
+    "Leave the terminal's full-screen view before jumping to history.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leave the terminal's full-screen view before jumping to history."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请退出终端全屏视图后再跳转到历史记录。"
+          }
+        }
+      }
+    },
+    "The terminal changed while locating the message. Try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The terminal changed while locating the message. Try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "定位消息时终端发生了变化，请重试。"
+          }
+        }
+      }
+    },
+    "The retained terminal history is too large to locate this message safely.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The retained terminal history is too large to locate this message safely."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保留的终端历史记录过大，无法安全定位此消息。"
+          }
+        }
+      }
+    },
+    "Saved conversation history changed. Refresh and try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved conversation history changed. Refresh and try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已保存的对话历史发生了变化，请刷新后重试。"
+          }
+        }
+      }
+    },
+    "The saved conversation file is unavailable on this device.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The saved conversation file is unavailable on this device."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此设备上的已保存对话文件不可用。"
+          }
+        }
+      }
+    },
+    "herdr cannot read the saved conversation file on this device.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "herdr cannot read the saved conversation file on this device."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "herdr 无法读取此设备上的已保存对话文件。"
+          }
+        }
+      }
+    },
+    "Reconnect this device before jumping to history.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reconnect this device before jumping to history."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请先重新连接此设备，再跳转到历史记录。"
+          }
+        }
+      }
+    },
+    "The terminal could not jump to this message. Try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The terminal could not jump to this message. Try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "终端无法跳转到此消息，请重试。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -38,6 +38,8 @@ public final class ConversationHistoryController: ObservableObject {
     @Published public private(set) var canLoadOlder = false
     @Published public private(set) var canLoadNewer = false
     @Published public private(set) var copyInProgress = false
+    @Published public private(set) var isJumping = false
+    @Published public private(set) var jumpNotice: ConversationJumpNotice?
     @Published public var isPresented = false { didSet { restartPolling() } }
     @Published public var searchQuery = ""
 
@@ -62,6 +64,8 @@ public final class ConversationHistoryController: ObservableObject {
     private var queue: [ConversationWindow] = []
     private var copyToken: UUID?
     private var copyingMessageID: String?
+    private var activeJumps = 0
+    private var jumpWaiters: [CheckedContinuation<Void, Never>] = []
     private var pageIDs: [[String]] = []
     private var cacheSizes: [String: Int] = [:]
     private struct PageAnchor { let before: String?; let after: String? }
@@ -122,6 +126,78 @@ public final class ConversationHistoryController: ObservableObject {
         else if messages.isEmpty { enqueue(.latest) }
     }
     public func close() { isPresented = false }
+
+    /// Moves the existing source terminal only after the daemon validates an exact
+    /// human message. Reads and viewport mutations share one serialization gate.
+    @discardableResult
+    public func jump(turnID: String) async -> ConversationJumpResult? {
+        guard visible else { jumpNotice = .disconnected; return nil }
+        guard let selection, let provider, let binding else { jumpNotice = .sessionChanged; return nil }
+        guard let turn = turns.first(where: { $0.id == turnID }) else { jumpNotice = .unavailable; return nil }
+        let token = epoch
+        isPresented = false; activeJumps += 1; isJumping = true; jumpNotice = nil
+        defer {
+            if epoch == token {
+                activeJumps -= 1; isJumping = activeJumps > 0
+                if !jumpWaiters.isEmpty { jumpWaiters.removeFirst().resume() }
+                if !isJumping { drain() }
+            }
+        }
+        // Preserve click order even when several callers await the same read.
+        if activeJumps > 1 { await withCheckedContinuation { jumpWaiters.append($0) } }
+        // Finish an already-dispatched read, including its application, before
+        // resolving the jump. New queued/polling reads wait until jumps finish.
+        if let pending = requestTask { await pending.value }
+        do {
+            let result = try await readGate.perform { [self] in
+                try await performJump(turn: turn, selection: selection, provider: provider, binding: binding, token: token)
+            }
+            guard epoch == token, self.selection == selection, self.binding == binding else { return nil }
+            selectedMessageID = result.messageID; followingLatest = false
+            promotePage(containing: result.messageID)
+            jumpNotice = nil
+            return result
+        } catch {
+            guard epoch == token, self.selection == selection, !Task.isCancelled else { return nil }
+            jumpNotice = ConversationJumpNotice.map(error)
+            return nil
+        }
+    }
+
+    private func performJump(turn: ConversationTurn, selection: Selection, provider: any ConversationHistoryProviding, binding: ConversationBinding, token: UUID) async throws -> ConversationJumpResult {
+        try validateJumpSelection(selection, binding: binding, token: token)
+        if !messages.contains(where: { $0.id == turn.messageID }) {
+            let page = try await provider.read(target: selection.paneID, expectedSessionID: selection.sessionID, window: .around(messageID: turn.messageID), limits: .init())
+            try validateJumpSelection(selection, binding: binding, token: token)
+            guard page.availability == "ready" else {
+                throw ConversationJumpNotice.map(HerdrError.rpc(code: page.availability, message: ""))
+            }
+            guard page.binding == binding else { throw ConversationJumpNotice.sessionChanged }
+            guard page.messages.contains(where: { $0.id == turn.messageID }) else { throw ConversationJumpNotice.notFound }
+            apply(page, window: .around(messageID: turn.messageID))
+        }
+        try validateJumpSelection(selection, binding: binding, token: token)
+        guard let message = messages.first(where: { $0.id == turn.messageID }),
+              message.role == "user", message.origin == "human", message.turnID == turn.id,
+              !message.messageRevision.isEmpty else { throw ConversationJumpNotice.unavailable }
+        let result = try await provider.jump(target: selection.paneID, expectedSessionID: selection.sessionID,
+                                             expectedGeneration: binding.generation, messageID: message.id,
+                                             messageRevision: message.messageRevision)
+        try validateJumpSelection(selection, binding: binding, token: token)
+        guard result.binding == binding else { throw ConversationJumpNotice.sessionChanged }
+        guard result.messageID == message.id, result.messageRevision == message.messageRevision,
+              messages.first(where: { $0.id == message.id })?.messageRevision == message.messageRevision else {
+            throw ConversationJumpNotice.messageChanged
+        }
+        return result
+    }
+
+    private func validateJumpSelection(_ selection: Selection, binding: ConversationBinding, token: UUID) throws {
+        try Task.checkCancellation()
+        guard epoch == token, visible, self.selection == selection, self.binding == binding else {
+            throw ConversationJumpNotice.sessionChanged
+        }
+    }
     public func refresh() {
         guard selection != nil else { return }
         enqueue(changesCursor.map { .changes(cursor: $0) } ?? .latest)
@@ -169,12 +245,16 @@ public final class ConversationHistoryController: ObservableObject {
         pollingTask?.cancel(); pollingTask = nil; queue = []
         isLoadingOlder = false; isLoadingNewer = false
         copyToken = nil; copyingMessageID = nil; copyInProgress = false
+        activeJumps = 0; isJumping = false; jumpNotice = nil
+        let waiting = jumpWaiters; jumpWaiters = []
+        for waiter in waiting { waiter.resume() }
     }
     private func clearContent() {
         messages = []; turns = []; matchedMessageIDs = []; pageIDs = []; cacheSizes = [:]; navigationAnchors = [:]
         binding = nil; appliedChangesRevision = ""; completeness = "source_available"; beforeCursor = nil; afterCursor = nil; changesCursor = nil
         canLoadOlder = false; canLoadNewer = false; selectedMessageID = nil; hasNewMessages = false
         failures = 0; searchQuery = ""; queryGeneration = UUID()
+        jumpNotice = nil
     }
     private func enqueue(_ window: ConversationWindow) {
         guard selection != nil, provider != nil, visible else { return }
@@ -182,7 +262,7 @@ public final class ConversationHistoryController: ObservableObject {
         drain()
     }
     private func drain() {
-        guard requestTask == nil, !copyInProgress, !queue.isEmpty, let selection, let provider else { return }
+        guard requestTask == nil, !copyInProgress, !isJumping, !queue.isEmpty, let selection, let provider else { return }
         let window = queue.removeFirst(), token = epoch, queryToken = queryGeneration
         let gate = readGate
         if messages.isEmpty { state = .loading }
@@ -338,7 +418,7 @@ public final class ConversationHistoryController: ObservableObject {
                 guard self.visible, !Task.isCancelled else { return }
                 if case .unavailable(let reason) = self.state,
                    !["disconnected", "loading", "no_binding", "not_recorded", "source_missing", "access_denied"].contains(reason) { continue }
-                if self.requestTask == nil, !self.copyInProgress { self.refresh() }
+                if self.requestTask == nil, !self.copyInProgress, !self.isJumping { self.refresh() }
             }
         }
     }

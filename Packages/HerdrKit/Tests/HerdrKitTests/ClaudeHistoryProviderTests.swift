@@ -42,6 +42,43 @@ final class ClaudeHistoryProviderTests: XCTestCase {
         XCTAssertEqual(socket.requests.compactMap { $0["method"] as? String }, ["ping", "session.snapshot"])
         await service.disconnect()
     }
+    func testJumpUsesExactIdentityAndScrollIsViewportOnly() async throws {
+        let socket = try HistoryFixtureSocket(supported: true, jumpSupported: true)
+        defer { socket.stop() }
+        let service = HerdrService(device: .init(name: "fixture", kind: .local, socketPath: socket.path), autoStartLocalServer: false)
+        _ = try await service.connect()
+        let jump = try await ClaudeHistoryProvider(service: service).jump(target: "w:p", expectedSessionID: "s", expectedGeneration: "g", messageID: "m", messageRevision: "mr")
+        XCTAssertEqual(jump.messageID, "m"); XCTAssertEqual(jump.sourceRow, 17)
+        try await service.scrollPane(paneID: "w:p", offsetFromBottom: 9)
+        try await service.scrollToBottom(paneID: "w:p")
+        await service.disconnect()
+        let requests = socket.requests
+        XCTAssertEqual(requests.compactMap { $0["method"] as? String }, ["ping", "agent.conversation.jump", "pane.scroll", "pane.scroll"])
+        let params = try XCTUnwrap(requests[1]["params"] as? [String: Any])
+        XCTAssertEqual(params["expected_generation"] as? String, "g")
+        XCTAssertEqual(params["expected_session_id"] as? String, "s")
+        XCTAssertEqual(params["message_id"] as? String, "m")
+        XCTAssertEqual(params["message_revision"] as? String, "mr")
+        XCTAssertEqual(params["target"] as? String, "w:p"); XCTAssertNil(params["path"])
+        XCTAssertEqual((requests[2]["params"] as? [String: Any])?["offset_from_bottom"] as? Int, 9)
+        XCTAssertEqual((requests[3]["params"] as? [String: Any])?["offset_from_bottom"] as? Int, 0)
+        XCTAssertTrue(requests.allSatisfy { !["pane.send_input", "agent.send", "pane.write"].contains($0["method"] as? String ?? "") })
+    }
+    func testMissingJumpCapabilityPreservesOrdinaryHistory() async throws {
+        let socket = try HistoryFixtureSocket(supported: true, jumpSupported: false)
+        defer { socket.stop() }
+        let service = HerdrService(device: .init(name: "fixture", kind: .local, socketPath: socket.path), autoStartLocalServer: false)
+        _ = try await service.connect()
+        let provider = ClaudeHistoryProvider(service: service)
+        do {
+            _ = try await provider.jump(target: "w:p", expectedSessionID: "s", expectedGeneration: "g", messageID: "m", messageRevision: "mr")
+            XCTFail("unadvertised jump should not be sent")
+        } catch { XCTAssertEqual(error as? ConversationJumpNotice, .unsupportedServer) }
+        let page = try await provider.read(target: "w:p", expectedSessionID: "s", window: .latest, limits: .init())
+        XCTAssertEqual(page.binding?.sessionID, "s")
+        XCTAssertEqual(socket.requests.compactMap { $0["method"] as? String }, ["ping", "agent.conversation.read"])
+        await service.disconnect()
+    }
 }
 
 /// Synthetic private socket only; never opens the user's daemon or reads a transcript.
@@ -52,7 +89,7 @@ private final class HistoryFixtureSocket: @unchecked Sendable {
     private let listener: Int32
     private var stopped = false
     var requests: [[String: Any]] { lock.lock(); defer { lock.unlock() }; return recorded }
-    init(supported: Bool) throws {
+    init(supported: Bool, jumpSupported: Bool = false) throws {
         path = "/tmp/hhist-\(UUID().uuidString.prefix(8)).sock"
         listener = socket(AF_UNIX, SOCK_STREAM, 0)
         guard listener >= 0 else { throw HerdrError.connectionFailed("fixture socket") }
@@ -76,7 +113,9 @@ private final class HistoryFixtureSocket: @unchecked Sendable {
                 let result: [String: Any]
                 switch method {
                 case "ping":
-                    result = supported ? ["type": "pong", "version": "fixture", "protocol": 17, "capabilities": ["agent_conversation_read": true, "agent_conversation_block_read": true]] : ["type": "pong", "version": "fixture", "protocol": 17]
+                    result = supported ? ["type": "pong", "version": "fixture", "protocol": 17, "capabilities": ["agent_conversation_read": true, "agent_conversation_block_read": true, "agent_conversation_jump": jumpSupported]] : ["type": "pong", "version": "fixture", "protocol": 17]
+                case "agent.conversation.jump": result = ["type": "agent_conversation_jump", "binding": ["provider": "claude", "session_id": "s", "generation": "g"], "message_id": "m", "message_revision": "mr", "content_seq": 42, "source_row": 17, "offset_from_bottom": 9]
+                case "pane.scroll": result = ["type": "pane_scrolled"]
                 case "session.snapshot": result = ["type": "session_snapshot", "snapshot": ["agents": [], "workspaces": []]]
                 case "agent.conversation.block.read": result = ["type": "agent_conversation_block", "binding": ["provider": "claude", "session_id": "s", "generation": "g"], "revision": "1", "message_id": "m", "message_revision": "mr", "block_id": "b", "kind": "text", "text": "🌍\n", "slice_index": 1]
                 default: result = ["type": "agent_conversation", "binding": ["provider": "claude", "session_id": "s", "generation": "g"], "revision": "1", "availability": "ready"]

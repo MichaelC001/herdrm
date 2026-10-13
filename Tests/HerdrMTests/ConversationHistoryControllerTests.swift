@@ -8,16 +8,31 @@ private actor HistoryFixtureProvider: ConversationHistoryProviding {
         var error: ConversationHistoryError?
         var delay: Double = 0
     }
+    struct JumpStep: Sendable {
+        var result: ConversationJumpResult?
+        var error: ConversationJumpNotice?
+        var delay: Double = 0
+    }
+    struct JumpRequest: Sendable, Equatable {
+        let target: String
+        let sessionID: String
+        let generation: String
+        let messageID: String
+        let messageRevision: String
+    }
     private var steps: [Step]
     private var blocks: [BlockPage]
+    private var jumps: [JumpStep]
+    private(set) var jumpRequests: [JumpRequest] = []
     private(set) var windows: [ConversationWindow] = []
     private(set) var sessions: [String] = []
     private(set) var blockReads = 0
     private var activeReads = 0
     private(set) var maximumConcurrentReads = 0
-    init(_ pages: [ConversationPage] = [], steps: [Step]? = nil, blocks: [BlockPage] = []) {
+    init(_ pages: [ConversationPage] = [], steps: [Step]? = nil, blocks: [BlockPage] = [], jumps: [JumpStep] = []) {
         self.steps = steps ?? pages.map { Step(page: $0) }
         self.blocks = blocks
+        self.jumps = jumps
     }
     func read(target: String, expectedSessionID: String, window: ConversationWindow, limits: ConversationLimits) async throws -> ConversationPage {
         activeReads += 1; maximumConcurrentReads = max(maximumConcurrentReads, activeReads)
@@ -36,6 +51,18 @@ private actor HistoryFixtureProvider: ConversationHistoryProviding {
         blockReads += 1
         guard !blocks.isEmpty else { throw ConversationHistoryError.invalidContinuation }
         return blocks.removeFirst()
+    }
+    func jump(target: String, expectedSessionID: String, expectedGeneration: String, messageID: String, messageRevision: String) async throws -> ConversationJumpResult {
+        activeReads += 1; maximumConcurrentReads = max(maximumConcurrentReads, activeReads)
+        defer { activeReads -= 1 }
+        jumpRequests.append(.init(target: target, sessionID: expectedSessionID, generation: expectedGeneration, messageID: messageID, messageRevision: messageRevision))
+        guard !jumps.isEmpty else { throw ConversationJumpNotice.unsupportedServer }
+        let step = jumps.removeFirst()
+        if step.delay > 0 {
+            await withCheckedContinuation { continuation in DispatchQueue.global().asyncAfter(deadline: .now() + step.delay) { continuation.resume() } }
+        }
+        if let error = step.error { throw error }
+        return step.result!
     }
 }
 
@@ -79,6 +106,9 @@ final class ConversationHistoryControllerTests: XCTestCase {
     }
     private func page(_ messages: [ConversationMessage], session: String = "s", revision: String = "1", before: String? = nil, changes: String? = "c", turns: [ConversationTurn] = []) -> ConversationPage {
         .init(binding: binding(session), revision: revision, messages: messages, turns: turns, beforeCursor: before, changesCursor: changes)
+    }
+    private func jumpResult(_ id: String, session: String = "s", generation: String = "g", revision: String = "mr") -> ConversationJumpResult {
+        .init(binding: binding(session, generation: generation), messageID: id, messageRevision: revision, contentSeq: 42, sourceRow: 17, offsetFromBottom: 9)
     }
     private func selected(_ provider: HistoryFixtureProvider) -> ConversationHistoryController {
         let c = ConversationHistoryController()
@@ -369,5 +399,78 @@ final class ConversationHistoryControllerTests: XCTestCase {
             c.loadOlder(); try await settled(c) { c.messages.contains { $0.id == "m\(index)" } && !c.isLoadingOlder }
         }
         XCTAssertEqual(c.messages.count, 8)
+    }
+    func testJumpLoadsUncachedHumanTurnAndKeepsDrawerClosed() async throws {
+        let turn = ConversationTurn(id: "t-ancient", messageID: "ancient", ordinal: 1)
+        let p = HistoryFixtureProvider([page([message("live")], turns: [turn]), page([message("ancient", order: 0)])], jumps: [.init(result: jumpResult("ancient"))])
+        let c = selected(p); defer { c.stop() }; try await settled(c) { c.state == .ready }
+        c.open(); let result = await c.jump(turnID: turn.id)
+        XCTAssertEqual(result, jumpResult("ancient")); XCTAssertEqual(c.selectedMessageID, "ancient")
+        XCTAssertFalse(c.isPresented); XCTAssertFalse(c.isJumping); XCTAssertNil(c.jumpNotice)
+        let windows = await p.windows
+        XCTAssertEqual(windows, [.latest, .around(messageID: "ancient")])
+        let requests = await p.jumpRequests
+        XCTAssertEqual(requests, [.init(target: "w:p", sessionID: "s", generation: "g", messageID: "ancient", messageRevision: "mr")])
+    }
+    func testJumpRejectsStaleAroundBindingWithoutMovingSelection() async throws {
+        let turn = ConversationTurn(id: "t-ancient", messageID: "ancient", ordinal: 1)
+        let stale = ConversationPage(binding: binding(generation: "replacement"), messages: [message("ancient")])
+        let p = HistoryFixtureProvider([page([message("live")], turns: [turn]), stale])
+        let c = selected(p); defer { c.stop() }; try await settled(c) { c.state == .ready }
+        let result = await c.jump(turnID: turn.id)
+        XCTAssertNil(result); XCTAssertEqual(c.selectedMessageID, "live"); XCTAssertEqual(c.jumpNotice, .sessionChanged)
+        let requests = await p.jumpRequests; XCTAssertTrue(requests.isEmpty)
+    }
+    func testJumpRejectsDifferentResultSessionGenerationAndRevision() async throws {
+        for result in [jumpResult("m", session: "other"), jumpResult("m", generation: "other"), jumpResult("m", revision: "other"), jumpResult("other")] {
+            let turn = ConversationTurn(id: "t-m", messageID: "m", ordinal: 1)
+            let p = HistoryFixtureProvider([page([message("m"), message("live", order: 2)], turns: [turn])], jumps: [.init(result: result)])
+            let c = selected(p); try await settled(c) { c.state == .ready }
+            let outcome = await c.jump(turnID: turn.id); XCTAssertNil(outcome); XCTAssertEqual(c.selectedMessageID, "live")
+            XCTAssertNotNil(c.jumpNotice); XCTAssertFalse(c.isPresented); c.stop()
+        }
+    }
+    func testJumpLateSuccessCannotAffectReplacedSession() async throws {
+        let turn = ConversationTurn(id: "t-m", messageID: "m", ordinal: 1)
+        let p = HistoryFixtureProvider([page([message("m"), message("live", order: 2)], turns: [turn]), page([message("new")], session: "new")], jumps: [.init(result: jumpResult("m"), delay: 0.1)])
+        let c = selected(p); defer { c.stop() }; try await settled(c) { c.state == .ready }
+        let task = Task { await c.jump(turnID: turn.id) }
+        try await settled(c) { c.isJumping }
+        c.select(deviceID: device, paneID: "w:p", session: ref("new"), provider: p)
+        let outcome = await task.value; XCTAssertNil(outcome)
+        try await settled(c) { c.selectedMessageID == "new" }
+        XCTAssertNil(c.jumpNotice); XCTAssertFalse(c.isJumping)
+    }
+    func testRapidJumpsAndPendingReadsRemainSerialInClickOrder() async throws {
+        let first = ConversationTurn(id: "t-a", messageID: "a", ordinal: 1), second = ConversationTurn(id: "t-b", messageID: "b", ordinal: 2)
+        let p = HistoryFixtureProvider(steps: [.init(page: page([message("a"), message("b", order: 2)], turns: [first, second])), .init(page: page([]), delay: 0.03)], jumps: [.init(result: jumpResult("a"), delay: 0.04), .init(result: jumpResult("b"))])
+        let c = selected(p); defer { c.stop() }; try await settled(c) { c.state == .ready }
+        c.refresh()
+        let a = Task { await c.jump(turnID: first.id) }
+        try await settled(c) { c.isJumping }
+        let b = Task { await c.jump(turnID: second.id) }
+        let aResult = await a.value, bResult = await b.value; XCTAssertNotNil(aResult); XCTAssertNotNil(bResult)
+        XCTAssertEqual(c.selectedMessageID, "b"); XCTAssertFalse(c.isJumping); XCTAssertFalse(c.isPresented)
+        let requests = await p.jumpRequests, maximum = await p.maximumConcurrentReads
+        XCTAssertEqual(requests.map(\.messageID), ["a", "b"]); XCTAssertEqual(maximum, 1)
+    }
+    func testAmbiguousAndUnsupportedJumpsPreserveHistoryAndSelection() async throws {
+        for error in [ConversationJumpNotice.ambiguous, .unsupportedServer] {
+            let turn = ConversationTurn(id: "t-m", messageID: "m", ordinal: 1)
+            let p = HistoryFixtureProvider([page([message("m"), message("live", order: 2)], turns: [turn])], jumps: [.init(error: error)])
+            let c = selected(p); try await settled(c) { c.state == .ready }
+            let outcome = await c.jump(turnID: turn.id); XCTAssertNil(outcome); XCTAssertEqual(c.selectedMessageID, "live")
+            XCTAssertEqual(c.jumpNotice, error); XCTAssertEqual(c.state, .ready)
+            XCTAssertEqual(c.messages.count, 2); XCTAssertFalse(c.isPresented); c.stop()
+        }
+    }
+    func testNonHumanTurnCannotIssueJumpMutation() async throws {
+        let turn = ConversationTurn(id: "t-auto", messageID: "auto", ordinal: 1)
+        let automatic = ConversationMessage(id: "auto", turnID: turn.id, role: "user", origin: "automatic", messageRevision: "mr")
+        let p = HistoryFixtureProvider([page([automatic, message("live", order: 2)], turns: [turn])])
+        let c = selected(p); defer { c.stop() }; try await settled(c) { c.state == .ready }
+        let outcome = await c.jump(turnID: turn.id); XCTAssertNil(outcome); XCTAssertEqual(c.selectedMessageID, "live")
+        XCTAssertEqual(c.jumpNotice, .unavailable)
+        let requests = await p.jumpRequests; XCTAssertTrue(requests.isEmpty)
     }
 }

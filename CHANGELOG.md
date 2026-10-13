@@ -8,10 +8,12 @@ the Sparkle update description — a release without a section here fails CI.
 ## [Unreleased]
 
 ### Added
-- **Claude conversation history (⇧⌘H).** A chronological prompt rail previews
-  sent messages and opens the full saved conversation, including Claude's
-  replies, in an overlay. Search, older/newer paging, expandable tool activity,
-  and complete-message reading/copying use a read-only API on the device
+- **Claude conversation history.** A thin, compact chronological prompt rail enlarges
+  nearby marks on hover and shows a compact prompt/reply preview. Clicking a mark
+  locates its supported rendered exchange in the existing terminal; a return-to-live
+  control restores current output. The secondary reader (⇧⌘H) includes Claude's
+  replies, search, older/newer paging, expandable tool activity,
+  and complete-message reading/copying through read-only APIs on the device
   running Claude. Requires a matching herdr daemon with the history capability;
   older servers keep normal terminal access. History browsing preserves the
   running terminal and never resends a message.

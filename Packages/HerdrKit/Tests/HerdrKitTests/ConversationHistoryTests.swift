@@ -29,14 +29,29 @@ final class ConversationHistoryTests: XCTestCase {
     func testOldAndSupportedPingCapabilityDecoding() throws {
         let old = try JSONDecoder().decode(PingResult.self, from: Data(#"{"version":"x","protocol":17}"#.utf8))
         XCTAssertNil(old.capabilities)
-        let current = try JSONDecoder().decode(PingResult.self, from: Data(#"{"version":"x","protocol":17,"capabilities":{"live_handoff":true,"agent_conversation_read":true,"agent_conversation_block_read":true}}"#.utf8))
+        let current = try JSONDecoder().decode(PingResult.self, from: Data(#"{"version":"x","protocol":17,"capabilities":{"live_handoff":true,"agent_conversation_read":true,"agent_conversation_block_read":true,"agent_conversation_jump":true}}"#.utf8))
         XCTAssertEqual(current.capabilities?.agentConversationRead, true)
         XCTAssertEqual(current.capabilities?.agentConversationBlockRead, true)
+        XCTAssertEqual(current.capabilities?.agentConversationJump, true)
     }
     func testLimitsAndTypedErrors() {
         XCTAssertEqual(ConversationLimits(limit: 999, maxBytes: Int.max), .init(limit: 200, maxBytes: 1_048_576))
         XCTAssertEqual(ConversationHistoryError.map(HerdrError.rpc(code: "cursor_expired", message: "synthetic")) as? ConversationHistoryError, .cursorExpired)
         XCTAssertEqual(ConversationHistoryError.map(HerdrError.rpc(code: "session_changed", message: "synthetic")) as? ConversationHistoryError, .sessionChanged)
         XCTAssertEqual(ConversationHistoryError.map(HerdrError.rpc(code: "unknown_method", message: "synthetic")) as? ConversationHistoryError, .unsupportedServer)
+    }
+    func testJumpWireIdentityAndUnsignedPositionsAreStrict() throws {
+        let result = ConversationJumpResult(binding: .init(provider: "claude", sessionID: "s", generation: "g"), messageID: "m", messageRevision: "mr", contentSeq: UInt64.max, sourceRow: 17, offsetFromBottom: 8)
+        XCTAssertEqual(try JSONDecoder().decode(ConversationJumpResult.self, from: JSONEncoder().encode(result)), result)
+        let malformed = #"{"binding":{"provider":"claude","session_id":"s","generation":"g"},"message_id":"m","message_revision":"mr","content_seq":1,"source_row":-1,"offset_from_bottom":8}"#
+        XCTAssertThrowsError(try JSONDecoder().decode(ConversationJumpResult.self, from: Data(malformed.utf8)))
+        let missing = #"{"binding":{"provider":"claude","session_id":"s","generation":"g"},"message_id":"m","message_revision":"mr","source_row":1,"offset_from_bottom":8}"#
+        XCTAssertThrowsError(try JSONDecoder().decode(ConversationJumpResult.self, from: Data(missing.utf8)))
+    }
+    func testJumpErrorsKeepSpecificCodes() {
+        XCTAssertEqual(ConversationJumpNotice.map(HerdrError.rpc(code: "jump_ambiguous", message: "fixture")), .ambiguous)
+        XCTAssertEqual(ConversationJumpNotice.map(HerdrError.rpc(code: "message_changed", message: "fixture")), .messageChanged)
+        XCTAssertEqual(ConversationJumpNotice.map(HerdrError.rpc(code: "geometry_changed", message: "fixture")), .geometryChanged)
+        XCTAssertEqual(ConversationJumpNotice.map(HerdrError.rpc(code: "future_jump_error", message: "fixture")).code, "future_jump_error")
     }
 }

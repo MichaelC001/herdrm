@@ -580,13 +580,20 @@ struct DetailView: View {
                 // down: its content survives the round trip. Do not key this on the
                 // selection; that rebuild-on-switch is exactly what this removes.
                 tabLayoutArea(selected: entry)
+                    // The timeline gutter is stable for retained agent terminals;
+                    // hovering, zooming and opening the reader do not resize them.
+                    .padding(.leading, 36)
                     .overlay {
                         if model.isClaudeHistorySelected {
-                            ConversationHistoryOverlay(controller: model.conversationHistory) {
-                                if let selected = model.selectedAttachedEntry {
-                                    AttachViewRegistry.focus(selected.id)
-                                }
-                            }
+                            ConversationHistoryOverlay(
+                                controller: model.conversationHistory,
+                                onClose: {
+                                    if let selected = model.selectedAttachedEntry { AttachViewRegistry.focus(selected.id) }
+                                },
+                                onJump: { model.jumpToConversationTurn($0) },
+                                canReturnToLive: model.conversationCanReturnToLive,
+                                onReturnToLive: { model.returnConversationToLive() }
+                            )
                             .onAppear { model.setConversationHistoryVisible(true) }
                             .onDisappear { model.setConversationHistoryVisible(false) }
                         }
