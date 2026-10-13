@@ -760,6 +760,7 @@ struct DetailView: View {
                 copyOnSelect: terminalCopyOnSelect,
                 // A selected shell or the file manager covers the attach side.
                 isVisible: isVisible && model.selectedShellID == nil && !model.isFileManagerActive,
+                historyService: model.service(for: session.device),
                 onAttachmentError: { model.actionError = $0 },
                 onAttachmentUploadingChanged: { uploadingAttachment = $0 },
                 onExit: { code in endedAttach[session.id] = code }
