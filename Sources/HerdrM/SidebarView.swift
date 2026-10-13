@@ -224,7 +224,7 @@ struct SidebarView: View {
     }
 
     private var terminalsSectionVisible: Bool {
-        !model.visibleTerminals.isEmpty || !model.shellSessions.isEmpty
+        !model.terminalSectionRows.isEmpty || !model.shellSessions.isEmpty
     }
 
     private func applyGrouping(_ grouped: Bool, collapseSections: Bool) {

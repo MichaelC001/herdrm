@@ -628,27 +628,30 @@ final class AppModel: ObservableObject {
         )
     }
 
-    /// The row entry for a pane. A tab label names the tab, which the main pane
-    /// stands for; a child pane keeps its own title (OSC title, then cwd), or
-    /// every pane of a tab would rename together whenever the tab does, as it
-    /// did with herdr's auto-title following a `cd` in one of them.
-    private func attachedEntry(for leaf: SidebarTree.Leaf, device: Device, isChild: Bool = false) -> AttachedEntry {
+    /// The row entry for a pane. A tab label names the tab, so it stands in for
+    /// the pane only while the tab is that one pane; once the tab is split every
+    /// pane shows its own title (herdr name or OSC title, then cwd). Otherwise
+    /// all of them would rename together whenever the tab did, as with herdr's
+    /// auto-title following a `cd` in one pane, or calling an agent's tab "Shell"
+    /// after a shell was split off it.
+    private func attachedEntry(for leaf: SidebarTree.Leaf, device: Device, sharesTab: Bool) -> AttachedEntry {
         switch leaf {
         case .agent(let agent):
-            return .agent(isChild
+            return .agent(sharesTab
                 ? AgentEntry(device: device, agent: agent, tabLabel: nil)
                 : agentEntry(device: device, agent: agent))
         case .terminal(let pane):
-            let tab = isChild ? nil : session(device.id).tabs.first { $0.tabID == pane.tabID }
+            let tab = sharesTab ? nil : session(device.id).tabs.first { $0.tabID == pane.tabID }
             // `ordinaryTerminalPanes` only keeps panes with a terminal id.
             return .terminal(TerminalEntry(device: device, pane: pane, tab: tab, terminalID: pane.terminalID ?? ""))
         }
     }
 
-    /// Rows of one section of the flat list. A tab's children indent under its
-    /// main pane when that pane belongs to the same section; otherwise they sit
-    /// at the top level, since there is nothing in this section to hang them on.
-    /// Rows never cross sections.
+    /// Rows of one section of the flat list. A tab's panes list under its main
+    /// pane, in the main pane's section: a shell split off an agent sits under
+    /// that agent in Agents, a shell split off a shell under it in Terminals. An
+    /// agent is always in Agents, so an agent split off a shell sits there at
+    /// the top level, with nothing to hang it on.
     private func sectionRows(agents wantAgents: Bool) -> [SidebarRow] {
         var rows: [SidebarRow] = []
         for device in devicesInScope {
@@ -660,19 +663,25 @@ final class AppModel: ObservableObject {
                 for tab in space.tabs {
                     let mainIsAgent: Bool
                     if case .agent = tab.main.leaf { mainIsAgent = true } else { mainIsAgent = false }
-                    let mainBelongs = mainIsAgent == wantAgents
-                    if mainBelongs {
-                        rows.append(SidebarRow(entry: attachedEntry(for: tab.main.leaf, device: device), indent: 0, isChild: false))
+                    let shared = !tab.main.children.isEmpty
+                    if mainIsAgent == wantAgents {
+                        rows.append(SidebarRow(
+                            entry: attachedEntry(for: tab.main.leaf, device: device, sharesTab: shared),
+                            indent: 0,
+                            isChild: false
+                        ))
                     }
                     for child in tab.main.children {
                         let childIsAgent: Bool
                         if case .agent = child.leaf { childIsAgent = true } else { childIsAgent = false }
-                        guard childIsAgent == wantAgents else { continue }
-                        rows.append(SidebarRow(
-                            entry: attachedEntry(for: child.leaf, device: device, isChild: true),
-                            indent: mainBelongs ? 1 : 0,
-                            isChild: mainBelongs
-                        ))
+                        let entry = attachedEntry(for: child.leaf, device: device, sharesTab: true)
+                        if mainIsAgent == wantAgents, mainIsAgent || !childIsAgent {
+                            // Under its main: anything split off an agent, a shell split off a shell.
+                            rows.append(SidebarRow(entry: entry, indent: 1, isChild: true))
+                        } else if wantAgents, childIsAgent, !mainIsAgent {
+                            // An agent split off a shell: in Agents, nothing to hang it on.
+                            rows.append(SidebarRow(entry: entry, indent: 0, isChild: false))
+                        }
                     }
                 }
             }
@@ -680,9 +689,10 @@ final class AppModel: ObservableObject {
         return rows
     }
 
-    /// The Agents section, children indented under their tab's main agent.
+    /// The Agents section: agent mains with everything split off them, plus
+    /// agents split off a shell.
     var agentSectionRows: [SidebarRow] { sectionRows(agents: true) }
-    /// The Terminals section, children indented under their tab's main terminal.
+    /// The Terminals section: shell mains with the shells split off them.
     var terminalSectionRows: [SidebarRow] { sectionRows(agents: false) }
 
     /// Top-level agent entries of the Agents section, the drag reorder list:
@@ -697,9 +707,18 @@ final class AppModel: ObservableObject {
         else { return [] }
         var rows: [SidebarRow] = []
         for tab in space.tabs {
-            rows.append(SidebarRow(entry: attachedEntry(for: tab.main.leaf, device: entry.device), indent: 1, isChild: false))
+            let shared = !tab.main.children.isEmpty
+            rows.append(SidebarRow(
+                entry: attachedEntry(for: tab.main.leaf, device: entry.device, sharesTab: shared),
+                indent: 1,
+                isChild: false
+            ))
             for child in tab.main.children {
-                rows.append(SidebarRow(entry: attachedEntry(for: child.leaf, device: entry.device, isChild: true), indent: 2, isChild: true))
+                rows.append(SidebarRow(
+                    entry: attachedEntry(for: child.leaf, device: entry.device, sharesTab: true),
+                    indent: 2,
+                    isChild: true
+                ))
             }
         }
         return rows
