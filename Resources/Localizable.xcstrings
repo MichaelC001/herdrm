@@ -4161,6 +4161,22 @@
         }
       }
     },
+    "Show Machine Stats": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Machine Stats"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示机器状态"
+          }
+        }
+      }
+    },
     "RECENT": {
       "localizations": {
         "en": {
