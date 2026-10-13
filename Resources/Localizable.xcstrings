@@ -3777,6 +3777,70 @@
         }
       }
     },
+    "MCP servers": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MCP servers"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MCP 服务器"
+          }
+        }
+      }
+    },
+    "%@ · service": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · service"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · 服务"
+          }
+        }
+      }
+    },
+    "Runs on its own; one copy serves every client": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Runs on its own; one copy serves every client"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "独立运行；一个实例服务所有客户端"
+          }
+        }
+      }
+    },
+    "Started by agent sessions; one copy per session": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Started by agent sessions; one copy per session"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "由 Agent 会话启动；每个会话一个实例"
+          }
+        }
+      }
+    },
     "%lld proc": {
       "localizations": {
         "en": {
