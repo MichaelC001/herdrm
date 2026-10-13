@@ -98,8 +98,9 @@ macOS window on top of it, and it's grown well past "attach to a terminal":
   prompt/reply preview; click a mark to locate the rendered exchange in the
   existing terminal. The arrow at the bottom returns to live output. The bubble
   button at the bottom-right of each Claude agent's sidebar card, or **⇧⌘H**,
-  opens the secondary full-conversation reader with search,
-  older/newer paging, collapsed tools and complete-message reading/copying.
+  opens or closes the secondary full-conversation reader for that agent. The
+  reader includes search, older/newer paging, collapsed tools and
+  complete-message reading/copying.
   Terminal jumps require a uniquely matched complete prompt and supported reply
   context still retained in source scrollback; unavailable matches leave it alone.
   This requires a herdr daemon advertising the history read/jump methods and a

@@ -13,7 +13,7 @@ the Sparkle update description — a release without a section here fails CI.
   nearby marks on hover and shows a compact prompt/reply preview. Clicking a mark
   locates its supported rendered exchange in the existing terminal; a return-to-live
   control restores current output. The bubble in each Claude agent's sidebar
-  card, or ⇧⌘H, opens the secondary reader, which includes Claude's
+  card, or ⇧⌘H, toggles the secondary reader, which includes Claude's
   replies, search, older/newer paging, expandable tool activity,
   and complete-message reading/copying through read-only APIs on the device
   running Claude. Requires a matching herdr daemon with the history capability;

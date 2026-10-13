@@ -161,7 +161,7 @@ struct HerdrMApp: App {
                 Toggle("Show Machine Stats", isOn: $showsMachineStats)
                 Button("Read full conversation") {
                     if let model = focusedModel, let entry = model.selectedEntry {
-                        model.openConversationHistory(for: entry.ref)
+                        model.toggleConversationHistory(for: entry.ref)
                     }
                 }
                 .keyboardShortcut("h", modifiers: [.command, .shift])

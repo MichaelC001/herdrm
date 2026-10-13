@@ -6,7 +6,7 @@ import XCTest
 /// the currently selected terminal and of the row's drag/select surface.
 @MainActor
 final class SidebarAgentHistoryUIUXTests: XCTestCase {
-    func testPointerOpensHistoryForAnUnselectedClaudeCard() throws {
+    func testPointerOpensClosesAndReopensHistoryForAnUnselectedClaudeCard() throws {
         let sidebar = try SidebarHarness(spaces: 14, agents: 20)
         sidebar.selectFirstAgent()
         sidebar.scroll(.offset(520))
@@ -17,6 +17,36 @@ final class SidebarAgentHistoryUIUXTests: XCTestCase {
 
         XCTAssertEqual(sidebar.model.selectedPane, target.ref)
         XCTAssertTrue(sidebar.model.conversationHistory.isPresented, "the native row drag host must not intercept the history button")
+        XCTAssertEqual(sidebar.model.conversationHistory.state, .unavailable("no_binding"))
+
+        try sidebar.clickAgentHistoryButton(for: target)
+
+        XCTAssertEqual(sidebar.model.selectedPane, target.ref)
+        XCTAssertFalse(sidebar.model.conversationHistory.isPresented, "clicking the same card again closes its history")
+        XCTAssertEqual(sidebar.model.conversationHistory.state, .unavailable("no_binding"))
+
+        try sidebar.clickAgentHistoryButton(for: target)
+
+        XCTAssertEqual(sidebar.model.selectedPane, target.ref)
+        XCTAssertTrue(sidebar.model.conversationHistory.isPresented, "the same control can reopen its history")
+        XCTAssertEqual(sidebar.model.conversationHistory.state, .unavailable("no_binding"))
+    }
+
+    func testPointerSwitchesAnOpenDrawerToAnotherClaudeCard() throws {
+        let sidebar = try SidebarHarness(spaces: 14, agents: 20)
+        sidebar.selectFirstAgent()
+        sidebar.scroll(.offset(520))
+        let first = try XCTUnwrap(sidebar.model.visibleAgents.first { $0.agent.paneID == "pane-1" })
+        let second = try XCTUnwrap(sidebar.model.visibleAgents.first { $0.agent.paneID == "pane-2" })
+
+        try sidebar.clickAgentHistoryButton(for: first)
+        XCTAssertEqual(sidebar.model.selectedPane, first.ref)
+        XCTAssertTrue(sidebar.model.conversationHistory.isPresented)
+
+        try sidebar.clickAgentHistoryButton(for: second)
+
+        XCTAssertEqual(sidebar.model.selectedPane, second.ref)
+        XCTAssertTrue(sidebar.model.conversationHistory.isPresented, "another card opens its own history rather than closing the old drawer")
         XCTAssertEqual(sidebar.model.conversationHistory.state, .unavailable("no_binding"))
     }
 
@@ -33,6 +63,11 @@ final class SidebarAgentHistoryUIUXTests: XCTestCase {
         XCTAssertEqual(sidebar.model.selectedPane, target.ref)
         XCTAssertTrue(sidebar.model.conversationHistory.isPresented)
         XCTAssertEqual(sidebar.model.conversationHistory.state, .unavailable("no_binding"))
+
+        try sidebar.pressAgentHistoryButton(for: target)
+
+        XCTAssertEqual(sidebar.model.selectedPane, target.ref)
+        XCTAssertFalse(sidebar.model.conversationHistory.isPresented, "VoiceOver repeats the same toggle action as a pointer click")
     }
 
     func testOtherAgentsHaveNoHistoryControlAndCannotOpenHistory() throws {
@@ -45,12 +80,20 @@ final class SidebarAgentHistoryUIUXTests: XCTestCase {
         XCTAssertFalse(ids.contains("sidebar.agent.history.\(other.id)"))
         XCTAssertFalse(ids.contains("sidebar.agent.history.\(shell.id)"))
 
-        sidebar.model.openConversationHistory(for: other.ref)
+        sidebar.model.toggleConversationHistory(for: other.ref)
         XCTAssertEqual(sidebar.model.selectedPane, selected)
         XCTAssertFalse(sidebar.model.conversationHistory.isPresented)
-        sidebar.model.openConversationHistory(for: PaneRef(deviceID: other.device.id, paneID: "removed-pane"))
+        let stale = PaneRef(deviceID: other.device.id, paneID: "removed-pane")
+        sidebar.model.toggleConversationHistory(for: stale)
         XCTAssertEqual(sidebar.model.selectedPane, selected)
         XCTAssertFalse(sidebar.model.conversationHistory.isPresented)
+
+        sidebar.model.toggleConversationHistory(for: try XCTUnwrap(selected))
+        XCTAssertTrue(sidebar.model.conversationHistory.isPresented)
+        sidebar.model.toggleConversationHistory(for: other.ref)
+        sidebar.model.toggleConversationHistory(for: stale)
+        XCTAssertEqual(sidebar.model.selectedPane, selected)
+        XCTAssertTrue(sidebar.model.conversationHistory.isPresented, "invalid targets must not close another agent's open history")
     }
 
     func testHistoryControlPreservesTaggedAndUntaggedCardHeights() throws {
