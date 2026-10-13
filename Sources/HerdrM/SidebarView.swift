@@ -141,18 +141,9 @@ struct SidebarView: View {
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(8)
                             }
+                            // Either kind: a shell split off an agent lists here, under it.
                             ForEach(model.agentSectionRows) { row in
-                                if let entry = row.agent {
-                                    AgentRowView(
-                                        entry: entry,
-                                        model: model,
-                                        indent: row.indent,
-                                        showsPaneGlyph: row.isChild,
-                                        draggable: row.indent == 0,
-                                        draggingAgentID: $draggingAgentID,
-                                        agentDrop: $agentDrop
-                                    )
-                                }
+                                sectionRow(row)
                             }
                         }
                         if terminalsSectionVisible {
@@ -171,17 +162,7 @@ struct SidebarView: View {
                         } content: {
                             if terminalsExpanded {
                                 ForEach(model.terminalSectionRows) { row in
-                                    if let entry = row.terminal {
-                                        TerminalRowView(
-                                            entry: entry,
-                                            model: model,
-                                            indent: row.indent,
-                                            showsPaneGlyph: row.isChild,
-                                            draggable: row.indent == 0,
-                                            draggingTerminalID: $draggingTerminalID,
-                                            terminalDrop: $terminalDrop
-                                        )
-                                    }
+                                    sectionRow(row)
                                 }
                                 ForEach(model.shellSessions) { session in
                                     shellRow(session)
@@ -236,11 +217,23 @@ struct SidebarView: View {
         }
     }
 
-    /// A pane row inside a space's tree: the same agent/terminal rows as the
-    /// sections, indented, without the space line (the space is the parent),
-    /// and without drag (tab order is edited in the sections).
+    /// A pane row in the Agents or Terminals section: an agent or terminal row
+    /// at its depth in the pane tree. Top-level rows drag (they stand for tabs).
+    @ViewBuilder
+    private func sectionRow(_ row: AppModel.SidebarRow) -> some View {
+        paneRow(row, showsSpace: true, draggable: row.indent == 0)
+    }
+
+    /// A pane row inside a space's tree: the same rows, without the space line
+    /// (the space is the parent) and without drag (tab order is edited in the
+    /// sections).
     @ViewBuilder
     private func treeRow(_ row: AppModel.SidebarRow) -> some View {
+        paneRow(row, showsSpace: false, draggable: false)
+    }
+
+    @ViewBuilder
+    private func paneRow(_ row: AppModel.SidebarRow, showsSpace: Bool, draggable: Bool) -> some View {
         switch row.entry {
         case .agent(let entry):
             AgentRowView(
@@ -248,8 +241,8 @@ struct SidebarView: View {
                 model: model,
                 indent: row.indent,
                 showsPaneGlyph: row.isChild,
-                showsSpace: false,
-                draggable: false,
+                showsSpace: showsSpace,
+                draggable: draggable,
                 draggingAgentID: $draggingAgentID,
                 agentDrop: $agentDrop
             )
@@ -259,8 +252,8 @@ struct SidebarView: View {
                 model: model,
                 indent: row.indent,
                 showsPaneGlyph: row.isChild,
-                showsSpace: false,
-                draggable: false,
+                showsSpace: showsSpace,
+                draggable: draggable,
                 draggingTerminalID: $draggingTerminalID,
                 terminalDrop: $terminalDrop
             )
