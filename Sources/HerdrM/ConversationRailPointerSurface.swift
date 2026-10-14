@@ -47,11 +47,7 @@ final class ConversationRailPointerView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         let local = convert(point, from: superview)
-        // A nil range means there are no marks (history empty, loading or
-        // unavailable), so the rail must claim nothing and let the click reach
-        // the terminal underneath — otherwise it swallows the terminal's left
-        // edge whenever there is no conversation to browse.
-        guard !isHidden, bounds.contains(local), activeRange?.contains(local.y) ?? false else { return nil }
+        guard !isHidden, bounds.contains(local), activeRange?.contains(local.y) ?? true else { return nil }
         return self
     }
 
@@ -66,10 +62,7 @@ final class ConversationRailPointerView: NSView {
     }
 
     override func resetCursorRects() {
-        // No range → no marks → no cursor rect, so the terminal keeps its own
-        // cursor over the strip instead of showing a pointing hand on nothing.
-        guard let activeRange else { return }
-        let active = NSRect(x: 0, y: activeRange.lowerBound, width: bounds.width, height: activeRange.upperBound - activeRange.lowerBound)
+        let active = activeRange.map { NSRect(x: 0, y: $0.lowerBound, width: bounds.width, height: $0.upperBound - $0.lowerBound) } ?? bounds
         addCursorRect(active.intersection(bounds), cursor: .pointingHand)
     }
 
@@ -78,7 +71,7 @@ final class ConversationRailPointerView: NSView {
     override func mouseExited(with event: NSEvent) { onHover(nil) }
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        guard bounds.contains(point), activeRange?.contains(point.y) ?? false else { return }
+        guard bounds.contains(point), activeRange?.contains(point.y) ?? true else { return }
         // Deliberately avoid first-responder changes and super.mouseDown: this
         // navigation must never turn into an input event for the terminal.
         onClick(point)
