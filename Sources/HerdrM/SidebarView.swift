@@ -351,7 +351,7 @@ struct SidebarView: View {
                 SpaceAttentionGlyph(attention: model.scopeAttention)
                 Text("\(model.scopeAgentCount)")
                     .font(.system(size: 11))
-                    .foregroundStyle(Theme.textGhost)
+                    .foregroundStyle(selected ? Theme.text : Theme.textSecondary) // the name's color
             }
             .padding(.horizontal, 8)
             .frame(height: 30)
@@ -751,9 +751,10 @@ struct SidebarHeaderButton: View {
 
     var body: some View {
         Button(action: action) {
+            // The section title's color: ghost gray was under 2.2:1 on the sidebar.
             Image(systemName: systemName)
                 .font(.system(size: 11.5))
-                .foregroundStyle(Theme.textGhost)
+                .foregroundStyle(Theme.textTertiary)
                 .frame(width: 20, height: 20)
                 .contentShape(Rectangle())
         }
@@ -1059,7 +1060,7 @@ private struct SpaceRowView: View {
             }
             Text("\(model.agentCount(in: entry))")
                 .font(.system(size: 11))
-                .foregroundStyle(Theme.textGhost)
+                .foregroundStyle(selected ? Theme.text : Theme.textSecondary) // the name's color
         }
         .padding(.horizontal, 8)
         .frame(height: 30)

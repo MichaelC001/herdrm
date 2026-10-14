@@ -5,6 +5,14 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
+## [Unreleased]
+
+### Fixed
+- **Section buttons and space counts are readable.** The New Space / New
+  Agent / New Terminal buttons on the section headers now use the header
+  title's color, and each space's agent count uses the space name's color.
+  Both were drawn in the faintest gray and often could not be seen at all.
+
 ## [0.6.17] - 2026-10-13
 
 ### Changed

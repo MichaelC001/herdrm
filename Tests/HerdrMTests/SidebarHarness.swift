@@ -24,13 +24,13 @@ final class SidebarHarness {
     ///   (what grazr / herdr-agent-quota publish); nil leaves the agents untagged.
     /// - Parameter sheets: attach the app's New Agent / New Terminal / New Space
     ///   sheets, so a button press can be followed to the sheet it opens.
-    init(spaces: Int, agents: Int, terminals: Int = 0, agentTokens: [String: String]? = nil, sheets: Bool = false, width: CGFloat = 260, height: CGFloat = 600) throws {
+    init(spaces: Int, agents: Int, terminals: Int = 0, agentTokens: [String: String]? = nil, sheets: Bool = false, appearance: NSAppearance.Name = .darkAqua, width: CGFloat = 260, height: CGFloat = 600) throws {
         model = try Self.fakeModel(spaces: spaces, agents: agents, terminals: terminals, agentTokens: agentTokens)
         let sidebar = SidebarView(model: model, collapsed: .constant(false), width: width).frame(width: width, height: height)
         root = NSHostingView(rootView: sheets ? AnyView(sidebar.newItemSheets(model: model)) : AnyView(sidebar))
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.appearance = NSAppearance(named: .darkAqua)
+        window.appearance = NSAppearance(named: appearance)
         window.title = "SidebarHarness \(UUID().uuidString)" // AccessibilityProbe finds the window by title
         window.contentView = root
         window.orderFrontRegardless()
@@ -119,6 +119,76 @@ final class SidebarHarness {
         let scored = signatures.map { ($0.key, Self.changedFraction($0.value, band)) }
         guard let best = scored.min(by: { $0.1 < $1.1 }), best.1 < 0.02 else { return nil }
         return best.0
+    }
+
+    /// How strongly a space row's name (left half) and its agent count (last
+    /// quarter) stand out from the row's own background, as WCAG contrast.
+    func spaceRowInk(_ name: String) throws -> (name: Double, count: Double) {
+        // Space rows are read as their label alone, so the row is the label's
+        // line across the full width of the All Spaces row (a button, read whole).
+        let elements = AccessibilityProbe.elements(in: window)
+        func widest(_ n: String) throws -> CGRect {
+            try XCTUnwrap(elements.filter { $0.name == n || $0.name?.hasPrefix(n + ",") == true }
+                .compactMap(\.frame).max { $0.width < $1.width }, "no row named \(n)")
+        }
+        let column = try widest("All Spaces")
+        let label = try widest(name)
+        let row = CGRect(x: column.minX, y: label.midY - column.height / 2, width: column.width, height: column.height)
+        let screenTop = NSScreen.screens[0].frame.maxY
+        let inWindow = window.convertFromScreen(NSRect(x: row.minX, y: screenTop - row.maxY, width: row.width, height: row.height))
+        let r = root.convert(inWindow, from: nil)
+        let rep = try XCTUnwrap(root.bitmapImageRepForCachingDisplay(in: root.bounds))
+        root.cacheDisplay(in: root.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / root.bounds.width
+        let top = root.isFlipped ? r.minY : root.bounds.height - r.maxY
+        let nameInk = luminances(rep, scale: scale, x: r.minX..<r.midX, y: top..<(top + r.height))
+        let countInk = luminances(rep, scale: scale, x: (r.maxX - r.width / 4)..<r.maxX, y: top..<(top + r.height))
+        let background = Self.background(nameInk + countInk)
+        return (Self.ink(nameInk, on: background), Self.ink(countInk, on: background))
+    }
+
+    /// How strongly the top header's title and its trailing button stand out
+    /// from the header's own background: the WCAG contrast of the pixel that
+    /// differs most from it, in the title area and in the button area.
+    func headerInk() throws -> (title: Double, button: Double) {
+        let rep = try XCTUnwrap(root.bitmapImageRepForCachingDisplay(in: root.bounds))
+        root.cacheDisplay(in: root.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / root.bounds.width
+        let r = scroll.contentView.convert(scroll.contentView.bounds, to: root)
+        let top = root.isFlipped ? r.minY : root.bounds.height - r.maxY
+        // Header layout: 8pt side padding, a 20pt trailing button.
+        let title = luminances(rep, scale: scale, x: (r.minX + 8)..<(r.minX + 90), y: (top + 4)..<(top + 24))
+        let button = luminances(rep, scale: scale, x: (r.maxX - 8 - 20)..<(r.maxX - 8), y: (top + 4)..<(top + 24))
+        let background = Self.background(title + button)
+        return (Self.ink(title, on: background), Self.ink(button, on: background))
+    }
+
+    /// WCAG relative luminance of every pixel in a region given in points.
+    private func luminances(_ rep: NSBitmapImageRep, scale: CGFloat, x: Range<CGFloat>, y: Range<CGFloat>) -> [Double] {
+        var out: [Double] = []
+        for py in Int(y.lowerBound * scale)..<Int(y.upperBound * scale) {
+            for px in Int(x.lowerBound * scale)..<Int(x.upperBound * scale) {
+                guard let c = rep.colorAt(x: px, y: py)?.usingColorSpace(.sRGB) else { continue }
+                out.append(0.2126 * Self.linear(c.redComponent) + 0.7152 * Self.linear(c.greenComponent) + 0.0722 * Self.linear(c.blueComponent))
+            }
+        }
+        return out
+    }
+
+    /// Ink is thin, so most of a region is background.
+    private static func background(_ values: [Double]) -> Double {
+        values.sorted()[values.count / 2]
+    }
+
+    /// Contrast of the pixel that differs most from the background.
+    private static func ink(_ values: [Double], on background: Double) -> Double {
+        values.map { (max($0, background) + 0.05) / (min($0, background) + 0.05) }.max() ?? 1
+    }
+
+    /// WCAG relative luminance of one sRGB channel.
+    private static func linear(_ c: CGFloat) -> Double {
+        let c = Double(c)
+        return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
     }
 
     /// Render the whole sidebar to a PNG (for eyeballing a layout change).
