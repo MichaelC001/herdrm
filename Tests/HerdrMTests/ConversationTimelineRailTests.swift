@@ -50,6 +50,24 @@ final class ConversationTimelineRailTests: XCTestCase {
         let geometry = ConversationRailGeometry(count: 5_000, height: 10)
         XCTAssertEqual(geometry.marks(selectedIndex: nil).count, 1)
         XCTAssertEqual(geometry.index(at: 5), 0)
+        XCTAssertEqual(geometry.position(of: 0), 5)
+        XCTAssertEqual(geometry.position(of: 4_999), 5)
+    }
+
+    func testDenseHistoryAndHoverStayAboveTheTerminalInputArea() {
+        for viewportHeight in [CGFloat(0), 12, 48, 200, 500, 1_500] {
+            let viewport = ConversationRailViewport(height: viewportHeight)
+            for count in [1, 12, 5_000] {
+                for focus in [nil, 0, count / 2, count - 1] as [Int?] {
+                    let geometry = ConversationRailGeometry(count: count, height: viewport.height, zoomedIndex: focus)
+                    for mark in geometry.marks(selectedIndex: focus) {
+                        let position = viewport.topInset + mark.y
+                        XCTAssertGreaterThanOrEqual(position, 0)
+                        XCTAssertLessThanOrEqual(position, viewportHeight * 0.8)
+                    }
+                }
+            }
+        }
     }
 
     func testShortConversationStaysPackedAndHoverGrowthTapersAcrossNeighbors() {

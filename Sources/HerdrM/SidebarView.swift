@@ -420,6 +420,8 @@ struct SidebarView: View {
 
     var body: some View {
         let agent = entry.agent
+        let statsLines = agent.statsLines
+        let supportsHistory = ["claude", "claude-code"].contains(agent.agent.lowercased())
         let selected = !model.isFileManagerActive
             && model.selectedPane == entry.ref
             && model.selectedShellID == nil
@@ -455,9 +457,10 @@ struct SidebarView: View {
                     DeviceChip(device: entry.device)
                 }
             }
+            .padding(.trailing, supportsHistory && statsLines.isEmpty ? 24 : 0)
             // Plugin stats (grazr account, Claude model / context / usage),
             // one line each, only for the tokens the pane actually carries.
-            ForEach(agent.statsLines, id: \.kind) { line in
+            ForEach(statsLines, id: \.kind) { line in
                 HStack(spacing: 3) {
                     // An agent on an account of its own, not the shared rotation.
                     if line.isPinnedAccount {
@@ -471,6 +474,7 @@ struct SidebarView: View {
                         .truncationMode(.tail)
                 }
                 .foregroundStyle(AgentStatsStyle.color(for: line.kind))
+                .padding(.trailing, supportsHistory && line.kind == statsLines.last?.kind ? 24 : 0)
             }
         }
         .padding(.horizontal, 8)
@@ -534,6 +538,25 @@ struct SidebarView: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { model.selectAgent(entry.ref) }
         .accessibilityLabel(accessibilityLabel(unread: unread))
+        // The drag host covers the row. Place this control above it so a
+        // footer click opens this agent's history instead of selecting alone.
+        .overlay(alignment: .bottomTrailing) {
+            if supportsHistory {
+                Button { model.toggleConversationHistory(for: entry.ref) } label: {
+                    Image(systemName: "text.bubble")
+                        .font(.system(size: 11.5))
+                        .frame(width: 20, height: 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.textTertiary)
+                .help("Read full conversation (⇧⌘H)")
+                .accessibilityLabel("Read full conversation")
+                .accessibilityIdentifier("sidebar.agent.history.\(entry.id)")
+                .padding(.trailing, 8)
+                .padding(.bottom, 7)
+            }
+        }
     }
 
     private func accessibilityLabel(unread: Bool) -> String {

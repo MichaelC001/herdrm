@@ -24,8 +24,8 @@ final class SidebarHarness {
     ///   (what grazr / herdr-agent-quota publish); nil leaves the agents untagged.
     /// - Parameter sheets: attach the app's New Agent / New Terminal / New Space
     ///   sheets, so a button press can be followed to the sheet it opens.
-    init(spaces: Int, agents: Int, terminals: Int = 0, agentTokens: [String: String]? = nil, sheets: Bool = false, width: CGFloat = 260, height: CGFloat = 600) throws {
-        model = try Self.fakeModel(spaces: spaces, agents: agents, terminals: terminals, agentTokens: agentTokens)
+    init(spaces: Int, agents: Int, terminals: Int = 0, agentTokens: [String: String]? = nil, agentKinds: [String] = [], sheets: Bool = false, width: CGFloat = 260, height: CGFloat = 600) throws {
+        model = try Self.fakeModel(spaces: spaces, agents: agents, terminals: terminals, agentTokens: agentTokens, agentKinds: agentKinds)
         let sidebar = SidebarView(model: model, collapsed: .constant(false), width: width).frame(width: width, height: height)
         root = NSHostingView(rootView: sheets ? AnyView(sidebar.newItemSheets(model: model)) : AnyView(sidebar))
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.titled], backing: .buffered, defer: false)
@@ -87,11 +87,37 @@ final class SidebarHarness {
         settle()
     }
 
+    /// Open an individual card's history through its independent AX action.
+    func pressAgentHistoryButton(for entry: AppModel.AgentEntry) throws {
+        AccessibilityProbe.press(try historyButton(for: entry))
+        settle()
+    }
+
+    /// Send ordinary mouse events to the actual footer button. This catches a
+    /// full-row native drag host accidentally intercepting its pointer events.
+    func clickAgentHistoryButton(for entry: AppModel.AgentEntry) throws {
+        let frame = try XCTUnwrap(try historyButton(for: entry).frame, "history button's screen frame")
+        let screenTop = try XCTUnwrap(NSScreen.screens.first).frame.maxY
+        let screenPoint = NSPoint(x: frame.midX, y: screenTop - frame.midY)
+        try click(at: window.convertPoint(fromScreen: screenPoint))
+        settle()
+    }
+
     // MARK: - Observations
 
     /// Whether the CPU / RAM / DISK meters are in the sidebar footer.
     var showsMachineStats: Bool {
         AccessibilityProbe.elements(in: window).contains { $0.identifier == "sidebar.machineStats" }
+    }
+
+    var agentHistoryButtons: [AccessibilityProbe.Element] {
+        AccessibilityProbe.elements(in: window).filter {
+            $0.role == "AXButton" && $0.identifier?.hasPrefix("sidebar.agent.history.") == true
+        }
+    }
+
+    private func historyButton(for entry: AppModel.AgentEntry) throws -> AccessibilityProbe.Element {
+        try XCTUnwrap(agentHistoryButtons.first { $0.identifier == "sidebar.agent.history.\(entry.id)" }, "history button for \(entry.agent.paneID)")
     }
 
     /// Names VoiceOver reads for the buttons on a section header.
@@ -136,7 +162,7 @@ final class SidebarHarness {
 
     // MARK: - Fake data
 
-    private static func fakeModel(spaces: Int, agents: Int, terminals: Int, agentTokens: [String: String]?) throws -> AppModel {
+    private static func fakeModel(spaces: Int, agents: Int, terminals: Int, agentTokens: [String: String]?, agentKinds: [String]) throws -> AppModel {
         let model = AppModel()
         let device = Device.local
         model.devices = [device]
@@ -145,7 +171,8 @@ final class SidebarHarness {
             try decode(WorkspaceInfo.self, ["workspace_id": "ws-\(i)", "number": i + 1, "label": "Space \(i + 1)"])
         }
         state.agents = try (0..<agents).map { i in
-            var json: [String: Any] = ["agent": "claude", "name": "Agent \(i + 1)", "workspace_id": "ws-0", "tab_id": "tab-\(i)", "pane_id": "pane-\(i)"]
+            let kind = agentKinds.indices.contains(i) ? agentKinds[i] : "claude"
+            var json: [String: Any] = ["agent": kind, "name": "Agent \(i + 1)", "workspace_id": "ws-0", "tab_id": "tab-\(i)", "pane_id": "pane-\(i)"]
             if let agentTokens { json["tokens"] = agentTokens }
             return try decode(AgentInfo.self, json)
         }

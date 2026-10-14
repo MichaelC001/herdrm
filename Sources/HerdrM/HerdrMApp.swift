@@ -75,6 +75,10 @@ private struct TabLayoutActiveFocusedValueKey: FocusedValueKey {
     typealias Value = Bool
 }
 
+private struct ClaudeHistorySelectedFocusedValueKey: FocusedValueKey {
+    typealias Value = Bool
+}
+
 extension FocusedValues {
     var appModel: AppModel? {
         get { self[AppModelFocusedValueKey.self] }
@@ -90,6 +94,11 @@ extension FocusedValues {
         get { self[TabLayoutActiveFocusedValueKey.self] }
         set { self[TabLayoutActiveFocusedValueKey.self] = newValue }
     }
+
+    var claudeHistorySelected: Bool? {
+        get { self[ClaudeHistorySelectedFocusedValueKey.self] }
+        set { self[ClaudeHistorySelectedFocusedValueKey.self] = newValue }
+    }
 }
 
 @main
@@ -103,6 +112,7 @@ struct HerdrMApp: App {
     @FocusedValue(\.appModel) private var focusedModel
     @FocusedValue(\.splitAxis) private var focusedSplitAxis
     @FocusedValue(\.tabLayoutActive) private var focusedTabLayoutActive
+    @FocusedValue(\.claudeHistorySelected) private var claudeHistorySelected
     private var tabLayoutActive: Bool { focusedTabLayoutActive == true }
 
     private let updaterController: SPUStandardUpdaterController
@@ -149,6 +159,13 @@ struct HerdrMApp: App {
             // Off removes the sidebar meters and stops their sampler (one ssh per remote host).
             CommandGroup(after: .sidebar) {
                 Toggle("Show Machine Stats", isOn: $showsMachineStats)
+                Button("Read full conversation") {
+                    if let model = focusedModel, let entry = model.selectedEntry {
+                        model.toggleConversationHistory(for: entry.ref)
+                    }
+                }
+                .keyboardShortcut("h", modifiers: [.command, .shift])
+                .disabled(claudeHistorySelected != true)
             }
 
             CommandGroup(after: .appInfo) {
