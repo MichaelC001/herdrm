@@ -570,7 +570,7 @@ final class LineBreakTerminalView: AppTerminalView {
     override func mouseUp(with event: NSEvent) {
         if let url = pendingLinkClick {
             pendingLinkClick = nil
-            Self.openClickedLink(url)
+            Self.openClickedLink(url, isLocal: pathContext?.isLocal ?? false)
             return
         }
         defer { heldPress = nil }
@@ -1112,11 +1112,15 @@ final class LineBreakTerminalView: AppTerminalView {
     /// anything. The URL is producer-controlled terminal output and the
     /// wrapper does not distinguish OSC 8 from regex matches, so only web and
     /// mail schemes are opened.
-    static func openClickedLink(_ string: String) {
+    static func openClickedLink(_ string: String, isLocal: Bool) {
         guard let url = URL(string: string),
               let scheme = url.scheme?.lowercased()
         else { return }
         if scheme == "file" {
+            // The URL is producer-controlled terminal output. A file:// target
+            // from a pane on a remote device must not open a coincidentally
+            // same-named file on this Mac, so file links open only for local panes.
+            guard isLocal else { return }
             openLocalFile(url)
         } else if ["http", "https", "mailto"].contains(scheme) {
             NSWorkspace.shared.open(url)
@@ -1750,7 +1754,7 @@ struct AttachTerminalView: NSViewRepresentable {
     final class Coordinator: NSObject, TerminalSurfaceLifecycleDelegate, TerminalSurfaceOpenURLDelegate,
         TerminalSurfaceHoverLinkDelegate, TerminalSurfaceGridResizeDelegate {
         func terminalDidRequestOpenURL(_ url: String, kind: TerminalOpenURLKind) {
-            LineBreakTerminalView.openClickedLink(url)
+            LineBreakTerminalView.openClickedLink(url, isLocal: view?.pathContext?.isLocal ?? false)
         }
 
         /// Cell size for mapping a pointer to a cell (links under mouse capture).
@@ -2013,7 +2017,7 @@ struct ShellTerminalView: NSViewRepresentable {
     final class Coordinator: NSObject, TerminalSurfaceLifecycleDelegate, TerminalSurfaceOpenURLDelegate,
         TerminalSurfaceHoverLinkDelegate, TerminalSurfaceGridResizeDelegate {
         func terminalDidRequestOpenURL(_ url: String, kind: TerminalOpenURLKind) {
-            LineBreakTerminalView.openClickedLink(url)
+            LineBreakTerminalView.openClickedLink(url, isLocal: view?.pathContext?.isLocal ?? false)
         }
 
         /// Cell size for mapping a pointer to a cell (links under mouse capture).
