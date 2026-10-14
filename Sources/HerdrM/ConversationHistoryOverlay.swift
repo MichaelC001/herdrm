@@ -1,10 +1,8 @@
 import SwiftUI
 
-/// Only the rail, navigation controls and visible drawer receive pointer events.
-/// The rail uses a reserved leading column; opening the drawer keeps the retained
-/// terminal's frame and surface identity stable.
+/// Only the rail, entry button and visible drawer receive pointer events.
+/// The terminal beneath keeps its original frame and retained surface identity.
 struct ConversationHistoryOverlay: View {
-    static let gutterWidth: CGFloat = 36
     @ObservedObject var controller: ConversationHistoryController
     var onClose: (() -> Void)? = nil
     var onJump: ((String) -> Void)? = nil
@@ -27,12 +25,10 @@ private struct ConversationOverlayContent: View {
     @State private var noticeDismissed = false
     var body: some View {
         GeometryReader { geometry in
-            let railViewport = ConversationRailViewport(height: geometry.size.height)
             ZStack(alignment: .topTrailing) {
                 HStack(spacing: 0) {
                     VStack(spacing: 6) {
                         ConversationTimelineRail(controller: controller, previewWidth: min(320, max(0, geometry.size.width - 76)), onJump: onJump)
-                            .frame(height: railViewport.height)
                         ProgressView().controlSize(.mini).frame(height: 18)
                             .opacity(controller.isJumping ? 1 : 0)
                             .allowsHitTesting(false).accessibilityHidden(!controller.isJumping)
@@ -42,11 +38,14 @@ private struct ConversationOverlayContent: View {
                             .help("Return to live terminal")
                             .accessibilityLabel("Return to live terminal")
                             .accessibilityIdentifier("history.returnToLive")
+                        Button { controller.open() } label: { Image(systemName: "text.bubble") }
+                            .buttonStyle(.plain).foregroundStyle(Theme.textTertiary)
+                            .keyboardShortcut("h", modifiers: [.command, .shift])
+                            .help("Read full conversation (⇧⌘H)")
+                            .accessibilityLabel("Read full conversation")
+                            .accessibilityIdentifier("history.open")
                     }
-                    .frame(width: ConversationHistoryOverlay.gutterWidth)
-                    .padding(.top, railViewport.topInset)
-                    .padding(.bottom, 12)
-                    .frame(maxHeight: .infinity, alignment: .top)
+                    .frame(width: 36).padding(.vertical, 12)
                     Spacer(minLength: 0)
                 }
                 if controller.isPresented {

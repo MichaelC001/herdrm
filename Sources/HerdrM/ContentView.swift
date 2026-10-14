@@ -88,7 +88,6 @@ struct RootView: View {
         .focusedSceneValue(\.appModel, model)
         .focusedSceneValue(\.splitAxis, model.shellSplitAxis)
         .focusedSceneValue(\.tabLayoutActive, model.visibleTabLayout != nil)
-        .focusedSceneValue(\.claudeHistorySelected, model.isClaudeHistorySelected)
         .sheet(isPresented: $model.showSearch) { SearchSheet(model: model) }
         .ignoresSafeArea(.container, edges: .top)
         .frame(minWidth: 980, minHeight: 620)
@@ -581,10 +580,8 @@ struct DetailView: View {
                 // down: its content survives the round trip. Do not key this on the
                 // selection; that rebuild-on-switch is exactly what this removes.
                 tabLayoutArea(selected: entry)
-                    // Reserve a column for history so its marks cannot intercept
-                    // selection at the beginning of a terminal line. Keep padding
-                    // structural so the retained terminal views keep their identity.
-                    .padding(.leading, model.isClaudeHistorySelected ? ConversationHistoryOverlay.gutterWidth : 0)
+                    // History floats over the terminal edge, so its hover state
+                    // and reader never change the retained terminal's dimensions.
                     .overlay {
                         if model.isClaudeHistorySelected {
                             ConversationHistoryOverlay(

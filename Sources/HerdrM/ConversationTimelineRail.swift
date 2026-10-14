@@ -1,18 +1,6 @@
 import HerdrKit
 import SwiftUI
 
-/// Keep the history controls above the terminal's prompt and status area.
-struct ConversationRailViewport {
-    let topInset: CGFloat
-    let height: CGFloat
-
-    init(height viewportHeight: CGFloat) {
-        let available = max(0, viewportHeight)
-        topInset = min(available * 0.06, max(0, available - 56))
-        height = max(0, min(available * 0.74, available - topInset - 56))
-    }
-}
-
 /// Geometry has bounded draw cost even when every one of 5,000 turns is indexed.
 struct ConversationRailGeometry {
     struct Mark: Equatable {
@@ -26,7 +14,7 @@ struct ConversationRailGeometry {
     // A short conversation stays a compact stack instead of stretching the
     // ticks over the full terminal. Long conversations still fit the viewport.
     var span: CGFloat { min(max(0, height - 20), CGFloat(max(0, count - 1)) * 6) }
-    var inset: CGFloat { max(0, (height - span) / 2) }
+    var inset: CGFloat { max(10, (height - span) / 2) }
 
     func position(of index: Int) -> CGFloat {
         guard count > 1 else { return height / 2 }
@@ -177,18 +165,16 @@ struct ConversationTimelineRail: View {
                                  with: .color(mark.isSelected || hovered ? Theme.text : Theme.textGhost.opacity(0.7)))
                 }
             }
-            // The quiet rail lives beside the terminal. Only its painted marks
+            // The quiet rail lives over the terminal. Only its painted marks
             // soften; pointer tracking, keyboard actions and the preview card
             // remain sharp and keep the same navigation bounds.
             .blur(radius: isActive ? 0 : 0.65)
             .opacity(isActive ? 1 : 0.35)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isActive)
-            .clipped()
             .overlay {
                 let resting = ConversationRailGeometry(count: controller.turns.count, height: proxy.size.height)
                 ConversationRailPointerSurface(
-                    activeRange: controller.turns.isEmpty || proxy.size.height <= 0 ? nil
-                        : max(0, resting.inset - 10)...min(proxy.size.height, resting.inset + resting.span + 10),
+                    activeRange: controller.turns.isEmpty ? nil : (resting.inset - 10)...(resting.inset + resting.span + 10),
                     onHover: { updatePointer($0, height: proxy.size.height) },
                     onClick: { selectPointer($0, height: proxy.size.height) }
                 )
@@ -259,7 +245,7 @@ struct ConversationTimelineRail: View {
                 }
             }
         }
-        .frame(width: ConversationHistoryOverlay.gutterWidth)
+        .frame(width: 36)
         .onChange(of: controller.turns.count) { _, count in
             if let index = previewIndex, index >= count { previewIndex = count > 0 ? count - 1 : nil }
         }

@@ -48,7 +48,9 @@ final class ConversationRailPointerView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? {
         let local = convert(point, from: superview)
         // A nil range means there are no marks (history empty, loading or
-        // unavailable), so leave the reserved column unclaimed.
+        // unavailable), so the rail must claim nothing and let the click reach
+        // the terminal underneath — otherwise it swallows the terminal's left
+        // edge whenever there is no conversation to browse.
         guard !isHidden, bounds.contains(local), activeRange?.contains(local.y) ?? false else { return nil }
         return self
     }
