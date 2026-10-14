@@ -19,6 +19,16 @@ the Sparkle update description — a release without a section here fails CI.
   had in 0.6.14.
 
 ### Added
+- **Claude conversation history.** A thin, compact chronological prompt rail floats
+  over the terminal edge, softly blurred when idle and clear on hover. It enlarges
+  nearby marks on hover and shows a compact prompt/reply preview. Clicking a mark
+  locates its supported rendered exchange in the existing terminal; a return-to-live
+  control restores current output. The secondary reader (⇧⌘H) includes Claude's
+  replies, search, older/newer paging, expandable tool activity,
+  and complete-message reading/copying through read-only APIs on the device
+  running Claude. Requires a matching herdr daemon with the history capability;
+  older servers keep normal terminal access. History browsing preserves the
+  running terminal and never resends a message.
 - **⌘-click a file path to open it.** Paths printed in a pane open the way
   URLs do: `README.md` and `src/index.ts:42:7` resolve against the pane's
   working directory as herdr reports it, `~/notes.txt` and absolute paths as
