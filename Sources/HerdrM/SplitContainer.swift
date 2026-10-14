@@ -104,7 +104,7 @@ private enum SplitContainerRatioBounds {
     }
 }
 
-/// Tracks which side of the ⌘D split holds the keyboard by KVO-observing the key
+/// Tracks which side of the local-shell split holds the keyboard by KVO-observing the key
 /// window's `firstResponder`.
 ///
 /// `NSWindow.firstResponder` is documented as KVO-observable. `NSApplication.keyWindow`

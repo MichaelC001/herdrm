@@ -178,34 +178,38 @@ struct HerdrMApp: App {
             }
 
             CommandMenu("Terminal") {
-                // Guarded on selectedAttachedEntry, not just on the model: with the placeholder
-                // on screen there is no SplitContainer to render into, so a split would
-                // be invisible yet leave shellSplitAxis non-nil — and the next ⌘W would
-                // "close" that phantom instead of the window.
-                Button("Split Vertically") { focusedModel?.shellSplitAxis = .vertical }
+                // ⌘D splits the herdr pane, as it does in the herdr TUI: the new
+                // shell joins the tab, shows in the sidebar under its pane, and is
+                // reachable with the pane keys. The app's own local shell split is
+                // the ⌃⇧ pair below.
+                Button("Split Pane Right") { focusedModel?.splitSelectedPane(.right) }
                     .keyboardShortcut("d", modifiers: .command)
                     .disabled(focusedModel?.selectedAttachedEntry == nil)
-                Button("Split Horizontally") { focusedModel?.shellSplitAxis = .horizontal }
+                Button("Split Pane Down") { focusedModel?.splitSelectedPane(.down) }
                     .keyboardShortcut("d", modifiers: [.command, .shift])
+                    .disabled(focusedModel?.selectedAttachedEntry == nil)
+                // A login shell on this Mac beside the attach, outside herdr: no pane,
+                // no sidebar row, gone with the window. Guarded on selectedAttachedEntry,
+                // not just on the model: with the placeholder on screen there is no
+                // SplitContainer to render into, so a split would be invisible yet leave
+                // shellSplitAxis non-nil, and the next ⌘W would "close" that phantom
+                // instead of the window.
+                Button("Split with Local Shell Right") { focusedModel?.shellSplitAxis = .vertical }
+                    .keyboardShortcut("d", modifiers: [.control, .shift])
+                    .disabled(focusedModel?.selectedAttachedEntry == nil)
+                Button("Split with Local Shell Down") { focusedModel?.shellSplitAxis = .horizontal }
+                    .keyboardShortcut("s", modifiers: [.control, .shift])
                     .disabled(focusedModel?.selectedAttachedEntry == nil)
 
                 Divider()
 
-                // Herdr's own tab splits (not the local ⌘D shell). The toggle is the
-                // Settings switch; Zoom Pane is herdr's pane.zoom, so the TUI zooms too.
+                // The toggle is the Settings switch; Zoom Pane is herdr's pane.zoom,
+                // so the TUI zooms too.
                 Toggle("Show Tab Panes", isOn: $tabLayoutEnabled)
                     .keyboardShortcut("l", modifiers: [.command, .shift])
                 Button("Zoom Pane") { focusedModel?.toggleSelectedPaneZoom() }
                     .keyboardShortcut("z", modifiers: [.command, .shift])
                     .disabled(focusedModel == nil)
-                // herdr's own splits, next to the local ⌘D shell split above. The new
-                // pane is a shell in the selected pane's directory.
-                Button("Split Pane Right") { focusedModel?.splitSelectedPane(.right) }
-                    .keyboardShortcut("d", modifiers: [.control, .shift])
-                    .disabled(focusedModel?.selectedAttachedEntry == nil)
-                Button("Split Pane Down") { focusedModel?.splitSelectedPane(.down) }
-                    .keyboardShortcut("s", modifiers: [.control, .shift])
-                    .disabled(focusedModel?.selectedAttachedEntry == nil)
                 // Control-shift arrows: no agent CLI binds them (pi takes ctrl-shift
                 // up/down for prompt jumps), and they read as "move over" in a column
                 // of workers, where directional focus would stop at the first one.
@@ -229,7 +233,7 @@ struct HerdrMApp: App {
                 // the arrows stayed frozen on the axis that was current at launch.
                 // Labels name the direction so no two rows read the same.
                 //
-                // Focus is directional and idempotent: in the ⌘D split the left/top
+                // Focus is directional and idempotent: in the local-shell split the left/top
                 // pane is always the agent, the right/bottom one always the shell.
                 // Without that split, a tab layout moves to the neighbouring herdr pane.
                 Button("Focus Left Pane") {

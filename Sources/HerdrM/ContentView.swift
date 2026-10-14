@@ -929,7 +929,7 @@ private struct PaneDivider: View {
                         onEnd(divider.ratio(at: value.location))
                     }
             )
-            // set() instead of push()/pop(), as the ⌘D divider does: a divider can
+            // set() instead of push()/pop(), as the local-shell split divider does: a divider can
             // vanish under the pointer when the tab's layout changes, and an
             // unbalanced push leaves the resize cursor stuck app-wide.
             .onHover { inside in

@@ -1906,7 +1906,7 @@ enum ShellViewRegistry {
 }
 
 struct ShellTerminalView: NSViewRepresentable {
-    /// Session identity for the registry; nil for the ⌘D split shell.
+    /// Session identity for the registry; nil for the local-shell split.
     var sessionID: UUID?
     var device: Device = .local
     var fontName: String = ""

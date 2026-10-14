@@ -74,13 +74,13 @@ struct SSHAuthenticationRequest: Identifiable {
 /// vertical = panes side by side with a vertical divider (iTerm2's convention).
 enum SplitAxis { case vertical, horizontal }
 
-/// Identifies one of the two panes in the ⌘D split. Used for focus tracking and
+/// Identifies one of the two panes in the local-shell split. Used for focus tracking and
 /// keyboard-driven resize.
 enum SplitSide { case agent, shell }
 
 /// A standalone local or SSH shell shown as its own sidebar entry — app-owned,
 /// outside any herdr space (unlike the persistent herdr terminals under
-/// TERMINALS) and not the ⌘D split.
+/// TERMINALS) and not the local-shell split.
 struct ShellSession: Identifiable, Equatable {
     let id: UUID
     var title: String
@@ -283,14 +283,14 @@ final class AppModel: ObservableObject {
         didSet { synchronizeConversationHistory() }
     }
     @Published var shellSplitAxis: SplitAxis?
-    /// Set by `reveal` when a jump lands while the ⌘D split is open, and consumed once the
+    /// Set by `reveal` when a jump lands while the local-shell split is open, and consumed once the
     /// main window is key again. Only an actual jump sets it: dismissing the search with
     /// Escape never calls `reveal`, and the sidebar assigns `selectedPane` directly.
     @Published var pendingSplitAgentFocus = false
-    /// The pane that currently holds the keyboard within the ⌘D split. Reset to
+    /// The pane that currently holds the keyboard within the local-shell split. Reset to
     /// the agent side whenever the split closes so reopening it is predictable.
     @Published var activeSplitSide: SplitSide = .agent
-    /// Persisted divider ratio for the ⌘D split, shared with the resize commands.
+    /// Persisted divider ratio for the local-shell split, shared with the resize commands.
     /// Deliberately not `@AppStorage`: that publishes only from inside a View, so the
     /// menu commands would write UserDefaults without ever redrawing the split.
     @Published var splitRatio: Double =
@@ -299,7 +299,7 @@ final class AppModel: ObservableObject {
         didSet { UserDefaults.standard.set(splitRatio, forKey: AppModel.splitRatioKey) }
     }
     static let splitRatioKey = "terminal.splitRatio"
-    /// Live terminal views of the ⌘D split, used by menu commands to move focus.
+    /// Live terminal views of the local-shell split, used by menu commands to move focus.
     /// The agent side is resolved from the attach registry by the current selection
     /// (kept-alive attach views persist across switches, so a stored ref would go
     /// stale); the shell side stays a weak ref since the split shell is a single view.
