@@ -783,6 +783,7 @@ struct DetailView: View {
                 device: session.device,
                 target: session.attachTarget,
                 sessionID: session.id,
+                workingDirectory: model.workingDirectory(for: session.ref),
                 serverVersion: model.serverVersion(deviceID: session.device.id),
                 attachmentCapabilities: attachmentCapabilities,
                 fontName: terminalFontName,
