@@ -182,6 +182,8 @@ final class AppModel: ObservableObject {
     private let claudeTranscripts = ClaudeTranscriptStore()
     private var isConversationHistoryVisible = false
     @Published private(set) var conversationCanReturnToLive = false
+    /// The last jump paged the agent's own history (fullscreen Claude), not herdr's.
+    private var conversationScrolledApp = false
     private let conversationViewportMutations = ConversationViewportMutationLane()
     private var conversationNavigationPane: PaneRef?
     private var conversationNavigationSessionID: String?
@@ -851,8 +853,12 @@ final class AppModel: ObservableObject {
                 // projection only after a verified jump; failures keep the view.
                 AttachViewRegistry.view(for: attachedID)?.performBindingAction("scroll_to_bottom")
                 self.conversationCanReturnToLive = result.offsetFromBottom > 0
+                self.conversationScrolledApp = result.scrolledApp
+                AttachViewRegistry.focus(attachedID)
+            } else {
+                // The terminal cannot show it (scrolled out, ambiguous, …): read it instead.
+                self.conversationHistory.open(turnID: turnID)
             }
-            AttachViewRegistry.focus(attachedID)
         }
     }
 
@@ -868,6 +874,10 @@ final class AppModel: ObservableObject {
                   self.selectedEntry?.agent.agentSession?.sessionID == sessionID else { return }
             do {
                 try await self.service(for: entry.device).scrollToBottom(paneID: entry.ref.paneID)
+                if self.conversationScrolledApp {
+                    _ = AttachViewRegistry.view(for: attachedID)?.sendAppScrollKey(.toBottom)
+                    self.conversationScrolledApp = false
+                }
                 guard self.isClaudeHistorySelected, self.conversationWindowIsVisible,
                       self.selectedAttachedEntry?.id == attachedID,
                       self.selectedEntry?.agent.agentSession?.sessionID == sessionID else { return }
@@ -907,13 +917,19 @@ final class AppModel: ObservableObject {
         if conversationNavigationPane != pane || conversationNavigationSessionID != sessionID {
             conversationNavigationPane = pane; conversationNavigationSessionID = sessionID
             conversationCanReturnToLive = false
+            conversationScrolledApp = false
             conversationHistory.close()
         }
         conversationHistory.select(
             deviceID: entry.device.id,
             paneID: entry.agent.paneID,
             session: entry.agent.agentSession,
-            provider: ClaudeHistoryProvider(store: claudeTranscripts, device: entry.device, service: service(for: entry.device))
+            provider: ClaudeHistoryProvider(
+                store: claudeTranscripts, device: entry.device, service: service(for: entry.device),
+                appScroll: { [attachedID = AttachedEntry.agent(entry).id] key in
+                    await MainActor.run { AttachViewRegistry.view(for: attachedID)?.sendAppScrollKey(key) ?? false }
+                }
+            )
         )
         let connected: Bool
         if case .connected = session(entry.device.id).connection { connected = true }

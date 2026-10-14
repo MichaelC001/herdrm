@@ -317,9 +317,13 @@ public struct ConversationJumpResult: Codable, Sendable, Equatable {
     public let contentSeq: UInt64
     public let sourceRow: UInt64
     public let offsetFromBottom: UInt64
-    public init(binding: ConversationBinding, messageID: String, messageRevision: String, contentSeq: UInt64, sourceRow: UInt64, offsetFromBottom: UInt64) {
+    /// The jump scrolled the program's own history (Claude's fullscreen renderer)
+    /// rather than herdr's pane scrollback; returning to live has to undo that too.
+    public var scrolledApp = false
+    public init(binding: ConversationBinding, messageID: String, messageRevision: String, contentSeq: UInt64, sourceRow: UInt64, offsetFromBottom: UInt64, scrolledApp: Bool = false) {
         self.binding = binding; self.messageID = messageID; self.messageRevision = messageRevision
         self.contentSeq = contentSeq; self.sourceRow = sourceRow; self.offsetFromBottom = offsetFromBottom
+        self.scrolledApp = scrolledApp
     }
     enum CodingKeys: String, CodingKey {
         case binding

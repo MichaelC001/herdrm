@@ -100,8 +100,9 @@ macOS window on top of it, and it's grown well past "attach to a terminal":
   HerdrM reads the transcript Claude Code writes on the agent's device (locally, or over one SSH
   stream per open conversation), so it works with any official herdr 0.9+ and needs no server
   changes; Tailcat devices have no shell access and show no history. A jump searches the pane's
-  scrollback with herdr's own copy-mode search, so it reaches prompts still in that scrollback
-  (not Claude's fullscreen mode) and never sends input to the agent.
+  scrollback with herdr's own copy-mode search and scrolls herdr's viewport. Claude's fullscreen
+  mode keeps its own history: there HerdrM presses PageUp in the terminal until the prompt shows,
+  and ⌃End to return to live. A prompt the terminal can't show opens in the reader instead.
 - **Two-pane file manager** — browse Local and any configured SSH device side by side, then
   upload or download regular files with progress, cancellation, and explicit Replace / Keep
   Both conflict handling. Transfers use the same OpenSSH config, agent, host-key, and Keychain

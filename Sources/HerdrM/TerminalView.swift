@@ -1400,6 +1400,18 @@ final class LineBreakTerminalView: AppTerminalView {
         }
     }
 
+    /// Types a scroll key into the attach, as the user would, for a program that keeps
+    /// its own history: Claude's fullscreen renderer pages on PageUp and returns to the
+    /// bottom on ⌃End. False when the view has no live session.
+    func sendAppScrollKey(_ key: AppScrollKey) -> Bool {
+        guard let session = processHost?.session else { return false }
+        switch key {
+        case .pageUp: session.sendInput(Data("\u{1B}[5~".utf8))
+        case .toBottom: session.sendInput(Data("\u{1B}[1;5F".utf8))
+        }
+        return true
+    }
+
     /// Ask the remote program to paste from its own clipboard with a literal
     /// ^V byte — the "native clipboard" delivery path.
     private func forwardNativeClipboardPaste() {

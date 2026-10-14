@@ -1,19 +1,39 @@
 import Foundation
 
+/// Keys typed into the agent's attached terminal to move the program's own history:
+/// Claude's fullscreen renderer keeps its transcript itself and scrolls it on these.
+public enum AppScrollKey: Sendable {
+    case pageUp
+    case toBottom
+}
+
 #if os(macOS)
 /// Claude history read by HerdrM itself, for Local and SSH devices alike: the transcript
 /// comes from `ClaudeTranscriptStore`, and a jump moves the pane's herdr viewport with
 /// the official `pane.copy_search` and `pane.scroll` methods. Needs nothing from herdr
 /// beyond the Claude session id it already reports for the pane.
+///
+/// Claude in fullscreen mode draws on the alternate screen, so herdr holds no
+/// scrollback for it. The jump then pages Claude's own history up through `appScroll`
+/// (keys typed into the attach, as the user would) until the prompt is on screen.
 public struct ClaudeHistoryProvider: ConversationHistoryProviding {
+    public typealias AppScroll = @Sendable (AppScrollKey) async -> Bool
+
     private let store: ClaudeTranscriptStore
     private let device: Device
     private let service: HerdrService
+    private let appScroll: AppScroll?
+    /// Fullscreen jumps give up after this many pages and return to the bottom.
+    static let maximumPages = 120
+    private let pageSettle: Duration
 
-    public init(store: ClaudeTranscriptStore, device: Device, service: HerdrService) {
+    public init(store: ClaudeTranscriptStore, device: Device, service: HerdrService,
+                appScroll: AppScroll? = nil, pageSettle: Duration = .milliseconds(120)) {
         self.store = store
         self.device = device
         self.service = service
+        self.appScroll = appScroll
+        self.pageSettle = pageSettle
     }
 
     public func read(target: String, expectedSessionID: String, window: ConversationWindow, limits: ConversationLimits = .init()) async throws -> ConversationPage {
@@ -36,31 +56,63 @@ public struct ClaudeHistoryProvider: ConversationHistoryProviding {
         }
         guard index.generation == expectedGeneration else { throw ConversationJumpNotice.sourceChanged }
         let wanted = try index.jumpTarget(messageID: messageID, messageRevision: messageRevision)
+        func result(row: Int, revision: UInt64, offset: Int, scrolledApp: Bool = false) -> ConversationJumpResult {
+            ConversationJumpResult(binding: index.binding, messageID: messageID, messageRevision: messageRevision,
+                                   contentSeq: revision, sourceRow: UInt64(row), offsetFromBottom: UInt64(max(0, offset)),
+                                   scrolledApp: scrolledApp)
+        }
         do {
             // New output between the search and the scroll shifts the rows: search again.
             for _ in 0..<3 {
-                let revision = try await service.paneContentRevision(paneID: target)
-                let found: PaneSearchResult
-                do {
-                    found = try await service.searchPane(paneID: target, query: wanted.key, contentRevision: revision)
-                } catch HerdrError.rpc(code: "stale_content", _) {
-                    continue
-                }
-                let row = try Self.row(for: wanted, in: found.matches)
+                guard let found = try await search(target, for: wanted.key) else { continue }
                 guard let metrics = try await service.paneScrollMetrics(paneID: target) else {
                     throw ConversationJumpNotice.unavailable
                 }
+                let row: Int
+                do {
+                    row = try Self.row(for: wanted, in: found.matches)
+                } catch ConversationJumpNotice.notFound where metrics.maxOffsetFromBottom == 0 && appScroll != nil {
+                    return try await pageAppHistory(target, for: wanted, result: result)
+                }
                 guard try await service.paneContentRevision(paneID: target) == found.contentRevision else { continue }
                 let landed = try await service.scrollPane(paneID: target, offsetFromBottom: Self.offset(showing: row, metrics: metrics))
-                return ConversationJumpResult(
-                    binding: index.binding, messageID: messageID, messageRevision: messageRevision,
-                    contentSeq: found.contentRevision, sourceRow: UInt64(row),
-                    offsetFromBottom: UInt64(max(0, landed?.offset ?? 0))
-                )
+                return result(row: row, revision: found.contentRevision, offset: landed?.offset ?? 0)
             }
             throw ConversationJumpNotice.contentChanged
         } catch {
             throw ConversationJumpNotice.map(error)
+        }
+    }
+
+    /// Pages the program's own history up until the prompt is on screen. Scrolling up,
+    /// the first match is the newest one, so only the newest of the prompts sharing
+    /// this start can be found this way. Returns to the bottom when it gives up.
+    private func pageAppHistory(_ pane: String, for wanted: ClaudeTranscriptIndex.JumpTarget,
+                                result: (Int, UInt64, Int, Bool) -> ConversationJumpResult) async throws -> ConversationJumpResult {
+        guard let appScroll, wanted.occurrence == wanted.occurrences - 1 else { throw ConversationJumpNotice.notFound }
+        var previousScreen = try await service.readPaneText(paneID: pane)
+        for page in 1...Self.maximumPages {
+            guard await appScroll(.pageUp) else { throw ConversationJumpNotice.unavailable }
+            try await Task.sleep(for: pageSettle)
+            if let found = try await search(pane, for: wanted.key),
+               let match = found.matches.filter({ $0.col <= 4 }).max(by: { $0.row < $1.row }) {
+                return result(match.row, found.contentRevision, page, true)
+            }
+            let screen = try await service.readPaneText(paneID: pane)
+            if screen == previousScreen { break }  // top of the history
+            previousScreen = screen
+        }
+        _ = await appScroll(.toBottom)
+        throw ConversationJumpNotice.notFound
+    }
+
+    /// One copy-mode search; nil when output landed between reading the revision and searching.
+    private func search(_ pane: String, for key: String) async throws -> PaneSearchResult? {
+        let revision = try await service.paneContentRevision(paneID: pane)
+        do {
+            return try await service.searchPane(paneID: pane, query: key, contentRevision: revision)
+        } catch HerdrError.rpc(code: "stale_content", _) {
+            return nil
         }
     }
 

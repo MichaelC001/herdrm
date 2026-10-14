@@ -18,9 +18,12 @@ the Sparkle update description — a release without a section here fails CI.
   changes. HerdrM reads the transcript Claude Code already writes
   (`~/.claude/projects/…/<session>.jsonl`) on the device running the agent: a
   local file for Local, one SSH stream per open conversation for SSH devices,
-  and nothing over Tailcat. The jump uses herdr's own pane search and scroll, so
-  it can only reach prompts still in the pane's scrollback, not when Claude runs
-  in fullscreen mode, and never sends input to the agent.
+  and nothing over Tailcat. The jump uses herdr's own pane search and scroll to
+  reach a prompt still in the pane's scrollback. Claude in fullscreen mode keeps
+  its own history, so there HerdrM presses PageUp in the terminal until the prompt
+  is on screen, and ⌃End when you return to live (only the newest of repeated
+  prompts can be found this way). A prompt the terminal cannot show opens in the
+  reader instead.
 
 ## [0.6.17] - 2026-10-13
 

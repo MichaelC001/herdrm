@@ -112,6 +112,60 @@ final class ClaudeHistoryProviderTests: XCTestCase {
         XCTAssertTrue(methods.allSatisfy { !["pane.send_input", "pane.send_text", "pane.send_keys", "agent.prompt"].contains($0) })
     }
 
+    private func fullscreenJump(prompts: [String], jumpTo index: Int, matchAfterPages: Int?, topAtPage: Int = .max)
+        async throws -> (Result<ConversationJumpResult, Error>, PageCounter) {
+        var text = "", parent: String?
+        for (n, prompt) in prompts.enumerated() {
+            text += self.prompt("u\(n)", parent: parent, prompt); parent = "u\(n)"
+        }
+        try text.write(to: transcript, atomically: true, encoding: .utf8)
+        let pages = PageCounter()
+        // Fullscreen Claude: herdr has no scrollback (max offset 0).
+        let socket = try PaneFixtureSocket(matches: [], maxOffset: 0, viewportRows: 40, pages: pages,
+                                           matchAfterPages: matchAfterPages, topAtPage: topAtPage)
+        defer { socket.stop() }
+        let store = ClaudeTranscriptStore()
+        let device = Device(name: "fixture", kind: .local, socketPath: socket.path)
+        let service = HerdrService(device: device, autoStartLocalServer: false)
+        _ = try await service.connect()
+        let provider = ClaudeHistoryProvider(store: store, device: device, service: service,
+                                             appScroll: { key in pages.press(key); return true },
+                                             pageSettle: .milliseconds(1))
+        let page = try await provider.read(target: "w:p", expectedSessionID: sessionID, window: .latest, limits: .init())
+        let message = try XCTUnwrap(page.messages.first { $0.id == "u\(index)" })
+        let outcome: Result<ConversationJumpResult, Error>
+        do {
+            outcome = .success(try await provider.jump(target: "w:p", expectedSessionID: sessionID,
+                                                       expectedGeneration: try XCTUnwrap(page.binding?.generation),
+                                                       messageID: message.id, messageRevision: message.messageRevision))
+        } catch { outcome = .failure(error) }
+        await service.disconnect()
+        await store.stopAll()
+        return (outcome, pages)
+    }
+
+    func testFullscreenJumpPagesClaudesOwnHistoryUntilThePromptShows() async throws {
+        let (outcome, pages) = try await fullscreenJump(prompts: ["first", "second"], jumpTo: 0, matchAfterPages: 3)
+        let result = try outcome.get()
+        XCTAssertTrue(result.scrolledApp)
+        XCTAssertEqual(result.offsetFromBottom, 3)
+        XCTAssertEqual(result.sourceRow, 12)
+        XCTAssertEqual(pages.sent, [.pageUp, .pageUp, .pageUp])
+    }
+
+    func testFullscreenJumpReturnsToTheBottomWhenTheTopHasNoMatch() async throws {
+        let (outcome, pages) = try await fullscreenJump(prompts: ["first", "second"], jumpTo: 0, matchAfterPages: nil, topAtPage: 4)
+        XCTAssertThrowsError(try outcome.get()) { XCTAssertEqual($0 as? ConversationJumpNotice, .notFound) }
+        XCTAssertEqual(pages.value, 5, "the fifth page showed the same screen as the fourth: the top")
+        XCTAssertEqual(pages.sent.last, .toBottom)
+    }
+
+    func testFullscreenJumpOnlyFindsTheNewestOfRepeatedPrompts() async throws {
+        let (outcome, pages) = try await fullscreenJump(prompts: ["continue", "other", "continue"], jumpTo: 0, matchAfterPages: 1)
+        XCTAssertThrowsError(try outcome.get()) { XCTAssertEqual($0 as? ConversationJumpNotice, .notFound) }
+        XCTAssertTrue(pages.sent.isEmpty, "an older repeat cannot be told apart, so nothing is typed")
+    }
+
     func testRowSelectionAccountsForScrolledOutAndQuotedPrompts() throws {
         let target = ClaudeTranscriptIndex.JumpTarget(key: "continue", occurrence: 2, occurrences: 3)
         // Only the two newest prompts are still in the scrollback.
@@ -137,6 +191,17 @@ final class ClaudeHistoryProviderTests: XCTestCase {
     }
 }
 
+final class PageCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    private(set) var keys: [AppScrollKey] = []
+    var value: Int { lock.lock(); defer { lock.unlock() }; return count }
+    var sent: [AppScrollKey] { lock.lock(); defer { lock.unlock() }; return keys }
+    func press(_ key: AppScrollKey) {
+        lock.lock(); keys.append(key); if key == .pageUp { count += 1 }; lock.unlock()
+    }
+}
+
 /// Synthetic private socket only; never opens the user's daemon.
 private final class PaneFixtureSocket: @unchecked Sendable {
     let path: String
@@ -146,7 +211,11 @@ private final class PaneFixtureSocket: @unchecked Sendable {
     private var stopped = false
     var requests: [[String: Any]] { lock.lock(); defer { lock.unlock() }; return recorded }
 
-    init(matches: [(row: Int, col: Int)], maxOffset: Int, viewportRows: Int) throws {
+    /// `pages` counts PageUp presses; with `matchAfterPages` set, the search finds the
+    /// prompt (row 12, col 2) only once that many pages were pressed. The visible screen
+    /// stops changing at `topAtPage`.
+    init(matches: [(row: Int, col: Int)], maxOffset: Int, viewportRows: Int,
+         pages: PageCounter? = nil, matchAfterPages: Int? = nil, topAtPage: Int = .max) throws {
         path = "/tmp/hhist-\(UUID().uuidString.prefix(8)).sock"
         listener = socket(AF_UNIX, SOCK_STREAM, 0)
         guard listener >= 0 else { throw HerdrError.connectionFailed("fixture socket") }
@@ -175,7 +244,13 @@ private final class PaneFixtureSocket: @unchecked Sendable {
                 case "pane.copy_motion":
                     result = ["type": "pane_copy_motion", "pane_id": "w:p", "cursor": ["row": 0, "col": 0], "content_revision": 42]
                 case "pane.copy_search":
-                    result = ["type": "pane_copy_search", "pane_id": "w:p", "content_revision": 42, "matches": ranges, "total": ranges.count]
+                    var found = ranges
+                    if let after = matchAfterPages {
+                        found = (pages?.value ?? 0) >= after ? [["start": ["row": 12, "col": 2], "end": ["row": 12, "col": 10]]] : []
+                    }
+                    result = ["type": "pane_copy_search", "pane_id": "w:p", "content_revision": 42, "matches": found, "total": found.count]
+                case "pane.read":
+                    result = ["type": "pane_read", "read": ["text": "screen \(min(pages?.value ?? 0, topAtPage))"]]
                 case "pane.get":
                     result = ["type": "pane_info", "pane": ["scroll": ["offset_from_bottom": 0, "max_offset_from_bottom": maxOffset, "viewport_rows": viewportRows]]]
                 case "pane.scroll":
