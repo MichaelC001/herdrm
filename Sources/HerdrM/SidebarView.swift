@@ -59,8 +59,8 @@ struct SidebarView: View {
             .padding(.horizontal, 10)
             .frame(height: TitlebarMetrics.height)
             .windowTitlebarInteraction()
-            .onAppear { applyGrouping(groupBySpace, collapseSections: false) }
-            .onChange(of: groupBySpace) { _, grouped in applyGrouping(grouped, collapseSections: true) }
+            .onAppear { applyGrouping(groupBySpace, animated: false) }
+            .onChange(of: groupBySpace) { _, grouped in applyGrouping(grouped, animated: true) }
 
             Spacer().frame(height: 8)
 
@@ -208,12 +208,21 @@ struct SidebarView: View {
         !model.terminalSectionRows.isEmpty || !model.shellSessions.isEmpty
     }
 
-    private func applyGrouping(_ grouped: Bool, collapseSections: Bool) {
+    private func applyGrouping(_ grouped: Bool, animated: Bool) {
         model.groupSidebarBySpace = grouped
-        guard collapseSections else { return }
-        withAnimation(.easeInOut(duration: 0.2)) {
+        // Collapse the Agents/Terminals sections while grouping is on so their
+        // panes aren't listed a second time under the spaces. This must run on
+        // first appear too (agentsExpanded/terminalsExpanded are @State and reset
+        // to true each launch): otherwise relaunching with grouping on shows
+        // every pane twice until the toggle is flipped.
+        let apply = {
             agentsExpanded = !grouped
             terminalsExpanded = !grouped
+        }
+        if animated {
+            withAnimation(.easeInOut(duration: 0.2)) { apply() }
+        } else {
+            apply()
         }
     }
 
