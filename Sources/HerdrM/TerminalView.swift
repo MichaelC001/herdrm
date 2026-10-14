@@ -390,6 +390,10 @@ final class LineBreakTerminalView: AppTerminalView {
     /// `AppTerminalView.surface` is internal, so selection queries come in here.
     weak var attachedSurface: TerminalSurface?
     weak var processHost: TerminalProcessHost?
+    /// Ghostty's grid as its resize delegate last reported it. The session's
+    /// `viewport` (from the PTY resize callback) carries columns, rows and the
+    /// surface size but no cell size, so this is where cell pixels come from.
+    var gridMetrics: TerminalGridMetrics?
     /// Lazily created by `showFind()`; lives in TerminalFindBar.swift.
     var findBar: TerminalFindBar?
 
@@ -588,13 +592,13 @@ final class LineBreakTerminalView: AppTerminalView {
 
     /// The cell grid under a window point, and the link printed there.
     private func linkHit(atWindowPoint windowPoint: NSPoint) -> (link: TerminalLink, rowRect: NSRect)? {
-        guard let viewport = processHost?.viewport,
-              viewport.columns > 0, viewport.cellWidthPixels > 0, viewport.cellHeightPixels > 0,
+        guard let viewport = processHost?.viewport, viewport.columns > 0, viewport.rows > 0,
+              let cell = cellSizePixels(viewport),
               let text = processHost?.session.readViewportText()
         else { return nil }
         let scale = window?.backingScaleFactor ?? 2
-        let cellWidth = CGFloat(viewport.cellWidthPixels) / scale
-        let cellHeight = CGFloat(viewport.cellHeightPixels) / scale
+        let cellWidth = cell.width / scale
+        let cellHeight = cell.height / scale
         let point = convert(windowPoint, from: nil)
         let fromTop = isFlipped ? point.y : bounds.height - point.y
         let column = Int(((point.x - Self.gridPadding) / cellWidth).rounded(.down))
@@ -610,6 +614,26 @@ final class LineBreakTerminalView: AppTerminalView {
             height: cellHeight
         )
         return (link, rowRect)
+    }
+
+    /// Cell size in backing pixels. Ghostty's resize delegate reports it with
+    /// the grid; the PTY resize callback that fills `viewport` does not (its
+    /// cell fields stay 0), so without the delegate value the cell is derived
+    /// from the surface size and the grid, minus Ghostty's padding.
+    private func cellSizePixels(_ viewport: InMemoryTerminalViewport) -> (width: CGFloat, height: CGFloat)? {
+        if let metrics = gridMetrics, metrics.cellWidthPixels > 0, metrics.cellHeightPixels > 0 {
+            return (CGFloat(metrics.cellWidthPixels), CGFloat(metrics.cellHeightPixels))
+        }
+        if viewport.cellWidthPixels > 0, viewport.cellHeightPixels > 0 {
+            return (CGFloat(viewport.cellWidthPixels), CGFloat(viewport.cellHeightPixels))
+        }
+        guard viewport.widthPixels > 0, viewport.heightPixels > 0 else { return nil }
+        let scale = window?.backingScaleFactor ?? 2
+        let padding = Self.gridPadding * 2 * scale
+        let width = (CGFloat(viewport.widthPixels) - padding) / CGFloat(viewport.columns)
+        let height = (CGFloat(viewport.heightPixels) - padding) / CGFloat(viewport.rows)
+        guard width > 0, height > 0 else { return nil }
+        return (width, height)
     }
 
     static func url(in lines: [String], row: Int, column: Int, columns: Int) -> String? {
@@ -1666,9 +1690,14 @@ struct AttachTerminalView: NSViewRepresentable {
     }
 
     final class Coordinator: NSObject, TerminalSurfaceLifecycleDelegate, TerminalSurfaceOpenURLDelegate,
-        TerminalSurfaceHoverLinkDelegate {
+        TerminalSurfaceHoverLinkDelegate, TerminalSurfaceGridResizeDelegate {
         func terminalDidRequestOpenURL(_ url: String, kind: TerminalOpenURLKind) {
             LineBreakTerminalView.openClickedLink(url)
+        }
+
+        /// Cell size for mapping a pointer to a cell (links under mouse capture).
+        func terminalDidResize(_ size: TerminalGridMetrics) {
+            view?.gridMetrics = size
         }
 
         func terminalDidUpdateHoverLink(_ url: String?) {
@@ -1923,9 +1952,14 @@ struct ShellTerminalView: NSViewRepresentable {
     }
 
     final class Coordinator: NSObject, TerminalSurfaceLifecycleDelegate, TerminalSurfaceOpenURLDelegate,
-        TerminalSurfaceHoverLinkDelegate {
+        TerminalSurfaceHoverLinkDelegate, TerminalSurfaceGridResizeDelegate {
         func terminalDidRequestOpenURL(_ url: String, kind: TerminalOpenURLKind) {
             LineBreakTerminalView.openClickedLink(url)
+        }
+
+        /// Cell size for mapping a pointer to a cell (links under mouse capture).
+        func terminalDidResize(_ size: TerminalGridMetrics) {
+            view?.gridMetrics = size
         }
 
         func terminalDidUpdateHoverLink(_ url: String?) {
