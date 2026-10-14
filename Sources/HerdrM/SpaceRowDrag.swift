@@ -97,6 +97,7 @@ struct AgentRowDragHost: View {
     let isClaude: Bool
     let pluginActions: [PluginActionGroup]
     let grazrReport: GrazrReport?
+    var allowsDrag = true
     let onClick: () -> Void
     let onRename: () -> Void
     let onPluginAction: (PluginAction) -> Void
@@ -122,6 +123,7 @@ struct AgentRowDragHost: View {
             onClick: onClick,
             onDoubleClick: onRename,
             onMenuOpen: onMenuOpen,
+            allowsDrag: allowsDrag,
             onDragStart: onDragStart,
             onDragEnd: onDragEnd,
             onDropHover: onDropHover,
@@ -229,6 +231,7 @@ struct AgentRowDragHost: View {
 
 struct TerminalRowDragHost: View {
     let entryID: String
+    var allowsDrag = true
     let onClick: () -> Void
     let onRename: () -> Void
     let onClose: () -> Void
@@ -249,6 +252,7 @@ struct TerminalRowDragHost: View {
             ],
             onClick: onClick,
             onDoubleClick: onRename,
+            allowsDrag: allowsDrag,
             onDragStart: onDragStart,
             onDragEnd: onDragEnd,
             onDropHover: onDropHover,

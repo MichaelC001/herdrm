@@ -109,6 +109,7 @@ struct HerdrMApp: App {
     /// invalidates the commands body, so the menu checkmark follows the setting.
     @AppStorage(TerminalDefaults.tabLayoutKey) private var tabLayoutEnabled = true
     @AppStorage(MachineStatsDefaults.showKey) private var showsMachineStats = true
+    @AppStorage(SidebarDefaults.groupBySpaceKey) private var groupSidebarBySpace = false
     @FocusedValue(\.appModel) private var focusedModel
     @FocusedValue(\.splitAxis) private var focusedSplitAxis
     @FocusedValue(\.tabLayoutActive) private var focusedTabLayoutActive
@@ -156,8 +157,8 @@ struct HerdrMApp: App {
                     .disabled(focusedModel == nil)
             }
 
-            // Off removes the sidebar meters and stops their sampler (one ssh per remote host).
             CommandGroup(after: .sidebar) {
+                // Off removes the sidebar meters and stops their sampler (one ssh per remote host).
                 Toggle("Show Machine Stats", isOn: $showsMachineStats)
                 Button("Read full conversation") {
                     if let model = focusedModel, let entry = model.selectedEntry {
@@ -166,6 +167,8 @@ struct HerdrMApp: App {
                 }
                 .keyboardShortcut("h", modifiers: [.command, .shift])
                 .disabled(claudeHistorySelected != true)
+                // Same key the sidebar's own button and Settings write.
+                Toggle("Group Sidebar by Space", isOn: $groupSidebarBySpace)
             }
 
             CommandGroup(after: .appInfo) {
@@ -726,6 +729,7 @@ struct TerminalSettingsView: View {
 struct AppearanceSettingsView: View {
     @AppStorage("app.theme") private var themePreference = "system"
     @AppStorage(AppLanguage.defaultsKey) private var language = AppLanguage.system.rawValue
+    @AppStorage(SidebarDefaults.groupBySpaceKey) private var groupSidebarBySpace = false
 
     var body: some View {
         Form {
@@ -739,6 +743,16 @@ struct AppearanceSettingsView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            Toggle(isOn: $groupSidebarBySpace) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Group sidebar by space")
+                    Text("List each space's panes under it: a tab's first pane, then the panes split off it. Agents and Terminals stay as sections, collapsed.")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
 
             LabeledContent("Language") {
                 HStack(spacing: 8) {

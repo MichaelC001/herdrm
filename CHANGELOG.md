@@ -8,24 +8,6 @@ the Sparkle update description — a release without a section here fails CI.
 ## [Unreleased]
 
 ### Added
-- **⌘-click a file path to open it.** Paths printed in a pane open the way
-  URLs do: `README.md` and `src/index.ts:42:7` resolve against the pane's
-  working directory as herdr reports it, `~/notes.txt` and absolute paths as
-  written, `file://` links too. Files open in their default app, folders in
-  Finder; anything that would run (an app, a package, an executable) is
-  revealed in Finder instead. Only paths that exist on this Mac become links,
-  so "see README.md" in prose stays text and panes on remote devices are left
-  alone. Hovering shows the same Copy button as for URLs.
-
-### Fixed
-- Links work again: hovering a URL shows the Copy button and ⌘-click opens it.
-  herdr's attach client keeps mouse reporting on, so herdrm maps the pointer to
-  a cell itself, and the cell size it read from the session viewport was always
-  0 with the current libghostty (the PTY resize callback does not carry it).
-  The cell size now comes from Ghostty's grid resize delegate, with a fallback
-  derived from the surface size.
-
-### Added
 - **Claude conversation history.** A thin, compact chronological prompt rail floats
   over the terminal edge, softly blurred when idle and clear on hover. It enlarges
   nearby marks on hover and shows a compact prompt/reply preview. Clicking a mark
@@ -37,6 +19,33 @@ the Sparkle update description — a release without a section here fails CI.
   running Claude. Requires a matching herdr daemon with the history capability;
   older servers keep normal terminal access. History browsing preserves the
   running terminal and never resends a message.
+- **⌘-click a file path to open it.** Paths printed in a pane open the way
+  URLs do: `README.md` and `src/index.ts:42:7` resolve against the pane's
+  working directory as herdr reports it, `~/notes.txt` and absolute paths as
+  written, `file://` links too. Files open in their default app, folders in
+  Finder; anything that would run (an app, a package, an executable) is
+  revealed in Finder instead. Only paths that exist on this Mac become links,
+  so "see README.md" in prose stays text and panes on remote devices are left
+  alone. Hovering shows the same Copy button as for URLs.
+- **Split panes nest in the sidebar.** A pane split off another lists indented
+  under its tab's main pane (the oldest pane of the tab) with a split-pane
+  glyph, in the main pane's section: a shell split off an agent sits under
+  that agent in Agents. Once a tab is split, each pane shows its own title
+  instead of the tab label, so a `cd` or herdr's auto-title renaming the tab
+  no longer renames every pane of it.
+- **Group the sidebar by space.** Off by default. Each space row gets a
+  disclosure and lists its panes under it, a tab's main pane then the panes
+  split off it, so a team of agents reads as one unit. Agents and Terminals
+  stay as sections and collapse while grouping is on. Toggle from the sidebar
+  strip, View › Group Sidebar by Space, or Settings › Appearance.
+
+### Fixed
+- Links work again: hovering a URL shows the Copy button and ⌘-click opens it.
+  herdr's attach client keeps mouse reporting on, so herdrm maps the pointer to
+  a cell itself, and the cell size it read from the session viewport was always
+  0 with the current libghostty (the PTY resize callback does not carry it).
+  The cell size now comes from Ghostty's grid resize delegate, with a fallback
+  derived from the surface size.
 
 ## [0.6.16] - 2026-10-13
 
