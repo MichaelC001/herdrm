@@ -24,7 +24,8 @@ final class SidebarHarness {
     ///   (what grazr / herdr-agent-quota publish); nil leaves the agents untagged.
     /// - Parameter sheets: attach the app's New Agent / New Terminal / New Space
     ///   sheets, so a button press can be followed to the sheet it opens.
-    init(spaces: Int, agents: Int, terminals: Int = 0, agentTokens: [String: String]? = nil, sheets: Bool = false, width: CGFloat = 260, height: CGFloat = 600) throws {
+    /// - Parameter pinnedHeaders: learn the header titles for `pinnedHeader`; needs a list long enough to scroll.
+    init(spaces: Int, agents: Int, terminals: Int = 0, agentTokens: [String: String]? = nil, sheets: Bool = false, pinnedHeaders: Bool = true, width: CGFloat = 260, height: CGFloat = 600) throws {
         model = try Self.fakeModel(spaces: spaces, agents: agents, terminals: terminals, agentTokens: agentTokens)
         let sidebar = SidebarView(model: model, collapsed: .constant(false), width: width).frame(width: width, height: height)
         root = NSHostingView(rootView: sheets ? AnyView(sidebar.newItemSheets(model: model)) : AnyView(sidebar))
@@ -37,7 +38,7 @@ final class SidebarHarness {
         root.layoutSubtreeIfNeeded()
         scroll = try XCTUnwrap(Self.firstScrollView(in: root), "sidebar scroll view")
         settle()
-        try learnHeaderSignatures()
+        if pinnedHeaders { try learnHeaderSignatures() }
     }
 
     deinit {
@@ -87,11 +88,107 @@ final class SidebarHarness {
         settle()
     }
 
+    /// Click, with the mouse, the disclosure chevron on a space's row (grouped mode).
+    func clickSpaceDisclosure(_ space: String) throws {
+        try click(atScreen: XCTUnwrap(spaceDisclosure(space).frame))
+        settle(seconds: 0.6) // the fold animates for 0.2s
+    }
+
+    /// Click, with the mouse, the title of a space's row.
+    func clickSpaceTitle(_ space: String) throws {
+        try click(atScreen: spaceTitle(space).frame!)
+        settle()
+    }
+
+    /// Titles in the menu a right-click on a space's row opens.
+    func spaceMenu(_ space: String) throws -> [String] {
+        try spaceRowMenu(space).items.map { $0.isSeparatorItem ? "-" : $0.title }
+    }
+
+    /// Right-click a space's row and choose `title` from its menu.
+    func chooseFromSpaceMenu(_ space: String, _ title: String) throws {
+        let menu = try spaceRowMenu(space)
+        let index = menu.indexOfItem(withTitle: title)
+        XCTAssertNotEqual(index, -1, "no \(title) in \(menu.items.map(\.title))")
+        guard index != -1 else { return }
+        menu.performActionForItem(at: index)
+        settle(seconds: 0.8) // a sheet slides in
+    }
+
+    /// Close whatever sheet is attached, as Cancel does.
+    func dismissSheet() {
+        model.showNewAgent = false
+        model.showNewTerminal = false
+        model.showNewSpace = false
+        settle(seconds: 0.8) // the sheet slides out
+    }
+
+    /// The texts on the sheet attached to the sidebar's window; empty when there is none.
+    var sheetTexts: [String] {
+        let all = AccessibilityProbe.elements(in: window)
+        guard let start = all.firstIndex(where: { $0.role == "AXSheet" }) else { return [] }
+        return all[start...].filter { $0.role == "AXStaticText" }.compactMap { $0.value ?? $0.name }
+    }
+
+    /// What VoiceOver reads for the disclosure chevron on a space's row.
+    func spaceDisclosureName(_ space: String) throws -> String? {
+        settle()
+        return try spaceDisclosure(space).name
+    }
+
+    var accessibilityDump: String {
+        AccessibilityProbe.elements(in: window).map { "\($0.role) \($0.name ?? "-") \($0.identifier ?? "-") \($0.frame.map { "\($0)" } ?? "-")" }.joined(separator: "\n")
+    }
+
+    /// The menu AppKit asks the view under the space's title for on a right-click.
+    private func spaceRowMenu(_ space: String) throws -> NSMenu {
+        let (point, target) = try hit(atScreen: spaceTitle(space).frame!)
+        let rightDown = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .rightMouseDown, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+        return try XCTUnwrap(target.menu(for: rightDown), "no menu on \(space)")
+    }
+
+    /// The widest element named for the space: its title, or the row content holding it.
+    private func spaceTitle(_ space: String) throws -> AccessibilityProbe.Element {
+        try XCTUnwrap(
+            AccessibilityProbe.elements(in: window)
+                .filter { ($0.name ?? "").hasPrefix(space) && $0.frame != nil }
+                .max { $0.frame!.width < $1.frame!.width },
+            "no row \(space)\n\(accessibilityDump)"
+        )
+    }
+
+    /// The leftmost button level with the space's title and before it.
+    private func spaceDisclosure(_ space: String) throws -> AccessibilityProbe.Element {
+        let title = try XCTUnwrap(spaceTitle(space).frame)
+        return try XCTUnwrap(
+            AccessibilityProbe.elements(in: window)
+                .filter { e in
+                    guard e.role == "AXButton", let f = e.frame else { return false }
+                    return f.maxX <= title.minX && (title.minY...title.maxY).contains(f.midY)
+                }
+                .min { $0.frame!.minX < $1.frame!.minX },
+            "no chevron on \(space)\n\(accessibilityDump)"
+        )
+    }
+
     // MARK: - Observations
 
     /// Whether the CPU / RAM / DISK meters are in the sidebar footer.
     var showsMachineStats: Bool {
         AccessibilityProbe.elements(in: window).contains { $0.identifier == "sidebar.machineStats" }
+    }
+
+    /// The controls VoiceOver lists in the sidebar, without the scroll bar's own parts.
+    var controls: [AccessibilityProbe.Element] {
+        let all = AccessibilityProbe.elements(in: window)
+        let scrollBars = all.filter { $0.role == "AXScrollBar" }.compactMap(\.frame)
+        let roles: Set<String> = ["AXButton", "AXCheckBox", "AXPopUpButton", "AXMenuButton", "AXRadioButton", "AXTextField"]
+        return all.filter { e in
+            guard roles.contains(e.role), let f = e.frame, f.width > 0, f.height > 0 else { return false }
+            return !scrollBars.contains { $0.contains(CGPoint(x: f.midX, y: f.midY)) }
+        }
     }
 
     /// Names VoiceOver reads for the buttons on a section header.
@@ -199,13 +296,45 @@ final class SidebarHarness {
         return Double(zip(a, b).filter { abs($0 - $1) > 0.1 }.count) / Double(a.count)
     }
 
-    private func click(at point: NSPoint) throws {
+    /// Click the middle of a rect given in accessibility screen coordinates.
+    /// The press goes to whichever view AppKit hit-tests there, the way a real
+    /// click picks its target. The test window is never key, so for a view that
+    /// does not accept first mouse (the row's drag view) `sendEvent` would spend
+    /// the click on activating the window; such a view gets the press directly.
+    private func click(atScreen rect: CGRect) throws {
+        let (point, target) = try hit(atScreen: rect)
+        let (down, up) = try mouseClick(at: point)
+        if target.acceptsFirstMouse(for: down) {
+            try click(at: point)
+            return
+        }
+        target.mouseDown(with: down)
+        settle()
+        target.mouseUp(with: up)
+    }
+
+    /// The window point at the middle of a rect in accessibility screen
+    /// coordinates, and the view AppKit hit-tests there.
+    private func hit(atScreen rect: CGRect) throws -> (NSPoint, NSView) {
+        let mainHeight = try XCTUnwrap(NSScreen.screens.first).frame.height
+        let point = window.convertPoint(fromScreen: NSPoint(x: rect.midX, y: mainHeight - rect.midY))
+        let content = try XCTUnwrap(window.contentView)
+        let target = try XCTUnwrap(content.hitTest(content.superview?.convert(point, from: nil) ?? point), "nothing under \(point)")
+        return (point, target)
+    }
+
+    private func mouseClick(at point: NSPoint) throws -> (NSEvent, NSEvent) {
         let down = try XCTUnwrap(NSEvent.mouseEvent(
             with: .leftMouseDown, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
             windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
         let up = try XCTUnwrap(NSEvent.mouseEvent(
             with: .leftMouseUp, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime + 0.05,
             windowNumber: window.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0))
+        return (down, up)
+    }
+
+    private func click(at point: NSPoint) throws {
+        let (down, up) = try mouseClick(at: point)
         window.sendEvent(down)
         settle()
         window.sendEvent(up)

@@ -5,6 +5,22 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
+## [Unreleased]
+
+### Added
+- **New Agent and New Terminal from a space's menu.** Right-click a space in
+  the sidebar to start an agent or a terminal in it, without selecting it
+  first.
+
+### Fixed
+- The chevron on a space row folds that space's panes when the sidebar is
+  grouped by space. Clicking it used to select the space instead.
+- VoiceOver reads the space chevron as Collapse / Expand space, and the
+  sidebar's icon buttons by what they do: Group Sidebar by Space, Hide
+  Sidebar, Settings. They were read by the space's name or by their icons'
+  names, such as "Gear Shape". A new test fails when any sidebar control has
+  no name or is read by its icon's name.
+
 ## [0.6.17] - 2026-10-13
 
 ### Changed
