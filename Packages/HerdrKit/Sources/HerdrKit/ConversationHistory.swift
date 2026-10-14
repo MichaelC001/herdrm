@@ -359,7 +359,7 @@ public enum ConversationJumpNotice: Error, LocalizedError, Sendable, Equatable {
     }
     public var message: String {
         switch self {
-        case .unsupportedServer: return "Update herdr on this device to jump to messages in the terminal."
+        case .unsupportedServer: return "Jumping to messages is not available for this device."
         case .sessionChanged: return "The selected Claude session changed. Try again."
         case .messageChanged: return "This saved message changed. Refresh history and try again."
         case .ambiguous: return "This message appears more than once. The terminal position cannot be identified reliably."
@@ -370,7 +370,7 @@ public enum ConversationJumpNotice: Error, LocalizedError, Sendable, Equatable {
         case .scanLimit: return "The retained terminal history is too large to locate this message safely."
         case .sourceChanged: return "Saved conversation history changed. Refresh and try again."
         case .sourceMissing: return "The saved conversation file is unavailable on this device."
-        case .accessDenied: return "herdr cannot read the saved conversation file on this device."
+        case .accessDenied: return "HerdrM cannot read the saved conversation file on this device."
         case .disconnected: return "Reconnect this device before jumping to history."
         case .other: return "The terminal could not jump to this message. Try again."
         }
@@ -398,7 +398,7 @@ public enum ConversationJumpNotice: Error, LocalizedError, Sendable, Equatable {
             case "jump_not_found": return .notFound
             case "jump_unavailable": return .unavailable
             case "alternate_screen": return .alternateScreen
-            case "content_changed": return .contentChanged
+            case "content_changed", "stale_content": return .contentChanged
             case "geometry_changed": return .geometryChanged
             case "terminal_changed": return .terminalChanged
             case "scan_limit": return .scanLimit

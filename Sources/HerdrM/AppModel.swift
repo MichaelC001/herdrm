@@ -178,6 +178,8 @@ final class AppModel: ObservableObject {
         didSet { synchronizeConversationHistory() }
     }
     let conversationHistory = ConversationHistoryController()
+    /// Claude transcripts HerdrM reads itself; one reader per open conversation.
+    private let claudeTranscripts = ClaudeTranscriptStore()
     private var isConversationHistoryVisible = false
     @Published private(set) var conversationCanReturnToLive = false
     private let conversationViewportMutations = ConversationViewportMutationLane()
@@ -911,7 +913,7 @@ final class AppModel: ObservableObject {
             deviceID: entry.device.id,
             paneID: entry.agent.paneID,
             session: entry.agent.agentSession,
-            provider: ClaudeHistoryProvider(service: service(for: entry.device))
+            provider: ClaudeHistoryProvider(store: claudeTranscripts, device: entry.device, service: service(for: entry.device))
         )
         let connected: Bool
         if case .connected = session(entry.device.id).connection { connected = true }
@@ -1709,6 +1711,7 @@ final class AppModel: ObservableObject {
     func shutdownAllSessions() async {
         conversationViewportMutations.discardPending()
         conversationHistory.stop()
+        await claudeTranscripts.stopAll()
         let live = services
         services.removeAll()
         sessionTasks.values.forEach { $0.cancel() }

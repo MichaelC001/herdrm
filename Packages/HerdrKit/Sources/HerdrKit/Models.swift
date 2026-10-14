@@ -318,12 +318,10 @@ public struct SessionSnapshot: Codable, Sendable, Equatable {
 public struct PingResult: Codable, Sendable {
     public let version: String
     public let protocolVersion: Int
-    public var capabilities: ConversationServerCapabilities? = nil
 
     enum CodingKeys: String, CodingKey {
         case version
         case protocolVersion = "protocol"
-        case capabilities
     }
 }
 
@@ -408,4 +406,32 @@ public enum HerdrError: Error, LocalizedError, Sendable {
 public enum TerminalAttachTarget: Sendable, Equatable {
     case agent(paneID: String)
     case terminal(terminalID: String)
+}
+
+/// A pane's server-side viewport, from `pane.get`.
+public struct PaneScrollMetrics: Sendable, Equatable {
+    public let offsetFromBottom: Int
+    public let maxOffsetFromBottom: Int
+    public let viewportRows: Int
+    public init(offsetFromBottom: Int, maxOffsetFromBottom: Int, viewportRows: Int) {
+        self.offsetFromBottom = offsetFromBottom
+        self.maxOffsetFromBottom = maxOffsetFromBottom
+        self.viewportRows = viewportRows
+    }
+}
+
+/// Where a `pane.copy_search` match starts; rows count from the top of the scrollback.
+public struct PaneTextMatch: Sendable, Equatable {
+    public let row: Int
+    public let col: Int
+    public init(row: Int, col: Int) {
+        self.row = row
+        self.col = col
+    }
+}
+
+public struct PaneSearchResult: Sendable, Equatable {
+    public let contentRevision: UInt64
+    public let matches: [PaneTextMatch]
+    public let total: Int
 }

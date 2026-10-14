@@ -26,13 +26,12 @@ final class ConversationHistoryTests: XCTestCase {
         let wire = String(decoding: try JSONEncoder().encode(block), as: UTF8.self)
         XCTAssertTrue(wire.contains("message_revision")); XCTAssertTrue(wire.contains("slice_index"))
     }
-    func testOldAndSupportedPingCapabilityDecoding() throws {
+    func testPingDecodesWithOrWithoutCapabilityFlags() throws {
+        // History needs no daemon capability; a server that advertises some still decodes.
         let old = try JSONDecoder().decode(PingResult.self, from: Data(#"{"version":"x","protocol":17}"#.utf8))
-        XCTAssertNil(old.capabilities)
-        let current = try JSONDecoder().decode(PingResult.self, from: Data(#"{"version":"x","protocol":17,"capabilities":{"live_handoff":true,"agent_conversation_read":true,"agent_conversation_block_read":true,"agent_conversation_jump":true}}"#.utf8))
-        XCTAssertEqual(current.capabilities?.agentConversationRead, true)
-        XCTAssertEqual(current.capabilities?.agentConversationBlockRead, true)
-        XCTAssertEqual(current.capabilities?.agentConversationJump, true)
+        XCTAssertEqual(old.protocolVersion, 17)
+        let current = try JSONDecoder().decode(PingResult.self, from: Data(#"{"version":"x","protocol":17,"capabilities":{"live_handoff":true}}"#.utf8))
+        XCTAssertEqual(current.version, "x")
     }
     func testLimitsAndTypedErrors() {
         XCTAssertEqual(ConversationLimits(limit: 999, maxBytes: Int.max), .init(limit: 200, maxBytes: 1_048_576))

@@ -92,22 +92,16 @@ macOS window on top of it, and it's grown well past "attach to a terminal":
   of freezing on the last frame; mixed-version `herdr` binaries no longer break attach.
 
 ### Files, search, and staying in the loop
-- **Claude conversation history** — select a Claude agent. The thin left timeline
-  floats over the terminal edge with closely packed, faint blurred marks. Hover to
-  reveal crisp marks at full color, grow the nearby marks and see a compact
-  prompt/reply preview; click a mark to locate the rendered exchange in the
-  existing terminal. The arrow at the bottom returns to live output. The bubble
-  button at the bottom-right of each Claude agent's sidebar card, or **⇧⌘H**,
-  opens or closes the secondary full-conversation reader for that agent. The
-  reader includes search, older/newer paging, collapsed tools and
-  complete-message reading/copying.
-  Terminal jumps require a uniquely matched complete prompt and supported reply
-  context still retained in source scrollback; unavailable matches leave it alone.
-  This requires a herdr daemon advertising the history read/jump methods and a
-  session binding from Claude's integration hook. Older daemons keep normal
-  terminal access and show a history update notice. Saved data stays on the
-  device running Claude; source retention and deletion still apply. Navigation
-  moves only the existing viewport and does not resend prompts.
+- **Claude conversation history** — select a Claude agent. A thin timeline floats over
+  the left edge of the terminal; hover it for a prompt/reply preview, click a mark to scroll
+  the terminal to that prompt, and use the arrow at the bottom to return to live output. The
+  bubble on each Claude agent's sidebar card, or **⇧⌘H**, opens the full conversation with
+  search, older/newer paging, collapsed tool activity and complete-message reading and copying.
+  HerdrM reads the transcript Claude Code writes on the agent's device (locally, or over one SSH
+  stream per open conversation), so it works with any official herdr 0.9+ and needs no server
+  changes; Tailcat devices have no shell access and show no history. A jump searches the pane's
+  scrollback with herdr's own copy-mode search, so it reaches prompts still in that scrollback
+  (not Claude's fullscreen mode) and never sends input to the agent.
 - **Two-pane file manager** — browse Local and any configured SSH device side by side, then
   upload or download regular files with progress, cancellation, and explicit Replace / Keep
   Both conflict handling. Transfers use the same OpenSSH config, agent, host-key, and Keychain

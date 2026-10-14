@@ -4,92 +4,149 @@ import XCTest
 @testable import HerdrKit
 
 final class ClaudeHistoryProviderTests: XCTestCase {
-    func testFixtureSocketUsesReadOnlyMethodsAndExactIdentityForEveryWindow() async throws {
-        let socket = try HistoryFixtureSocket(supported: true)
-        defer { socket.stop() }
-        let service = HerdrService(device: .init(name: "fixture", kind: .local, socketPath: socket.path), autoStartLocalServer: false)
-        _ = try await service.connect()
-        let provider = ClaudeHistoryProvider(service: service)
-        for window in [ConversationWindow.latest, .before(cursor: "b"), .after(cursor: "a"), .around(messageID: "m"), .search(query: "q"), .turns(cursor: "t"), .changes(cursor: "c")] {
-            let page = try await provider.read(target: "w:p", expectedSessionID: "s", window: window, limits: .init())
-            XCTAssertEqual(page.binding?.sessionID, "s")
+    private let sessionID = "0b4f6c1e-1111-4222-8333-944455556666"
+    private var configDirectory: URL!
+    private var transcript: URL!
+
+    override func setUpWithError() throws {
+        configDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("hhist-\(UUID().uuidString.prefix(8))")
+        let project = configDirectory.appendingPathComponent("projects/-tmp-project")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        transcript = project.appendingPathComponent("\(sessionID).jsonl")
+        // The reader is a child process; it finds the transcript through this.
+        setenv("CLAUDE_CONFIG_DIR", configDirectory.path, 1)
+    }
+
+    override func tearDownWithError() throws {
+        unsetenv("CLAUDE_CONFIG_DIR")
+        try? FileManager.default.removeItem(at: configDirectory)
+    }
+
+    private func prompt(_ uuid: String, parent: String?, _ text: String) -> String {
+        record(["type": "user", "uuid": uuid, "parentUuid": parent ?? NSNull(), "origin": ["kind": "human"],
+                "message": ["role": "user", "content": text]])
+    }
+
+    private func reply(_ uuid: String, parent: String, id: String, _ text: String) -> String {
+        record(["type": "assistant", "uuid": uuid, "parentUuid": parent,
+                "message": ["id": id, "role": "assistant", "content": [["type": "text", "text": text]]]])
+    }
+
+    private func record(_ object: [String: Any]) -> String {
+        String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self) + "\n"
+    }
+
+    private func append(_ text: String) throws {
+        let handle = try FileHandle(forWritingTo: transcript)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(text.utf8))
+        try handle.close()
+    }
+
+    private func provider(store: ClaudeTranscriptStore = .init()) -> ClaudeHistoryProvider {
+        let device = Device(name: "fixture", kind: .local, socketPath: "/tmp/none.sock")
+        return ClaudeHistoryProvider(store: store, device: device, service: HerdrService(device: device, autoStartLocalServer: false))
+    }
+
+    func testReadsTheTranscriptAndFollowsAppendedRecords() async throws {
+        try (prompt("u1", parent: nil, "first") + reply("a1", parent: "u1", id: "m1", "one")).write(to: transcript, atomically: true, encoding: .utf8)
+        let store = ClaudeTranscriptStore()
+        let provider = provider(store: store)
+        let latest = try await provider.read(target: "w:p", expectedSessionID: sessionID, window: .latest, limits: .init())
+        XCTAssertEqual(latest.availability, "ready")
+        XCTAssertEqual(latest.binding?.sessionID, sessionID)
+        XCTAssertEqual(latest.messages.map(\.id), ["u1", "a-m1"])
+        let cursor = try XCTUnwrap(latest.changesCursor)
+
+        try append(prompt("u2", parent: "a1", "second"))
+        var upserts: [String] = []
+        for _ in 0..<40 where upserts.isEmpty {
+            try await Task.sleep(for: .milliseconds(50))
+            upserts = try await provider.read(target: "w:p", expectedSessionID: sessionID, window: .changes(cursor: cursor), limits: .init()).upserts.map(\.id)
         }
-        let block = try await provider.readBlock(target: "w:p", expectedSessionID: "s", blockCursor: "bc", maxBytes: 1_048_576)
-        XCTAssertEqual(block.text, "🌍\n")
+        XCTAssertEqual(upserts, ["u2"])
+        await store.stopAll()
+    }
+
+    func testMissingTranscriptIsReportedNotThrown() async throws {
+        let page = try await provider().read(target: "w:p", expectedSessionID: sessionID, window: .latest, limits: .init())
+        XCTAssertEqual(page.availability, "source_missing")
+    }
+
+    func testUnsupportedDevicesAndSessionIDsNeverStartAReader() async throws {
+        let store = ClaudeTranscriptStore()
+        let tailcat = Device(name: "tc", kind: .tailcat)
+        let snapshot = try await store.snapshot(device: tailcat, sessionID: sessionID)
+        guard case .unavailable("unsupported_device") = snapshot else { return XCTFail("\(snapshot)") }
+        let local = Device(name: "l", kind: .local)
+        let injected = try await store.snapshot(device: local, sessionID: "x'; rm -rf ~; '")
+        guard case .unavailable("no_binding") = injected else { return XCTFail("\(injected)") }
+    }
+
+    func testJumpSearchesThePaneAndScrollsItsViewportOnly() async throws {
+        let text = prompt("u1", parent: nil, "continue") + reply("a1", parent: "u1", id: "m1", "ok")
+            + prompt("u2", parent: "a1", "continue") + reply("a2", parent: "u2", id: "m2", "ok again")
+        try text.write(to: transcript, atomically: true, encoding: .utf8)
+        // Row 30 is Claude quoting the prompt mid-line; rows 10 and 50 are the prompts.
+        let socket = try PaneFixtureSocket(matches: [(10, 2), (30, 12), (50, 2)], maxOffset: 200, viewportRows: 40)
+        defer { socket.stop() }
+        let store = ClaudeTranscriptStore()
+        let device = Device(name: "fixture", kind: .local, socketPath: socket.path)
+        let service = HerdrService(device: device, autoStartLocalServer: false)
+        _ = try await service.connect()
+        let provider = ClaudeHistoryProvider(store: store, device: device, service: service)
+        let page = try await provider.read(target: "w:p", expectedSessionID: sessionID, window: .latest, limits: .init())
+        let second = try XCTUnwrap(page.messages.first { $0.id == "u2" })
+        let result = try await provider.jump(target: "w:p", expectedSessionID: sessionID,
+                                             expectedGeneration: try XCTUnwrap(page.binding?.generation),
+                                             messageID: "u2", messageRevision: second.messageRevision)
         await service.disconnect()
-        let requests = socket.requests
-        XCTAssertEqual(requests.count, 9)
-        XCTAssertEqual(requests.first?["method"] as? String, "ping")
-        XCTAssertTrue(requests.dropFirst().allSatisfy { ["agent.conversation.read", "agent.conversation.block.read"].contains($0["method"] as? String ?? "") })
-        for request in requests.dropFirst() {
-            let params = try XCTUnwrap(request["params"] as? [String: Any])
-            XCTAssertEqual(params["target"] as? String, "w:p")
-            XCTAssertEqual(params["expected_session_id"] as? String, "s")
-            XCTAssertNil(params["path"])
+        await store.stopAll()
+        XCTAssertEqual(result.sourceRow, 50)
+        XCTAssertEqual(result.offsetFromBottom, 151, "row 50 lands one line below the viewport top")
+        let methods = socket.requests.compactMap { $0["method"] as? String }
+        XCTAssertEqual(methods, ["ping", "pane.copy_motion", "pane.copy_search", "pane.get", "pane.copy_motion", "pane.scroll"])
+        let search = try XCTUnwrap(socket.requests.first { $0["method"] as? String == "pane.copy_search" }?["params"] as? [String: Any])
+        XCTAssertEqual(search["query"] as? String, "continue")
+        XCTAssertEqual(search["content_revision"] as? Int, 42)
+        XCTAssertTrue(methods.allSatisfy { !["pane.send_input", "pane.send_text", "pane.send_keys", "agent.prompt"].contains($0) })
+    }
+
+    func testRowSelectionAccountsForScrolledOutAndQuotedPrompts() throws {
+        let target = ClaudeTranscriptIndex.JumpTarget(key: "continue", occurrence: 2, occurrences: 3)
+        // Only the two newest prompts are still in the scrollback.
+        XCTAssertEqual(try ClaudeHistoryProvider.row(for: target, in: [.init(row: 5, col: 2), .init(row: 9, col: 2)]), 9)
+        let oldest = ClaudeTranscriptIndex.JumpTarget(key: "continue", occurrence: 0, occurrences: 3)
+        XCTAssertThrowsError(try ClaudeHistoryProvider.row(for: oldest, in: [.init(row: 5, col: 2), .init(row: 9, col: 2)])) {
+            XCTAssertEqual($0 as? ConversationJumpNotice, .notFound)
+        }
+        let single = ClaudeTranscriptIndex.JumpTarget(key: "yes", occurrence: 0, occurrences: 1)
+        XCTAssertThrowsError(try ClaudeHistoryProvider.row(for: single, in: [.init(row: 1, col: 2), .init(row: 7, col: 2)])) {
+            XCTAssertEqual($0 as? ConversationJumpNotice, .ambiguous, "an older session's prompt in the scrollback")
+        }
+        XCTAssertThrowsError(try ClaudeHistoryProvider.row(for: single, in: [.init(row: 1, col: 20)])) {
+            XCTAssertEqual($0 as? ConversationJumpNotice, .notFound)
         }
     }
-    func testOldServerRemainsConnectedWhileHistoryIsUnavailable() async throws {
-        let socket = try HistoryFixtureSocket(supported: false)
-        defer { socket.stop() }
-        let service = HerdrService(device: .init(name: "fixture", kind: .local, socketPath: socket.path), autoStartLocalServer: false)
-        _ = try await service.connect()
-        do {
-            _ = try await ClaudeHistoryProvider(service: service).read(target: "w:p", expectedSessionID: "s", window: .latest, limits: .init())
-            XCTFail("old server should not receive a history RPC")
-        } catch { XCTAssertEqual(error as? ConversationHistoryError, .unsupportedServer) }
-        let snapshot = try await service.snapshot()
-        XCTAssertEqual(snapshot.agents.count, 0)
-        XCTAssertEqual(socket.requests.compactMap { $0["method"] as? String }, ["ping", "session.snapshot"])
-        await service.disconnect()
-    }
-    func testJumpUsesExactIdentityAndScrollIsViewportOnly() async throws {
-        let socket = try HistoryFixtureSocket(supported: true, jumpSupported: true)
-        defer { socket.stop() }
-        let service = HerdrService(device: .init(name: "fixture", kind: .local, socketPath: socket.path), autoStartLocalServer: false)
-        _ = try await service.connect()
-        let jump = try await ClaudeHistoryProvider(service: service).jump(target: "w:p", expectedSessionID: "s", expectedGeneration: "g", messageID: "m", messageRevision: "mr")
-        XCTAssertEqual(jump.messageID, "m"); XCTAssertEqual(jump.sourceRow, 17)
-        try await service.scrollPane(paneID: "w:p", offsetFromBottom: 9)
-        try await service.scrollToBottom(paneID: "w:p")
-        await service.disconnect()
-        let requests = socket.requests
-        XCTAssertEqual(requests.compactMap { $0["method"] as? String }, ["ping", "agent.conversation.jump", "pane.scroll", "pane.scroll"])
-        let params = try XCTUnwrap(requests[1]["params"] as? [String: Any])
-        XCTAssertEqual(params["expected_generation"] as? String, "g")
-        XCTAssertEqual(params["expected_session_id"] as? String, "s")
-        XCTAssertEqual(params["message_id"] as? String, "m")
-        XCTAssertEqual(params["message_revision"] as? String, "mr")
-        XCTAssertEqual(params["target"] as? String, "w:p"); XCTAssertNil(params["path"])
-        XCTAssertEqual((requests[2]["params"] as? [String: Any])?["offset_from_bottom"] as? Int, 9)
-        XCTAssertEqual((requests[3]["params"] as? [String: Any])?["offset_from_bottom"] as? Int, 0)
-        XCTAssertTrue(requests.allSatisfy { !["pane.send_input", "agent.send", "pane.write"].contains($0["method"] as? String ?? "") })
-    }
-    func testMissingJumpCapabilityPreservesOrdinaryHistory() async throws {
-        let socket = try HistoryFixtureSocket(supported: true, jumpSupported: false)
-        defer { socket.stop() }
-        let service = HerdrService(device: .init(name: "fixture", kind: .local, socketPath: socket.path), autoStartLocalServer: false)
-        _ = try await service.connect()
-        let provider = ClaudeHistoryProvider(service: service)
-        do {
-            _ = try await provider.jump(target: "w:p", expectedSessionID: "s", expectedGeneration: "g", messageID: "m", messageRevision: "mr")
-            XCTFail("unadvertised jump should not be sent")
-        } catch { XCTAssertEqual(error as? ConversationJumpNotice, .unsupportedServer) }
-        let page = try await provider.read(target: "w:p", expectedSessionID: "s", window: .latest, limits: .init())
-        XCTAssertEqual(page.binding?.sessionID, "s")
-        XCTAssertEqual(socket.requests.compactMap { $0["method"] as? String }, ["ping", "agent.conversation.read"])
-        await service.disconnect()
+
+    func testOffsetClampsToTheScrollback() {
+        let metrics = PaneScrollMetrics(offsetFromBottom: 0, maxOffsetFromBottom: 100, viewportRows: 40)
+        XCTAssertEqual(ClaudeHistoryProvider.offset(showing: 0, metrics: metrics), 100)
+        XCTAssertEqual(ClaudeHistoryProvider.offset(showing: 61, metrics: metrics), 40)
+        XCTAssertEqual(ClaudeHistoryProvider.offset(showing: 139, metrics: metrics), 0)
     }
 }
 
-/// Synthetic private socket only; never opens the user's daemon or reads a transcript.
-private final class HistoryFixtureSocket: @unchecked Sendable {
+/// Synthetic private socket only; never opens the user's daemon.
+private final class PaneFixtureSocket: @unchecked Sendable {
     let path: String
     private let lock = NSLock()
     private var recorded: [[String: Any]] = []
     private let listener: Int32
     private var stopped = false
     var requests: [[String: Any]] { lock.lock(); defer { lock.unlock() }; return recorded }
-    init(supported: Bool, jumpSupported: Bool = false) throws {
+
+    init(matches: [(row: Int, col: Int)], maxOffset: Int, viewportRows: Int) throws {
         path = "/tmp/hhist-\(UUID().uuidString.prefix(8)).sock"
         listener = socket(AF_UNIX, SOCK_STREAM, 0)
         guard listener >= 0 else { throw HerdrError.connectionFailed("fixture socket") }
@@ -98,6 +155,7 @@ private final class HistoryFixtureSocket: @unchecked Sendable {
         let status = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(listener, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
         guard status == 0, listen(listener, 8) == 0 else { close(listener); throw HerdrError.connectionFailed("fixture bind") }
         let listening = listener
+        let ranges = matches.map { ["start": ["row": $0.row, "col": $0.col], "end": ["row": $0.row, "col": $0.col + 8]] }
         Thread.detachNewThread { [weak self] in
             while true {
                 let connection = accept(listening, nil, nil)
@@ -109,16 +167,22 @@ private final class HistoryFixtureSocket: @unchecked Sendable {
                       let request = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let self else { continue }
                 self.lock.lock(); self.recorded.append(request); self.lock.unlock()
-                let method = request["method"] as? String ?? ""
+                let params = request["params"] as? [String: Any] ?? [:]
                 let result: [String: Any]
-                switch method {
+                switch request["method"] as? String ?? "" {
                 case "ping":
-                    result = supported ? ["type": "pong", "version": "fixture", "protocol": 17, "capabilities": ["agent_conversation_read": true, "agent_conversation_block_read": true, "agent_conversation_jump": jumpSupported]] : ["type": "pong", "version": "fixture", "protocol": 17]
-                case "agent.conversation.jump": result = ["type": "agent_conversation_jump", "binding": ["provider": "claude", "session_id": "s", "generation": "g"], "message_id": "m", "message_revision": "mr", "content_seq": 42, "source_row": 17, "offset_from_bottom": 9]
-                case "pane.scroll": result = ["type": "pane_scrolled"]
-                case "session.snapshot": result = ["type": "session_snapshot", "snapshot": ["agents": [], "workspaces": []]]
-                case "agent.conversation.block.read": result = ["type": "agent_conversation_block", "binding": ["provider": "claude", "session_id": "s", "generation": "g"], "revision": "1", "message_id": "m", "message_revision": "mr", "block_id": "b", "kind": "text", "text": "🌍\n", "slice_index": 1]
-                default: result = ["type": "agent_conversation", "binding": ["provider": "claude", "session_id": "s", "generation": "g"], "revision": "1", "availability": "ready"]
+                    result = ["type": "pong", "version": "fixture", "protocol": 17]
+                case "pane.copy_motion":
+                    result = ["type": "pane_copy_motion", "pane_id": "w:p", "cursor": ["row": 0, "col": 0], "content_revision": 42]
+                case "pane.copy_search":
+                    result = ["type": "pane_copy_search", "pane_id": "w:p", "content_revision": 42, "matches": ranges, "total": ranges.count]
+                case "pane.get":
+                    result = ["type": "pane_info", "pane": ["scroll": ["offset_from_bottom": 0, "max_offset_from_bottom": maxOffset, "viewport_rows": viewportRows]]]
+                case "pane.scroll":
+                    let offset = params["offset_from_bottom"] as? Int ?? 0
+                    result = ["type": "pane_info", "pane": ["scroll": ["offset_from_bottom": offset, "max_offset_from_bottom": maxOffset, "viewport_rows": viewportRows]]]
+                default:
+                    result = ["type": "unknown"]
                 }
                 guard var reply = try? JSONSerialization.data(withJSONObject: ["id": request["id"] ?? "fixture", "ok": true, "result": result]) else { continue }
                 reply.append(10)
@@ -126,6 +190,7 @@ private final class HistoryFixtureSocket: @unchecked Sendable {
             }
         }
     }
+
     func stop() {
         lock.lock(); defer { lock.unlock() }
         guard !stopped else { return }; stopped = true
