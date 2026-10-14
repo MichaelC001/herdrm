@@ -171,7 +171,5 @@ schemes:
       config: Debug
     test:
       config: Debug
-      environmentVariables:
-        HERDRM_TEST_MODE: "1"
       targets:
         - HerdrMTests

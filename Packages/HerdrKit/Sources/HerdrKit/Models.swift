@@ -45,7 +45,6 @@ public struct AgentInfo: Codable, Sendable, Identifiable, Equatable {
     /// tag and Claude stats, herdr-agent-quota's `quota_*`, radar's glyphs, …
     /// Missing on older servers and on panes no plugin has tagged yet.
     public let tokens: [String: String]?
-    public var agentSession: AgentSessionRef? = nil
 
     public var id: String { paneID }
     public var status: AgentStatus { AgentStatus(wire: agentStatusRaw) }
@@ -70,8 +69,7 @@ public struct AgentInfo: Codable, Sendable, Identifiable, Equatable {
             focused: focused,
             cwd: cwd,
             revision: revision,
-            tokens: tokens,
-            agentSession: agentSession
+            tokens: tokens
         )
     }
 
@@ -170,7 +168,6 @@ public struct AgentInfo: Codable, Sendable, Identifiable, Equatable {
         case cwd
         case revision
         case tokens
-        case agentSession = "agent_session"
     }
 }
 
@@ -210,7 +207,6 @@ public struct PaneInfo: Codable, Sendable, Identifiable, Equatable {
     public let terminalTitle: String?
     public let cwd: String?
     public let revision: Int?
-    public var agentSession: AgentSessionRef? = nil
 
     public var id: String { paneID }
     public var hasAgent: Bool { agentKindRaw != nil }
@@ -225,7 +221,6 @@ public struct PaneInfo: Codable, Sendable, Identifiable, Equatable {
         case terminalTitle = "terminal_title"
         case cwd
         case revision
-        case agentSession = "agent_session"
     }
 }
 
@@ -318,12 +313,10 @@ public struct SessionSnapshot: Codable, Sendable, Equatable {
 public struct PingResult: Codable, Sendable {
     public let version: String
     public let protocolVersion: Int
-    public var capabilities: ConversationServerCapabilities? = nil
 
     enum CodingKeys: String, CodingKey {
         case version
         case protocolVersion = "protocol"
-        case capabilities
     }
 }
 

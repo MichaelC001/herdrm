@@ -174,17 +174,7 @@ final class AppModel: ObservableObject {
         }
     }
     private static let deviceFilterKey = "device.filter"
-    @Published var sessions: [UUID: DeviceSessionState] = [:] {
-        didSet { synchronizeConversationHistory() }
-    }
-    let conversationHistory = ConversationHistoryController()
-    private var isConversationHistoryVisible = false
-    @Published private(set) var conversationCanReturnToLive = false
-    private let conversationViewportMutations = ConversationViewportMutationLane()
-    private var conversationNavigationPane: PaneRef?
-    private var conversationNavigationSessionID: String?
-    private var conversationLastVisible = false
-    private var conversationResumeNeedsLatest = false
+    @Published var sessions: [UUID: DeviceSessionState] = [:]
     @Published var selectedSpace: SpaceRef?
     @Published var selectedPane: PaneRef? {
         didSet {
@@ -198,31 +188,20 @@ final class AppModel: ObservableObject {
                 snapPaneViewportToBottom(pane)
                 refreshSelectedTabLayout()
             }
-            synchronizeConversationHistory()
         }
     }
 
-    /// Selecting a pane begins at its live origin viewport. Explicit history
-    /// jumps then move that viewport; their task waits for this initial snap.
+    /// herdr keeps a server-side viewport per pane that HerdrM never scrolls
+    /// (ghostty owns the scrollback here), yet statusline plugins such as
+    /// herdr-agent-quota refuse to update a pane while that viewport is
+    /// scrolled up — a stale offset silently freezes the sidebar stats lines.
+    /// Showing a pane in HerdrM means the user is at the live bottom, so snap
+    /// herdr's viewport there too. Best effort: a failure changes nothing.
     private func snapPaneViewportToBottom(_ pane: PaneRef) {
         guard let device = device(pane.deviceID) else { return }
         let service = service(for: device)
-        conversationViewportMutations.submit(kind: .snap, key: "\(pane.deviceID)-\(pane.paneID)") { [weak self] in
-            guard let self, self.selectedPane == pane else { return }
-            do {
-                try await service.scrollToBottom(paneID: pane.paneID)
-                guard self.selectedPane == pane else { return }
-                self.conversationCanReturnToLive = false
-                if self.isClaudeHistorySelected {
-                    self.conversationHistory.showLatest()
-                    if self.conversationWindowIsVisible {
-                        self.conversationResumeNeedsLatest = false
-                        if let entry = self.selectedAttachedEntry {
-                            AttachViewRegistry.view(for: entry.id)?.performBindingAction("scroll_to_bottom")
-                        }
-                    }
-                }
-            } catch { /* A disconnected source will be retried on reappearance. */ }
+        Task {
+            try? await service.scrollToBottom(paneID: pane.paneID)
         }
     }
 
@@ -279,9 +258,7 @@ final class AppModel: ObservableObject {
     @Published var showNewTerminal = false
     @Published var showNewSpace = false
     @Published var showSearch = false
-    @Published var isFileManagerActive = false {
-        didSet { synchronizeConversationHistory() }
-    }
+    @Published var isFileManagerActive = false
     @Published var shellSplitAxis: SplitAxis?
     /// Set by `reveal` when a jump lands while the local-shell split is open, and consumed once the
     /// main window is key again. Only an actual jump sets it: dismissing the search with
@@ -310,9 +287,7 @@ final class AppModel: ObservableObject {
     /// Standalone terminals. Their views stay alive while deselected —
     /// unlike agents, a local shell has no server side to reattach to.
     @Published var shellSessions: [ShellSession] = []
-    @Published var selectedShellID: UUID? {
-        didSet { synchronizeConversationHistory() }
-    }
+    @Published var selectedShellID: UUID?
     /// In-window device panel (NSPopover crashes in ViewBridge on macOS 26+ betas).
     @Published var showDevicePanel = false
     /// Machine stats under the terminal: the sampler state lives in its own object so its
@@ -799,123 +774,6 @@ final class AppModel: ObservableObject {
         return nil
     }
 
-    var isClaudeHistorySelected: Bool {
-        guard !isFileManagerActive, selectedShellID == nil,
-              let entry = selectedEntry else { return false }
-        return ["claude", "claude-code"].contains(entry.agent.agent.lowercased())
-    }
-
-    func setConversationHistoryVisible(_ visible: Bool) {
-        isConversationHistoryVisible = visible
-        synchronizeConversationHistory()
-    }
-
-    func refreshConversationHistoryVisibility() {
-        synchronizeConversationHistory()
-    }
-
-    func jumpToConversationTurn(_ turnID: String) {
-        guard isClaudeHistorySelected, let entry = selectedEntry,
-              let attachedID = selectedAttachedEntry?.id,
-              attachedID == AttachedEntry.agent(entry).id else { return }
-        let sessionID = entry.agent.agentSession?.sessionID
-        conversationHistory.close()
-        conversationViewportMutations.submit(kind: .jump, key: attachedID) { [weak self] in
-            guard let self else { return }
-            guard self.isClaudeHistorySelected, self.conversationWindowIsVisible,
-                  self.selectedAttachedEntry?.id == attachedID,
-                  self.selectedEntry?.agent.agentSession?.sessionID == sessionID else { return }
-            let result = await self.conversationHistory.jump(turnID: turnID)
-            guard self.isClaudeHistorySelected, self.conversationWindowIsVisible,
-                  self.selectedAttachedEntry?.id == attachedID,
-                  self.selectedEntry?.agent.agentSession?.sessionID == sessionID else { return }
-            if let result {
-                // Reveal the daemon's new source viewport in its retained native
-                // projection only after a verified jump; failures keep the view.
-                AttachViewRegistry.view(for: attachedID)?.performBindingAction("scroll_to_bottom")
-                self.conversationCanReturnToLive = result.offsetFromBottom > 0
-            }
-            AttachViewRegistry.focus(attachedID)
-        }
-    }
-
-    func returnConversationToLive() {
-        guard isClaudeHistorySelected, let entry = selectedEntry,
-              let attachedID = selectedAttachedEntry?.id,
-              attachedID == AttachedEntry.agent(entry).id else { return }
-        let sessionID = entry.agent.agentSession?.sessionID
-        conversationViewportMutations.submit(kind: .live, key: attachedID) { [weak self] in
-            guard let self else { return }
-            guard self.isClaudeHistorySelected, self.conversationWindowIsVisible,
-                  self.selectedAttachedEntry?.id == attachedID,
-                  self.selectedEntry?.agent.agentSession?.sessionID == sessionID else { return }
-            do {
-                try await self.service(for: entry.device).scrollToBottom(paneID: entry.ref.paneID)
-                guard self.isClaudeHistorySelected, self.conversationWindowIsVisible,
-                      self.selectedAttachedEntry?.id == attachedID,
-                      self.selectedEntry?.agent.agentSession?.sessionID == sessionID else { return }
-                AttachViewRegistry.view(for: attachedID)?.performBindingAction("scroll_to_bottom")
-                self.conversationCanReturnToLive = false
-                self.conversationHistory.showLatest()
-                AttachViewRegistry.focus(attachedID)
-            } catch { /* Existing terminal remains usable; another click can retry. */ }
-        }
-    }
-
-    private var conversationWindowIsVisible: Bool {
-        guard isConversationHistoryVisible, !NSApplication.shared.isHidden else { return false }
-        let window = selectedAttachedEntry.flatMap { AttachViewRegistry.view(for: $0.id)?.window }
-            ?? NSApplication.shared.mainWindow
-        return window.map { $0.isVisible && !$0.isMiniaturized } ?? false
-    }
-
-    /// History follows the live agent reference, including a new Claude session
-    /// reported in a pane whose selection has not changed.
-    private func synchronizeConversationHistory() {
-        guard isClaudeHistorySelected, let entry = selectedEntry else {
-            if let previousPane = conversationNavigationPane {
-                // Files or a standalone shell can cover a retained pane without
-                // changing selectedPane. Reconcile after any dispatched jump.
-                conversationResumeNeedsLatest = true
-                snapPaneViewportToBottom(previousPane)
-            }
-            conversationLastVisible = false
-            conversationNavigationPane = nil; conversationNavigationSessionID = nil
-            conversationCanReturnToLive = false
-            conversationHistory.stop()
-            return
-        }
-        let pane = PaneRef(deviceID: entry.device.id, paneID: entry.agent.paneID)
-        let sessionID = entry.agent.agentSession?.sessionID
-        if conversationNavigationPane != pane || conversationNavigationSessionID != sessionID {
-            conversationNavigationPane = pane; conversationNavigationSessionID = sessionID
-            conversationCanReturnToLive = false
-            conversationHistory.close()
-        }
-        conversationHistory.select(
-            deviceID: entry.device.id,
-            paneID: entry.agent.paneID,
-            session: entry.agent.agentSession,
-            provider: ClaudeHistoryProvider(service: service(for: entry.device))
-        )
-        let connected: Bool
-        if case .connected = session(entry.device.id).connection { connected = true }
-        else { connected = false }
-        let visible = connected && conversationWindowIsVisible
-        if conversationLastVisible && !visible && conversationViewportMutations.isRunning {
-            conversationResumeNeedsLatest = true
-            snapPaneViewportToBottom(pane)
-        }
-        if !conversationLastVisible && visible && conversationResumeNeedsLatest {
-            snapPaneViewportToBottom(pane)
-        }
-        conversationLastVisible = visible
-        conversationHistory.setVisible(visible)
-        if visible && conversationResumeNeedsLatest {
-            conversationHistory.showLatest()
-        }
-    }
-
     /// The tab holding the selected pane.
     var selectedTabRef: TabRef? {
         if let entry = selectedEntry {
@@ -1263,9 +1121,6 @@ final class AppModel: ObservableObject {
     // MARK: - Lifecycle
 
     func start() {
-        // Hosted UI tests use fixture models; never attach their app host to
-        // the user's running agents merely because a window appears.
-        guard ProcessInfo.processInfo.environment["HERDRM_TEST_MODE"] != "1" else { return }
         NotificationManager.shared.setup(model: self)
         // Finder-launched apps have launchd's PATH. Capture the login +
         // interactive shell environment on a background thread once; New Agent
@@ -1692,8 +1547,6 @@ final class AppModel: ObservableObject {
     /// Tears down every live tunnel. Awaited from the app's terminate hook — `stopSession`
     /// fires its disconnect in a detached `Task`, which never runs when the process is exiting.
     func shutdownAllSessions() async {
-        conversationViewportMutations.discardPending()
-        conversationHistory.stop()
         let live = services
         services.removeAll()
         sessionTasks.values.forEach { $0.cancel() }
