@@ -1,0 +1,31 @@
+name: Verify HerdrSSH artifacts
+
+# The prebuilt libssh2 / OpenSSL frameworks can't be reviewed by reading the
+# diff, so any change to them, or to how they're built, runs the checks in
+# Packages/HerdrSSH/Scripts/verify-native.sh (checksums, slices, deployment
+# target, OpenSSL signature and team, disabled algorithms).
+on:
+  pull_request:
+    paths:
+      - "Packages/HerdrSSH/**"
+      - "project.yml"
+      - ".github/workflows/verify-artifacts.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Packages/HerdrSSH/**"
+      - "project.yml"
+      - ".github/workflows/verify-artifacts.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verify native artifacts
+        run: Packages/HerdrSSH/Scripts/verify-native.sh

@@ -1,0 +1,13 @@
+# Changes here can reach every user's machine through a signed release or
+# Sparkle auto-update, or ship binaries that can't be reviewed by reading the
+# diff. They need the owner's review.
+/.github/                            @missuo
+/project.yml                         @missuo
+/Makefile                            @missuo
+/Packages/*/Package.swift            @missuo
+/Packages/HerdrSSH/Artifacts/        @missuo
+/Packages/HerdrSSH/Scripts/          @missuo
+/Packages/HerdrSSH/Patches/          @missuo
+/Packages/HerdrSSH/Sources.lock      @missuo
+/AGENTS.md                           @missuo
+/CLAUDE.md                           @missuo
