@@ -4790,6 +4790,40 @@
         }
       }
     },
+    "Loading the saved conversation…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading the saved conversation…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在加载已保存的对话…"
+          }
+        }
+      }
+    },
+    "Saved conversation history is not available for this device.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved conversation history is not available for this device."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此设备不支持查看已保存的对话历史。"
+          }
+        }
+      }
+    },
     "The saved conversation is no longer available on this device.": {
       "extractionState": "manual",
       "localizations": {
@@ -4858,19 +4892,19 @@
         }
       }
     },
-    "herdr does not have permission to read this saved conversation.": {
+    "HerdrM does not have permission to read this saved conversation.": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "herdr does not have permission to read this saved conversation."
+            "value": "HerdrM does not have permission to read this saved conversation."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "herdr 没有权限读取此已保存的对话。"
+            "value": "HerdrM 没有权限读取此已保存的对话。"
           }
         }
       }
