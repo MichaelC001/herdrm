@@ -189,6 +189,7 @@ final class ConversationHistoryDrawerTests: XCTestCase {
         let root = HistoryTerminalFixture(terminal: terminal, controller: controller)
         let hosted = show(root, width: 800, height: 500)
         let initial = terminal.bounds.size
+        XCTAssertEqual(initial, NSSize(width: 800 - ConversationHistoryOverlay.gutterWidth, height: 500))
         controller.open(turnID: "turn-1")
         settle()
         if let content = hosted.contentView, let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) {
@@ -216,11 +217,13 @@ final class ConversationHistoryDrawerTests: XCTestCase {
         let center = terminal.convert(NSPoint(x: terminal.bounds.midX, y: terminal.bounds.midY), to: nil)
         let content = try XCTUnwrap(hosted.contentView)
         XCTAssertTrue(content.hitTest(center) === terminal, "The native hit-test target outside rail/History is the retained terminal")
-        XCTAssertEqual(terminal.bounds.size, NSSize(width: 800, height: 500))
+        XCTAssertEqual(terminal.bounds.size, NSSize(width: 800 - ConversationHistoryOverlay.gutterWidth, height: 500))
         hosted.makeFirstResponder(terminal)
         XCTAssertTrue(hosted.firstResponder === terminal)
         let before = await provider.readWindows()
-        let hoverPoint = terminal.convert(NSPoint(x: 12, y: terminal.bounds.midY), to: nil)
+        let pointer = try railPointer(in: content)
+        let resting = ConversationRailGeometry(count: controller.turns.count, height: pointer.bounds.height)
+        let hoverPoint = pointer.convert(NSPoint(x: pointer.bounds.midX, y: resting.position(of: 0)), to: nil)
         hosted.sendEvent(try XCTUnwrap(NSEvent.mouseEvent(with: .mouseMoved, location: hoverPoint, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: hosted.windowNumber, context: nil, eventNumber: 2, clickCount: 0, pressure: 0)))
         settle()
         XCTAssertTrue(hosted.firstResponder === terminal, "Rail pointer preview must preserve terminal focus")
@@ -230,6 +233,66 @@ final class ConversationHistoryDrawerTests: XCTestCase {
         controller.open(turnID: "turn-1")
         settle()
         XCTAssertFalse(content.hitTest(center) === terminal, "The visible drawer owns pointer events inside its bounds")
+        controller.stop()
+    }
+
+    func testFirstTerminalColumnReceivesSelectionWithRestingAndHoveredRail() async throws {
+        let provider = HistoryViewFixtureProvider()
+        let controller = makeController(provider: provider)
+        await waitReady(controller)
+        let terminal = HistoryMouseTerminal()
+        var jumps: [String] = []
+        let hosted = show(HistoryTerminalFixture(terminal: terminal, controller: controller, onJump: { jumps.append($0) }), width: 800, height: 500)
+        hosted.makeKeyAndOrderFront(nil)
+        hosted.makeFirstResponder(terminal)
+        settle()
+        XCTAssertTrue(terminal.acceptsFirstMouse(for: nil), "The fixture accepts synthetic clicks even when the test runner app is inactive")
+
+        let content = try XCTUnwrap(hosted.contentView)
+        let pointer = try railPointer(in: content)
+        let railFrame = pointer.convert(pointer.bounds, to: content)
+        let terminalFrame = terminal.convert(terminal.bounds, to: content)
+        XCTAssertLessThanOrEqual(railFrame.maxX, terminalFrame.minX,
+                                 "Rail pointer bounds must end before the first terminal column")
+        XCTAssertEqual(terminalFrame.minX, ConversationHistoryOverlay.gutterWidth)
+        let resting = ConversationRailGeometry(count: controller.turns.count, height: pointer.bounds.height)
+        let railPoint = pointer.convert(NSPoint(x: pointer.bounds.midX, y: resting.position(of: 0)), to: nil)
+        let lineY = terminal.convert(railPoint, from: nil).y
+        let firstColumn = terminal.convert(NSPoint(x: 0.5, y: lineY), to: nil)
+        let selectionEnd = terminal.convert(NSPoint(x: HistoryMouseTerminal.cellWidth * 6 + 0.5, y: lineY), to: nil)
+        let before = await provider.readWindows()
+
+        func mouseEvent(_ type: NSEvent.EventType, at point: NSPoint, number: Int) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                                           timestamp: ProcessInfo.processInfo.systemUptime,
+                                           windowNumber: hosted.windowNumber, context: nil,
+                                           eventNumber: number, clickCount: 1,
+                                           pressure: type == .leftMouseUp ? 0 : 1))
+        }
+        let hover = try mouseEvent(.mouseMoved, at: railPoint, number: 10)
+        for isHovered in [false, true] {
+            if isHovered { pointer.mouseMoved(with: hover) }
+            else { pointer.mouseExited(with: hover) }
+            settle()
+            XCTAssertFalse(controller.isPresented)
+            XCTAssertTrue(content.hitTest(firstColumn) === terminal,
+                          "The beginning of a terminal line remains selectable while rail hover is \(isHovered)")
+            XCTAssertTrue(content.hitTest(selectionEnd) === terminal,
+                          "Even a preview drawn above the line must allow terminal text selection")
+            hosted.sendEvent(try mouseEvent(.leftMouseDown, at: firstColumn, number: 11))
+            hosted.sendEvent(try mouseEvent(.leftMouseDragged, at: selectionEnd, number: 12))
+            hosted.sendEvent(try mouseEvent(.leftMouseUp, at: selectionEnd, number: 13))
+            settle()
+            XCTAssertEqual(terminal.selectedText, "First ")
+            XCTAssertEqual(try XCTUnwrap(terminal.selectionStart).x, 0.5, accuracy: 0.01)
+            XCTAssertTrue(hosted.firstResponder === terminal,
+                          "Selecting terminal text must preserve its native keyboard focus")
+            XCTAssertTrue(jumps.isEmpty, "Text selection must not navigate the history")
+        }
+        XCTAssertEqual(terminal.clicks, 2)
+        XCTAssertEqual(terminal.drags, 2, "Both selection gestures reach the native terminal")
+        let after = await provider.readWindows()
+        XCTAssertEqual(after, before, "Terminal selection performs no history reads")
         controller.stop()
     }
 
@@ -248,6 +311,11 @@ final class ConversationHistoryDrawerTests: XCTestCase {
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         let content = try XCTUnwrap(hosted.contentView)
         let pointer = try XCTUnwrap(descendants(content).compactMap { $0 as? ConversationRailPointerView }.first)
+        let railFrame = pointer.convert(pointer.bounds, to: terminal)
+        XCTAssertLessThanOrEqual(railFrame.height, terminal.bounds.height * 0.75,
+                                 "Long histories must not stretch the rail over the whole terminal")
+        XCTAssertGreaterThanOrEqual(railFrame.minY, terminal.bounds.height * 0.2,
+                                    "The rail leaves the lower terminal input and status area clear")
         XCTAssertFalse(pointer.acceptsFirstResponder)
         XCTAssertTrue(pointer.acceptsFirstMouse(for: nil))
         XCTAssertFalse(pointer.isAccessibilityElement())
@@ -294,6 +362,10 @@ final class ConversationHistoryDrawerTests: XCTestCase {
     private func waitReady(_ controller: ConversationHistoryController) async {
         for _ in 0..<100 where controller.state != .ready { await Task.yield() }
         XCTAssertEqual(controller.state, .ready)
+    }
+    private func railPointer(in content: NSView) throws -> ConversationRailPointerView {
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        return try XCTUnwrap(descendants(content).compactMap { $0 as? ConversationRailPointerView }.first)
     }
     private func makeController(provider: any ConversationHistoryProviding) -> ConversationHistoryController {
         let controller = ConversationHistoryController()
@@ -424,7 +496,12 @@ private struct HistoryTerminalFixture: View {
     let terminal: NSView
     let controller: ConversationHistoryController
     var onJump: ((String) -> Void)? = nil
-    var body: some View { HistoryNativeTerminal(view: terminal).frame(maxWidth: .infinity, maxHeight: .infinity).overlay { ConversationHistoryOverlay(controller: controller, onJump: onJump) } }
+    var body: some View {
+        HistoryNativeTerminal(view: terminal)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.leading, ConversationHistoryOverlay.gutterWidth)
+            .overlay { ConversationHistoryOverlay(controller: controller, onJump: onJump) }
+    }
 }
 private struct HistoryNativeTerminal: NSViewRepresentable {
     let view: NSView
@@ -433,10 +510,30 @@ private struct HistoryNativeTerminal: NSViewRepresentable {
 }
 
 private final class HistoryMouseTerminal: NSView {
+    static let cellWidth: CGFloat = 8
+    private let line = "First column selection fixture"
     var clicks = 0
+    var drags = 0
+    private(set) var selectionStart: NSPoint?
+    private(set) var selectedText = ""
     override var acceptsFirstResponder: Bool { true }
+    // Injected sendEvent does not activate the test application through the
+    // WindowServer. Accept that first click so this fixture exercises native
+    // event dispatch rather than testing application-activation policy.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) {
         clicks += 1
+        selectionStart = convert(event.locationInWindow, from: nil)
+        selectedText = ""
         window?.makeFirstResponder(self)
+    }
+    override func mouseDragged(with event: NSEvent) {
+        drags += 1
+        guard let selectionStart else { return }
+        let end = convert(event.locationInWindow, from: nil)
+        let characters = Array(line)
+        let lower = min(characters.count, max(0, Int(min(selectionStart.x, end.x) / Self.cellWidth)))
+        let upper = min(characters.count, max(lower, Int(max(selectionStart.x, end.x) / Self.cellWidth)))
+        selectedText = String(characters[lower..<upper])
     }
 }
