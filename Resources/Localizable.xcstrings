@@ -4790,6 +4790,23 @@
         }
       }
     },
+    "Finding the prompt…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finding the prompt…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在查找该提示…"
+          }
+        }
+      }
+    },
     "Loading the saved conversation…": {
       "extractionState": "manual",
       "localizations": {

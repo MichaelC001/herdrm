@@ -25,10 +25,11 @@ public struct ClaudeHistoryProvider: ConversationHistoryProviding {
     private let appScroll: AppScroll?
     /// Fullscreen jumps give up after this many pages and return to the bottom.
     static let maximumPages = 120
+    /// How long a page may take to redraw before the history counts as at its top.
     private let pageSettle: Duration
 
     public init(store: ClaudeTranscriptStore, device: Device, service: HerdrService,
-                appScroll: AppScroll? = nil, pageSettle: Duration = .milliseconds(120)) {
+                appScroll: AppScroll? = nil, pageSettle: Duration = .milliseconds(250)) {
         self.store = store
         self.device = device
         self.service = service
@@ -87,23 +88,60 @@ public struct ClaudeHistoryProvider: ConversationHistoryProviding {
     /// Pages the program's own history up until the prompt is on screen. Scrolling up,
     /// the first match is the newest one, so only the newest of the prompts sharing
     /// this start can be found this way. Returns to the bottom when it gives up.
+    ///
+    /// Each page costs one screen read once the redraw has settled, searched here: a
+    /// copy-mode search would need two more round trips per page to the device.
     private func pageAppHistory(_ pane: String, for wanted: ClaudeTranscriptIndex.JumpTarget,
                                 result: (Int, UInt64, Int, Bool) -> ConversationJumpResult) async throws -> ConversationJumpResult {
         guard let appScroll, wanted.occurrence == wanted.occurrences - 1 else { throw ConversationJumpNotice.notFound }
-        var previousScreen = try await service.readPaneText(paneID: pane)
+        var screen = try await service.readPaneText(paneID: pane)
         for page in 1...Self.maximumPages {
             guard await appScroll(.pageUp) else { throw ConversationJumpNotice.unavailable }
-            try await Task.sleep(for: pageSettle)
-            if let found = try await search(pane, for: wanted.key),
-               let match = found.matches.filter({ $0.col <= 4 }).max(by: { $0.row < $1.row }) {
-                return result(match.row, found.contentRevision, page, true)
+            guard let next = try await settledScreen(pane, after: screen) else { break }  // top of the history
+            screen = next
+            if let row = Self.promptRow(of: wanted.key, in: screen) {
+                return result(row, 0, page, true)
             }
-            let screen = try await service.readPaneText(paneID: pane)
-            if screen == previousScreen { break }  // top of the history
-            previousScreen = screen
         }
         _ = await appScroll(.toBottom)
         throw ConversationJumpNotice.notFound
+    }
+
+    /// The screen once the program has redrawn after a key: read until its history part
+    /// differs from `previous` and two reads in a row agree, so a half-drawn frame is
+    /// never searched. nil when nothing moved within `pageSettle`: the top of the history.
+    private func settledScreen(_ pane: String, after previous: String) async throws -> String? {
+        let deadline = ContinuousClock.now + pageSettle
+        let before = Self.historyPart(previous)
+        var last = before
+        while true {
+            try await Task.sleep(for: Self.pollInterval)
+            let screen = try await service.readPaneText(paneID: pane)
+            let history = Self.historyPart(screen)
+            let moved = history != before
+            if moved, history == last { return screen }
+            if !moved, ContinuousClock.now >= deadline { return nil }
+            if moved, ContinuousClock.now >= deadline + pageSettle { return screen }
+            last = history
+        }
+    }
+
+    /// The upper two thirds of the screen. A working Claude redraws its spinner and
+    /// status lines at the bottom all the time; only the history above them scrolls.
+    static func historyPart(_ screen: String) -> ArraySlice<Substring> {
+        let rows = screen.split(separator: "\n", omittingEmptySubsequences: false)
+        return rows.prefix(max(1, rows.count * 2 / 3))
+    }
+
+    static let pollInterval: Duration = .milliseconds(15)
+
+    /// The row on `screen` where a prompt starting with `key` is drawn at the left edge.
+    static func promptRow(of key: String, in screen: String) -> Int? {
+        let rows = screen.split(separator: "\n", omittingEmptySubsequences: false)
+        return rows.lastIndex { row in
+            guard let range = row.range(of: key) else { return false }
+            return row.distance(from: row.startIndex, to: range.lowerBound) <= 4
+        }
     }
 
     /// One copy-mode search; nil when output landed between reading the revision and searching.

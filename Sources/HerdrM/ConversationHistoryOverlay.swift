@@ -29,6 +29,7 @@ private struct ConversationOverlayContent: View {
         GeometryReader { geometry in
             let railViewport = ConversationRailViewport(height: geometry.size.height)
             ZStack(alignment: .topTrailing) {
+                JumpCover(active: controller.isJumping)
                 HStack(spacing: 0) {
                     VStack(spacing: 6) {
                         ConversationTimelineRail(controller: controller, previewWidth: min(320, max(0, geometry.size.width - 76)), onJump: onJump)
@@ -74,5 +75,26 @@ private struct ConversationOverlayContent: View {
             }
             .onChange(of: controller.jumpNotice?.message) { _, _ in noticeDismissed = false }
         }
+    }
+}
+
+/// Hides the terminal while a jump pages the agent's own history (fullscreen Claude
+/// redraws every page), so only the landing shows. It fades in late enough that a
+/// jump within herdr's scrollback, which lands at once, never flashes it.
+private struct JumpCover: View {
+    let active: Bool
+    var body: some View {
+        ZStack {
+            Theme.terminalBackground.opacity(0.94)
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Finding the prompt…").font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+            }
+        }
+        .opacity(active ? 1 : 0)
+        .animation(active ? .easeIn(duration: 0.12).delay(0.15) : .easeOut(duration: 0.1), value: active)
+        .allowsHitTesting(false)
+        .accessibilityHidden(!active)
+        .accessibilityIdentifier("history.jumpCover")
     }
 }

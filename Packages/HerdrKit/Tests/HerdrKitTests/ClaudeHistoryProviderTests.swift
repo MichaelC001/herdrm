@@ -130,7 +130,7 @@ final class ClaudeHistoryProviderTests: XCTestCase {
         _ = try await service.connect()
         let provider = ClaudeHistoryProvider(store: store, device: device, service: service,
                                              appScroll: { key in pages.press(key); return true },
-                                             pageSettle: .milliseconds(1))
+                                             pageSettle: .milliseconds(60))
         let page = try await provider.read(target: "w:p", expectedSessionID: sessionID, window: .latest, limits: .init())
         let message = try XCTUnwrap(page.messages.first { $0.id == "u\(index)" })
         let outcome: Result<ConversationJumpResult, Error>
@@ -181,6 +181,12 @@ final class ClaudeHistoryProviderTests: XCTestCase {
         XCTAssertThrowsError(try ClaudeHistoryProvider.row(for: single, in: [.init(row: 1, col: 20)])) {
             XCTAssertEqual($0 as? ConversationJumpNotice, .notFound)
         }
+    }
+
+    func testPromptRowFindsThePromptAtTheLeftEdgeOnly() {
+        let screen = "● Claude said: ❯ first\n\n❯ first question here\n  quoting first"
+        XCTAssertEqual(ClaudeHistoryProvider.promptRow(of: "first", in: screen), 2)
+        XCTAssertNil(ClaudeHistoryProvider.promptRow(of: "missing", in: screen))
     }
 
     func testOffsetClampsToTheScrollback() {
@@ -250,7 +256,12 @@ private final class PaneFixtureSocket: @unchecked Sendable {
                     }
                     result = ["type": "pane_copy_search", "pane_id": "w:p", "content_revision": 42, "matches": found, "total": found.count]
                 case "pane.read":
-                    result = ["type": "pane_read", "read": ["text": "screen \(min(pages?.value ?? 0, topAtPage))"]]
+                    // 40 rows: history on top, a spinner that never stops at the bottom.
+                    let page = min(pages?.value ?? 0, topAtPage)
+                    var rows = (0..<40).map { "history page \(page) row \($0)" }
+                    if let after = matchAfterPages, page >= after { rows[12] = "❯ first" }
+                    rows[39] = "✻ Working… \(UUID().uuidString.prefix(4))"
+                    result = ["type": "pane_read", "read": ["text": rows.joined(separator: "\n")]]
                 case "pane.get":
                     result = ["type": "pane_info", "pane": ["scroll": ["offset_from_bottom": 0, "max_offset_from_bottom": maxOffset, "viewport_rows": viewportRows]]]
                 case "pane.scroll":
