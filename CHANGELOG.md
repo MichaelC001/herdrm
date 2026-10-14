@@ -5,7 +5,7 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
-## [Unreleased]
+## [0.6.17] - 2026-10-13
 
 ### Changed
 - **⌘D splits the herdr pane.** ⌘D and ⇧⌘D now add a herdr pane to the right
@@ -46,6 +46,7 @@ the Sparkle update description — a release without a section here fails CI.
   0 with the current libghostty (the PTY resize callback does not carry it).
   The cell size now comes from Ghostty's grid resize delegate, with a fallback
   derived from the surface size.
+
 ## [0.6.16] - 2026-10-13
 
 ### Added
