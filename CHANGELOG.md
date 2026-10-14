@@ -5,6 +5,13 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
+## [Unreleased]
+
+### Fixed
+- A request no longer fails with "setsockopt(SO_RCVTIMEO): Invalid argument"
+  when herdr answers and closes the connection before herdrm reads the
+  answer; the answer is read instead.
+
 ## [0.6.17] - 2026-10-13
 
 ### Changed
