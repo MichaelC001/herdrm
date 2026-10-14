@@ -926,9 +926,14 @@ final class AppModel: ObservableObject {
             session: entry.agent.agentSession,
             provider: ClaudeHistoryProvider(
                 store: claudeTranscripts, device: entry.device, service: service(for: entry.device),
-                appScroll: { [attachedID = AttachedEntry.agent(entry).id] key in
-                    await MainActor.run { AttachViewRegistry.view(for: attachedID)?.sendAppScrollKey(key) ?? false }
-                }
+                appTerminal: { [attachedID = AttachedEntry.agent(entry).id] in
+                    AppTerminal(
+                        press: { key in
+                            await MainActor.run { AttachViewRegistry.view(for: attachedID)?.sendAppScrollKey(key) ?? false }
+                        },
+                        screen: { await MainActor.run { AttachViewRegistry.view(for: attachedID)?.viewportText() } }
+                    )
+                }()
             )
         )
         let connected: Bool

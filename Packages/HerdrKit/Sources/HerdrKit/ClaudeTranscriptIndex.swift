@@ -481,6 +481,22 @@ public struct ClaudeTranscriptIndex: Sendable {
         public let key: String
         public let occurrence: Int
         public let occurrences: Int
+        /// Character counts of the lines shown below the prompt (one per text line, one
+        /// per tool call), to estimate how far up a terminal must scroll to reach it.
+        public let linesBelow: [Int]
+        public init(key: String, occurrence: Int, occurrences: Int, linesBelow: [Int] = []) {
+            self.key = key
+            self.occurrence = occurrence
+            self.occurrences = occurrences
+            self.linesBelow = linesBelow
+        }
+
+        /// Rows those lines take in a terminal `columns` wide, one blank row between messages
+        /// not counted: a lower bound, so a scroll aimed by it lands short, not past.
+        public func rowsBelow(columns: Int) -> Int {
+            let width = max(20, columns)
+            return linesBelow.reduce(0) { $0 + max(1, ($1 + width - 1) / width) }
+        }
     }
 
     public func jumpTarget(messageID: String, messageRevision: String) throws -> JumpTarget {
@@ -492,7 +508,13 @@ public struct ClaudeTranscriptIndex: Sendable {
         guard let occurrence = sharing.firstIndex(where: { $0.id == messageID }) else {
             throw ConversationJumpNotice.unavailable
         }
-        return JumpTarget(key: key, occurrence: occurrence, occurrences: sharing.count)
+        let below = messages[(position + 1)...].flatMap { later in
+            later.blocks.flatMap { block -> [Int] in
+                guard block.kind != "tool_use" else { return [1] }
+                return (block.text ?? "").split(separator: "\n", omittingEmptySubsequences: false).map(\.count)
+            }
+        }
+        return JumpTarget(key: key, occurrence: occurrence, occurrences: sharing.count, linesBelow: below)
     }
 
     private static func jumpKey(_ message: Message) -> String? {

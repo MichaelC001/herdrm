@@ -4,7 +4,20 @@ import Foundation
 /// Claude's fullscreen renderer keeps its transcript itself and scrolls it on these.
 public enum AppScrollKey: Sendable {
     case pageUp
+    case pageDown
     case toBottom
+}
+
+/// The agent's terminal as HerdrM shows it: keys typed into the attach, and the visible
+/// screen read from HerdrM's own copy of it, without a round trip to the device.
+public struct AppTerminal: Sendable {
+    public let press: @Sendable (AppScrollKey) async -> Bool
+    public let screen: @Sendable () async -> String?
+    public init(press: @escaping @Sendable (AppScrollKey) async -> Bool,
+                screen: @escaping @Sendable () async -> String?) {
+        self.press = press
+        self.screen = screen
+    }
 }
 
 #if os(macOS)
@@ -14,26 +27,25 @@ public enum AppScrollKey: Sendable {
 /// beyond the Claude session id it already reports for the pane.
 ///
 /// Claude in fullscreen mode draws on the alternate screen, so herdr holds no
-/// scrollback for it. The jump then pages Claude's own history up through `appScroll`
+/// scrollback for it. The jump then pages Claude's own history through `appTerminal`
 /// (keys typed into the attach, as the user would) until the prompt is on screen.
 public struct ClaudeHistoryProvider: ConversationHistoryProviding {
-    public typealias AppScroll = @Sendable (AppScrollKey) async -> Bool
-
     private let store: ClaudeTranscriptStore
     private let device: Device
     private let service: HerdrService
-    private let appScroll: AppScroll?
+    private let appTerminal: AppTerminal?
     /// Fullscreen jumps give up after this many pages and return to the bottom.
     static let maximumPages = 120
-    /// How long a page may take to redraw before the history counts as at its top.
+    /// How long a page may take to redraw before the history counts as at an end.
     private let pageSettle: Duration
+    static let pollInterval: Duration = .milliseconds(8)
 
     public init(store: ClaudeTranscriptStore, device: Device, service: HerdrService,
-                appScroll: AppScroll? = nil, pageSettle: Duration = .milliseconds(250)) {
+                appTerminal: AppTerminal? = nil, pageSettle: Duration = .milliseconds(250)) {
         self.store = store
         self.device = device
         self.service = service
-        self.appScroll = appScroll
+        self.appTerminal = appTerminal
         self.pageSettle = pageSettle
     }
 
@@ -72,8 +84,8 @@ public struct ClaudeHistoryProvider: ConversationHistoryProviding {
                 let row: Int
                 do {
                     row = try Self.row(for: wanted, in: found.matches)
-                } catch ConversationJumpNotice.notFound where metrics.maxOffsetFromBottom == 0 && appScroll != nil {
-                    return try await pageAppHistory(target, for: wanted, result: result)
+                } catch ConversationJumpNotice.notFound where metrics.maxOffsetFromBottom == 0 && appTerminal != nil {
+                    return try await pageAppHistory(for: wanted, result: result)
                 }
                 guard try await service.paneContentRevision(paneID: target) == found.contentRevision else { continue }
                 let landed = try await service.scrollPane(paneID: target, offsetFromBottom: Self.offset(showing: row, metrics: metrics))
@@ -85,41 +97,72 @@ public struct ClaudeHistoryProvider: ConversationHistoryProviding {
         }
     }
 
-    /// Pages the program's own history up until the prompt is on screen. Scrolling up,
-    /// the first match is the newest one, so only the newest of the prompts sharing
-    /// this start can be found this way. Returns to the bottom when it gives up.
+    /// Pages the program's own history until the prompt is on screen. Scrolling up, the
+    /// first match is the newest one, so only the newest of the prompts sharing this start
+    /// can be found this way.
     ///
-    /// Each page costs one screen read once the redraw has settled, searched here: a
-    /// copy-mode search would need two more round trips per page to the device.
-    private func pageAppHistory(_ pane: String, for wanted: ClaudeTranscriptIndex.JumpTarget,
+    /// After one page it knows how far a page scrolls, and the transcript says roughly how
+    /// many rows lie below the prompt, so it skips most of the way in one burst of keys
+    /// (aimed short), then searches page by page. Reaching the top without a match means
+    /// the burst overshot: it goes back to where the burst landed and searches downward.
+    /// Screens are read from HerdrM's own terminal, so a page costs no round trip to the device.
+    private func pageAppHistory(for wanted: ClaudeTranscriptIndex.JumpTarget,
                                 result: (Int, UInt64, Int, Bool) -> ConversationJumpResult) async throws -> ConversationJumpResult {
-        guard let appScroll, wanted.occurrence == wanted.occurrences - 1 else { throw ConversationJumpNotice.notFound }
-        var screen = try await service.readPaneText(paneID: pane)
-        for page in 1...Self.maximumPages {
-            guard await appScroll(.pageUp) else { throw ConversationJumpNotice.unavailable }
-            guard let next = try await settledScreen(pane, after: screen) else { break }  // top of the history
-            screen = next
-            if let row = Self.promptRow(of: wanted.key, in: screen) {
-                return result(row, 0, page, true)
-            }
+        guard let terminal = appTerminal, wanted.occurrence == wanted.occurrences - 1 else {
+            throw ConversationJumpNotice.notFound
         }
-        _ = await appScroll(.toBottom)
+        guard var screen = await terminal.screen() else { throw ConversationJumpNotice.unavailable }
+        var page = 0
+        func found() -> ConversationJumpResult? {
+            Self.promptRow(of: wanted.key, in: screen).map { result($0, 0, max(1, page), true) }
+        }
+        /// Presses `key` `count` times; false when the screen did not move (an end of the history).
+        func scroll(_ key: AppScrollKey, _ count: Int = 1) async throws -> Bool {
+            for _ in 0..<count {
+                guard await terminal.press(key) else { throw ConversationJumpNotice.unavailable }
+            }
+            // A burst redraws for a while; wait for it to hold still longer.
+            guard let next = try await settledScreen(terminal, after: screen, steadyPolls: count > 1 ? 6 : 2) else { return false }
+            screen = next
+            page += key == .pageUp ? count : -count
+            return true
+        }
+
+        let start = screen
+        guard try await scroll(.pageUp) else { throw ConversationJumpNotice.notFound }
+        if let hit = found() { return hit }
+        let rows = Self.historyPart(screen).count
+        let shift = Self.scrollShift(from: start, to: screen) ?? max(1, rows - 2)
+        let columns = screen.split(separator: "\n").map(\.count).max() ?? 80
+        let burst = Int(Double(wanted.rowsBelow(columns: columns)) * 0.6) / max(1, shift) - page
+        if burst >= 2, try await scroll(.pageUp, burst), let hit = found() { return hit }
+        let landing = page
+        while page < Self.maximumPages, try await scroll(.pageUp) {
+            if let hit = found() { return hit }
+        }
+        // At the top: the prompt lies in what the burst skipped, below the landing point.
+        if page > landing, try await scroll(.pageDown, page - landing), let hit = found() { return hit }
+        while page > 1, try await scroll(.pageDown) {
+            if let hit = found() { return hit }
+        }
+        _ = await terminal.press(.toBottom)
         throw ConversationJumpNotice.notFound
     }
 
     /// The screen once the program has redrawn after a key: read until its history part
-    /// differs from `previous` and two reads in a row agree, so a half-drawn frame is
-    /// never searched. nil when nothing moved within `pageSettle`: the top of the history.
-    private func settledScreen(_ pane: String, after previous: String) async throws -> String? {
+    /// differs from `previous` and holds still for `steadyPolls` polls, so a half-drawn
+    /// frame is never searched. nil when nothing moved within `pageSettle`: an end of the history.
+    private func settledScreen(_ terminal: AppTerminal, after previous: String, steadyPolls: Int) async throws -> String? {
         let deadline = ContinuousClock.now + pageSettle
         let before = Self.historyPart(previous)
-        var last = before
+        var last = before, steady = 0
         while true {
             try await Task.sleep(for: Self.pollInterval)
-            let screen = try await service.readPaneText(paneID: pane)
+            guard let screen = await terminal.screen() else { throw ConversationJumpNotice.unavailable }
             let history = Self.historyPart(screen)
             let moved = history != before
-            if moved, history == last { return screen }
+            steady = history == last ? steady + 1 : 0
+            if moved, steady >= steadyPolls { return screen }
             if !moved, ContinuousClock.now >= deadline { return nil }
             if moved, ContinuousClock.now >= deadline + pageSettle { return screen }
             last = history
@@ -133,7 +176,17 @@ public struct ClaudeHistoryProvider: ConversationHistoryProviding {
         return rows.prefix(max(1, rows.count * 2 / 3))
     }
 
-    static let pollInterval: Duration = .milliseconds(15)
+    /// How many rows a page key moved the history up the screen's content: where a line
+    /// unique to the old screen's history now sits. nil when none of it is left on screen.
+    static func scrollShift(from old: String, to new: String) -> Int? {
+        let before = Array(historyPart(old)), after = Array(historyPart(new))
+        let counts = Dictionary(before.map { ($0, 1) }, uniquingKeysWith: +)
+        for (index, line) in before.enumerated()
+        where !line.trimmingCharacters(in: .whitespaces).isEmpty && counts[line] == 1 {
+            if let moved = after.firstIndex(of: line), moved > index { return moved - index }
+        }
+        return nil
+    }
 
     /// The row on `screen` where a prompt starting with `key` is drawn at the left edge.
     static func promptRow(of key: String, in screen: String) -> Int? {
