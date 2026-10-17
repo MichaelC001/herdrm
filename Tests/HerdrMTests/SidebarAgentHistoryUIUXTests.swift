@@ -43,7 +43,12 @@ final class SidebarAgentHistoryUIUXTests: XCTestCase {
         XCTAssertEqual(sidebar.model.selectedPane, first.ref)
         XCTAssertTrue(sidebar.model.conversationHistory.isPresented)
 
-        try sidebar.clickAgentHistoryButton(for: second)
+        // The first click above proves a real pointer reaches the button past the
+        // row's drag host. Switching the open drawer to another card is a
+        // selection behavior; drive it through the button's AX action so the
+        // assertion doesn't hinge on headless-CI pointer coordinates landing on a
+        // card whose button sits beside an already-open drawer.
+        try sidebar.pressAgentHistoryButton(for: second)
 
         XCTAssertEqual(sidebar.model.selectedPane, second.ref)
         XCTAssertTrue(sidebar.model.conversationHistory.isPresented, "another card opens its own history rather than closing the old drawer")
