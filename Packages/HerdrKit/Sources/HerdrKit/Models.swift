@@ -45,6 +45,7 @@ public struct AgentInfo: Codable, Sendable, Identifiable, Equatable {
     /// tag and Claude stats, herdr-agent-quota's `quota_*`, radar's glyphs, …
     /// Missing on older servers and on panes no plugin has tagged yet.
     public let tokens: [String: String]?
+    public var agentSession: AgentSessionRef? = nil
 
     public var id: String { paneID }
     public var status: AgentStatus { AgentStatus(wire: agentStatusRaw) }
@@ -69,7 +70,8 @@ public struct AgentInfo: Codable, Sendable, Identifiable, Equatable {
             focused: focused,
             cwd: cwd,
             revision: revision,
-            tokens: tokens
+            tokens: tokens,
+            agentSession: agentSession
         )
     }
 
@@ -168,6 +170,7 @@ public struct AgentInfo: Codable, Sendable, Identifiable, Equatable {
         case cwd
         case revision
         case tokens
+        case agentSession = "agent_session"
     }
 }
 
@@ -207,6 +210,7 @@ public struct PaneInfo: Codable, Sendable, Identifiable, Equatable {
     public let terminalTitle: String?
     public let cwd: String?
     public let revision: Int?
+    public var agentSession: AgentSessionRef? = nil
 
     public var id: String { paneID }
     public var hasAgent: Bool { agentKindRaw != nil }
@@ -221,6 +225,7 @@ public struct PaneInfo: Codable, Sendable, Identifiable, Equatable {
         case terminalTitle = "terminal_title"
         case cwd
         case revision
+        case agentSession = "agent_session"
     }
 }
 
@@ -401,4 +406,32 @@ public enum HerdrError: Error, LocalizedError, Sendable {
 public enum TerminalAttachTarget: Sendable, Equatable {
     case agent(paneID: String)
     case terminal(terminalID: String)
+}
+
+/// A pane's server-side viewport, from `pane.get`.
+public struct PaneScrollMetrics: Sendable, Equatable {
+    public let offsetFromBottom: Int
+    public let maxOffsetFromBottom: Int
+    public let viewportRows: Int
+    public init(offsetFromBottom: Int, maxOffsetFromBottom: Int, viewportRows: Int) {
+        self.offsetFromBottom = offsetFromBottom
+        self.maxOffsetFromBottom = maxOffsetFromBottom
+        self.viewportRows = viewportRows
+    }
+}
+
+/// Where a `pane.copy_search` match starts; rows count from the top of the scrollback.
+public struct PaneTextMatch: Sendable, Equatable {
+    public let row: Int
+    public let col: Int
+    public init(row: Int, col: Int) {
+        self.row = row
+        self.col = col
+    }
+}
+
+public struct PaneSearchResult: Sendable, Equatable {
+    public let contentRevision: UInt64
+    public let matches: [PaneTextMatch]
+    public let total: Int
 }

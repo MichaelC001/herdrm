@@ -576,10 +576,7 @@ public actor HerdrService {
     /// script) skip every metadata update while it is scrolled up, which
     /// silently freezes the sidebar stats lines.
     public func scrollToBottom(paneID: String) async throws {
-        _ = try await client().request(
-            method: "pane.scroll",
-            params: .object(["pane_id": .string(paneID), "offset_from_bottom": .number(0)])
-        )
+        try await scrollPane(paneID: paneID, offsetFromBottom: 0)
     }
 
     /// Moves the pane's server-side viewport `offsetFromBottom` rows up its
@@ -599,6 +596,61 @@ public actor HerdrService {
               let maxOffset = Self.integer(scroll?["max_offset_from_bottom"])
         else { return nil }
         return (Int(offset), Int(maxOffset))
+    }
+
+    /// The pane's server-side viewport: where it sits and how far it can scroll.
+    public func paneScrollMetrics(paneID: String) async throws -> PaneScrollMetrics? {
+        let result = try await client().request(
+            method: "pane.get",
+            params: .object(["pane_id": .string(paneID)])
+        )
+        let scroll = result["pane"]?["scroll"]
+        guard let offset = Self.integer(scroll?["offset_from_bottom"]),
+              let maxOffset = Self.integer(scroll?["max_offset_from_bottom"]),
+              let rows = Self.integer(scroll?["viewport_rows"])
+        else { return nil }
+        return PaneScrollMetrics(offsetFromBottom: Int(offset), maxOffsetFromBottom: Int(maxOffset), viewportRows: Int(rows))
+    }
+
+    /// herdr's revision of the pane's text, which `searchPane` has to quote. Read with a
+    /// no-op copy-mode motion, the one official method that reports it.
+    public func paneContentRevision(paneID: String) async throws -> UInt64 {
+        let result = try await client().request(
+            method: "pane.copy_motion",
+            params: .object([
+                "pane_id": .string(paneID),
+                "cursor": .object(["row": .number(0), "col": .number(0)]),
+                "motion": .string("line_end"),
+            ])
+        )
+        guard let revision = Self.integer(result["content_revision"]) else {
+            throw HerdrError.rpc(code: "jump_unavailable", message: "pane.copy_motion returned no content revision")
+        }
+        return revision
+    }
+
+    /// Every match of `query` in the pane's retained text, top to bottom. Rows count
+    /// from the top of the scrollback, the way `pane.scroll` offsets are measured.
+    public func searchPane(paneID: String, query: String, contentRevision: UInt64) async throws -> PaneSearchResult {
+        let result = try await client().request(
+            method: "pane.copy_search",
+            params: .object([
+                "pane_id": .string(paneID),
+                "query": .string(query),
+                "direction": .string("forward"),
+                "cursor": .object(["row": .number(0), "col": .number(0)]),
+                "content_revision": .number(Double(contentRevision)),
+            ])
+        )
+        let matches: [PaneTextMatch] = (result["matches"]?.arrayValue ?? []).compactMap { range in
+            guard let row = Self.integer(range["start"]?["row"]), let col = Self.integer(range["start"]?["col"]) else { return nil }
+            return PaneTextMatch(row: Int(row), col: Int(col))
+        }
+        return PaneSearchResult(
+            contentRevision: Self.integer(result["content_revision"]) ?? contentRevision,
+            matches: matches,
+            total: Self.integer(result["total"]).map(Int.init) ?? matches.count
+        )
     }
 
     /// Rows the pane's server-side viewport sits above the bottom (0 = at bottom).

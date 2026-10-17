@@ -11,6 +11,22 @@ the Sparkle update description — a release without a section here fails CI.
 - **New Agent and New Terminal from a space's menu.** Right-click a space in
   the sidebar to start an agent or a terminal in it, without selecting it
   first.
+- **Claude conversation history, read by HerdrM itself.** A thin prompt rail
+  floats over the terminal edge, blurred when idle and clear on hover, with a
+  prompt/reply preview per mark. Clicking a mark scrolls the agent's terminal to
+  that prompt; an arrow returns to live output. The bubble on each Claude agent's
+  sidebar card, or ⇧⌘H, opens the full conversation: Claude's replies, search,
+  older/newer paging, collapsed tool activity, and reading or copying a complete
+  message. Works with official herdr 0.9 and later; nothing on the server
+  changes. HerdrM reads the transcript Claude Code already writes
+  (`~/.claude/projects/…/<session>.jsonl`) on the device running the agent: a
+  local file for Local, one SSH stream per open conversation for SSH devices,
+  and nothing over Tailcat. The jump uses herdr's own pane search and scroll to
+  reach a prompt still in the pane's scrollback. Claude in fullscreen mode keeps
+  its own history, so there HerdrM presses PageUp in the terminal until the prompt
+  is on screen, and ⌃End when you return to live (only the newest of repeated
+  prompts can be found this way). A prompt the terminal cannot show opens in the
+  reader instead.
 
 ### Fixed
 - A request no longer fails with "setsockopt(SO_RCVTIMEO): Invalid argument"

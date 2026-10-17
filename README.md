@@ -49,6 +49,7 @@ macOS window on top of it, and it's grown well past "attach to a terminal":
 | 📁 **Move files** | Browse Local + SSH files side by side and copy in either direction |
 | 🔔 **Notifications** | A system alert the moment an agent needs you — click it to jump right there |
 | 🔍 **⌘K search** | Every agent, on every device, one keystroke away |
+| 💬 **Claude history** | A prompt timeline and full saved conversation, including replies, search and copy |
 
 <details>
 <summary><strong>See the full feature list</strong></summary>
@@ -91,6 +92,17 @@ macOS window on top of it, and it's grown well past "attach to a terminal":
   of freezing on the last frame; mixed-version `herdr` binaries no longer break attach.
 
 ### Files, search, and staying in the loop
+- **Claude conversation history** — select a Claude agent. A thin timeline floats over
+  the left edge of the terminal; hover it for a prompt/reply preview, click a mark to scroll
+  the terminal to that prompt, and use the arrow at the bottom to return to live output. The
+  bubble on each Claude agent's sidebar card, or **⇧⌘H**, opens the full conversation with
+  search, older/newer paging, collapsed tool activity and complete-message reading and copying.
+  HerdrM reads the transcript Claude Code writes on the agent's device (locally, or over one SSH
+  stream per open conversation), so it works with any official herdr 0.9+ and needs no server
+  changes; Tailcat devices have no shell access and show no history. A jump searches the pane's
+  scrollback with herdr's own copy-mode search and scrolls herdr's viewport. Claude's fullscreen
+  mode keeps its own history: there HerdrM presses PageUp in the terminal until the prompt shows,
+  and ⌃End to return to live. A prompt the terminal can't show opens in the reader instead.
 - **Two-pane file manager** — browse Local and any configured SSH device side by side, then
   upload or download regular files with progress, cancellation, and explicit Replace / Keep
   Both conflict handling. Transfers use the same OpenSSH config, agent, host-key, and Keychain
@@ -179,8 +191,8 @@ flowchart LR
   over a local Unix socket.
 - **`Packages/HerdrKit`** — transport and domain layer, UI-independent and unit-tested on its
   own (`make kit-test`).
-- **`Sources/HerdrM`** — the SwiftUI shell built on
-  [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm).
+- **`Sources/HerdrM`** — the SwiftUI shell with an embedded
+  [Ghostty terminal](https://github.com/Lakr233/libghostty-spm).
 
 ## 🔨 Build from source
 

@@ -88,10 +88,26 @@ struct RootView: View {
         .focusedSceneValue(\.appModel, model)
         .focusedSceneValue(\.splitAxis, model.shellSplitAxis)
         .focusedSceneValue(\.tabLayoutActive, model.visibleTabLayout != nil)
+        .focusedSceneValue(\.claudeHistorySelected, model.isClaudeHistorySelected)
         .sheet(isPresented: $model.showSearch) { SearchSheet(model: model) }
         .ignoresSafeArea(.container, edges: .top)
         .frame(minWidth: 980, minHeight: 620)
         .onAppear { model.start() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didHideNotification)) { _ in
+            model.refreshConversationHistoryVisibility()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didUnhideNotification)) { _ in
+            model.refreshConversationHistoryVisibility()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didMiniaturizeNotification)) { _ in
+            model.refreshConversationHistoryVisibility()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didDeminiaturizeNotification)) { _ in
+            model.refreshConversationHistoryVisibility()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            model.refreshConversationHistoryVisibility()
+        }
         .sheet(isPresented: $model.showAddDevice) { AddDeviceSheet(model: model) }
         .newItemSheets(model: model)
         .sheet(item: $model.spaceToRename) { entry in RenameSpaceSheet(model: model, entry: entry) }
@@ -565,6 +581,25 @@ struct DetailView: View {
                 // down: its content survives the round trip. Do not key this on the
                 // selection; that rebuild-on-switch is exactly what this removes.
                 tabLayoutArea(selected: entry)
+                    // Reserve a column for history so its marks cannot intercept
+                    // selection at the beginning of a terminal line. Keep padding
+                    // structural so the retained terminal views keep their identity.
+                    .padding(.leading, model.isClaudeHistorySelected ? ConversationHistoryOverlay.gutterWidth : 0)
+                    .overlay {
+                        if model.isClaudeHistorySelected {
+                            ConversationHistoryOverlay(
+                                controller: model.conversationHistory,
+                                onClose: {
+                                    if let selected = model.selectedAttachedEntry { AttachViewRegistry.focus(selected.id) }
+                                },
+                                onJump: { model.jumpToConversationTurn($0) },
+                                canReturnToLive: model.conversationCanReturnToLive,
+                                onReturnToLive: { model.returnConversationToLive() }
+                            )
+                            .onAppear { model.setConversationHistoryVisible(true) }
+                            .onDisappear { model.setConversationHistoryVisible(false) }
+                        }
+                    }
             } second: {
                 ShellTerminalView(
                     fontName: terminalFontName,
