@@ -10,7 +10,11 @@ struct VisualEffectView: NSViewRepresentable {
         let view = NSVisualEffectView()
         view.material = material
         view.blendingMode = .behindWindow
-        view.state = .active
+        // Drawn without blending, the sidebar material is the system's opaque
+        // sidebar color (the one Finder shows in a background window). Blending
+        // let a white window behind HerdrM lift the dark sidebar from gray ~42
+        // to ~81, where the section text and header buttons wash out.
+        view.state = .inactive
         return view
     }
 
@@ -351,7 +355,7 @@ struct SidebarView: View {
                 SpaceAttentionGlyph(attention: model.scopeAttention)
                 Text("\(model.scopeAgentCount)")
                     .font(.system(size: 11))
-                    .foregroundStyle(Theme.textGhost)
+                    .foregroundStyle(selected ? Theme.text : Theme.textSecondary) // the name's color
             }
             .padding(.horizontal, 8)
             .frame(height: 30)
@@ -751,9 +755,10 @@ struct SidebarHeaderButton: View {
 
     var body: some View {
         Button(action: action) {
+            // The section title's color: ghost gray was under 2.2:1 on the sidebar.
             Image(systemName: systemName)
                 .font(.system(size: 11.5))
-                .foregroundStyle(Theme.textGhost)
+                .foregroundStyle(Theme.textTertiary)
                 .frame(width: 20, height: 20)
                 .contentShape(Rectangle())
         }
@@ -1059,7 +1064,7 @@ private struct SpaceRowView: View {
             }
             Text("\(model.agentCount(in: entry))")
                 .font(.system(size: 11))
-                .foregroundStyle(Theme.textGhost)
+                .foregroundStyle(selected ? Theme.text : Theme.textSecondary) // the name's color
         }
         .padding(.horizontal, 8)
         .frame(height: 30)

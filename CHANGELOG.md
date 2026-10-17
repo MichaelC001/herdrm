@@ -11,6 +11,14 @@ the Sparkle update description — a release without a section here fails CI.
 - A request no longer fails with "setsockopt(SO_RCVTIMEO): Invalid argument"
   when herdr answers and closes the connection before herdrm reads the
   answer; the answer is read instead.
+- **Section buttons and space counts are readable.** The New Space / New
+  Agent / New Terminal buttons on the section headers now use the header
+  title's color, and each space's agent count uses the space name's color.
+  Both were drawn in the faintest gray and often could not be seen at all.
+- **The sidebar no longer shows what is behind the window.** It used to blur
+  the desktop or window behind HerdrM, so a bright window there washed the
+  dark sidebar out to a mid gray and its labels, counts and header buttons
+  faded. It is now the system's solid sidebar color in both light and dark.
 
 ## [0.6.17] - 2026-10-13
 
