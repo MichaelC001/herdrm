@@ -1,0 +1,5 @@
+# False positives, checked 2026-10-15:
+# - project.yml: SUPublicEDKey is Sparkle's public key, published by design.
+# - SessionDriverE2ETests.swift: a property declaration (privateKey: Curve25519.Signing.PrivateKey), no key value.
+20daf96963b282244edf1e2d2803139ade269367:Packages/HerdrSSH/Tests/HerdrSSHTests/SessionDriverE2ETests.swift:generic-api-key:1664
+8510fbe1c91c295138abf3e11123536bf44615a0:project.yml:generic-api-key:41

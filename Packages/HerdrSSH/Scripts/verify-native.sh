@@ -6,7 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PROJECT_DIR="$(cd "${PACKAGE_DIR}/../.." && pwd)"
 ARTIFACT_DIR="${PACKAGE_DIR}/Artifacts"
-EXPECTED_TARGET="$(awk -F'"' '/^[[:space:]]*iOS: / { print $2; exit }' "${PROJECT_DIR}/project.yml")"
+# The iOS app target's `deploymentTarget: "x.y"`, the first one after `platform: iOS`.
+EXPECTED_TARGET="$(awk -F'"' '/^[[:space:]]*platform: iOS/ { ios = 1 } ios && /^[[:space:]]*deploymentTarget: "/ { print $2; exit }' "${PROJECT_DIR}/project.yml")"
 EXPECTED_MAJOR="${EXPECTED_TARGET%%.*}"
 
 [[ -n "${EXPECTED_TARGET}" ]] || {

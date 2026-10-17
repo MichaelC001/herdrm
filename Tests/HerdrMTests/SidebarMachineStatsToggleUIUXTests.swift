@@ -61,11 +61,12 @@ final class SidebarMachineStatsToggleUIUXTests: XCTestCase {
 
         try Self.chooseViewMenuItem("Show Machine Stats")
         XCTAssertTrue(waitFor { !sidebar.showsMachineStats }, "meters still on screen")
-        XCTAssertEqual(try Self.openViewMenuItem("Show Machine Stats").state, .off)
+        // SwiftUI updates the checkmark asynchronously; a slower machine (CI) reads it late.
+        XCTAssertTrue(waitFor { (try? Self.openViewMenuItem("Show Machine Stats").state) == .off }, "checkmark still on")
 
         try Self.chooseViewMenuItem("Show Machine Stats")
         XCTAssertTrue(waitFor { sidebar.showsMachineStats }, "meters did not come back")
-        XCTAssertEqual(try Self.openViewMenuItem("Show Machine Stats").state, .on)
+        XCTAssertTrue(waitFor { (try? Self.openViewMenuItem("Show Machine Stats").state) == .on }, "checkmark did not come back")
     }
 
     // MARK: - Helpers
