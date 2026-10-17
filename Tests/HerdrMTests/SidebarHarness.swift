@@ -171,6 +171,8 @@ final class SidebarHarness {
                 .min { $0.frame!.minX < $1.frame!.minX },
             "no chevron on \(space)\n\(accessibilityDump)"
         )
+    }
+
     /// Open an individual card's history through its independent AX action.
     func pressAgentHistoryButton(for entry: AppModel.AgentEntry) throws {
         AccessibilityProbe.press(try historyButton(for: entry))
