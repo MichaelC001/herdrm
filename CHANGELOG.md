@@ -5,6 +5,16 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
+## [Unreleased]
+
+### Added
+- **Real thumbnails inside Claude's `[Image #N]` boxes.** Images you paste or
+  drop into a Claude pane now show as pictures in the bordered box above the
+  prompt, on Local and SSH devices alike. HerdrM draws them itself from the
+  image it delivered, so the preview no longer depends on Claude detecting a
+  picture-capable terminal. When HerdrM cannot tell which image a box belongs
+  to, it draws nothing rather than guessing.
+
 ## [0.6.18] - 2026-10-17
 
 ### Added
