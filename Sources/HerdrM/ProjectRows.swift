@@ -9,21 +9,26 @@ import SwiftUI
 struct ProjectTag: View {
     let text: LocalizedStringKey
     var tint: Color = Theme.textSecondary
+    var systemImage: String?
 
-    init(_ text: LocalizedStringKey, tint: Color = Theme.textSecondary) {
+    init(_ text: LocalizedStringKey, tint: Color = Theme.textSecondary, systemImage: String? = nil) {
         self.text = text
         self.tint = tint
+        self.systemImage = systemImage
     }
 
     var body: some View {
-        Text(text)
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 5)
-            .frame(height: 16)
-            .background(tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 4))
-            .lineLimit(1)
-            .fixedSize()
+        HStack(spacing: 3) {
+            if let systemImage { Image(systemName: systemImage).font(.system(size: 8.5)) }
+            Text(text)
+        }
+        .font(.system(size: 10, weight: .medium))
+        .foregroundStyle(tint)
+        .padding(.horizontal, 5)
+        .frame(height: 16)
+        .background(tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 4))
+        .lineLimit(1)
+        .fixedSize()
     }
 }
 
@@ -87,19 +92,21 @@ enum ProjectURLActions {
     }
 }
 
-/// The URL chips of one service: open, copy, and (for dev servers) set an override.
+/// The URL chips of one service: a globe, the link (or plain text when only the host can reach
+/// it) and, when `showsCopy`, a copy icon.
 struct ProjectURLButtons: View {
     let urls: [ProjectURL]
-    /// Non-nil adds a "Set URL…" popover that edits this service's override.
-    var onSetURL: ((String?) -> Void)?
-    var currentOverride: String?
     /// The device is not this Mac: a loopback-only URL would open the Mac's own localhost.
     var isRemote = false
-    @State private var editing = false
+    var showsCopy = true
 
     var body: some View {
         HStack(spacing: 4) {
             ForEach(Array(urls.enumerated()), id: \.offset) { _, url in
+                Image(systemName: "globe")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(Theme.textTertiary)
+                    .accessibilityHidden(true)
                 if isRemote && url.loopbackOnHost {
                     Text(verbatim: url.label)
                         .font(.system(size: 11.5, design: .monospaced))
@@ -117,19 +124,9 @@ struct ProjectURLButtons: View {
                     .buttonStyle(.link)
                     .help("Open this URL")
                 }
-                ProjectIconButton(systemImage: "doc.on.doc", label: "Copy URL") { ProjectURLActions.copy(url) }
-            }
-            if let onSetURL {
-                ProjectIconButton(systemImage: "link.badge.plus", label: "Set URL…") { editing = true }
-                    .popover(isPresented: $editing, arrowEdge: .bottom) {
-                        URLOverridePopover(
-                            initial: currentOverride ?? "",
-                            onSave: { value in
-                                onSetURL(value)
-                                editing = false
-                            },
-                            onCancel: { editing = false })
-                    }
+                if showsCopy {
+                    ProjectIconButton(systemImage: "doc.on.doc", label: "Copy URL") { ProjectURLActions.copy(url) }
+                }
             }
         }
     }
@@ -169,58 +166,6 @@ struct URLOverridePopover: View {
     private func save() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         onSave(trimmed.isEmpty ? nil : trimmed)
-    }
-}
-
-// MARK: - Dev servers
-
-struct DevServerRow: View {
-    let server: DevServer
-    let overrideURL: String?
-    var isRemote = false
-    /// Nil hides the "Set URL…" control (listeners that are not part of the project).
-    let onSetURL: ((String?) -> Void)?
-    let onToggleHidden: () -> Void
-
-    private var roleName: LocalizedStringKey {
-        switch server.role {
-        case .frontend: "Frontend"
-        case .backend: "Backend"
-        case .tooling: "Tooling"
-        case .other: "Other"
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 8) {
-            StatusDot(color: server.hotReload ? Theme.success : Theme.textTertiary)
-            Text(verbatim: server.framework)
-                .font(.system(size: ProjectMetrics.textSize, weight: .medium))
-                .foregroundStyle(server.isHidden ? Theme.textTertiary : Theme.text)
-            Text(roleName)
-                .font(.system(size: 11.5))
-                .foregroundStyle(Theme.textTertiary)
-            Text(verbatim: "\(server.bind):\(server.port)")
-                .font(.system(size: 11.5, design: .monospaced))
-                .foregroundStyle(Theme.textSecondary)
-            if server.isPublicBind {
-                ProjectTag("public", tint: Theme.warning)
-            } else {
-                ProjectTag("loopback only")
-            }
-            if let unit = server.unit {
-                ProjectVerbatimTag(text: unit, systemImage: "gearshape")
-            }
-            if let log = server.logPath {
-                ProjectVerbatimTag(text: (log as NSString).lastPathComponent, systemImage: "doc.text", help: log)
-            }
-            Spacer(minLength: 8)
-            ProjectURLButtons(urls: server.urls, onSetURL: onSetURL, currentOverride: overrideURL, isRemote: isRemote)
-            ProjectIconButton(
-                systemImage: server.isHidden ? "eye" : "eye.slash",
-                label: server.isHidden ? "Unhide" : "Hide", action: onToggleHidden)
-        }
-        .frame(minHeight: ProjectMetrics.rowHeight)
     }
 }
 

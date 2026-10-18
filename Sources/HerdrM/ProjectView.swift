@@ -338,27 +338,17 @@ private struct ProjectPanel: View {
             set: { if $0 { expanded.insert(id) } else { expanded.remove(id) } })
     }
 
-    private func devServerRow(_ server: DevServer, canSetURL: Bool) -> some View {
-        DevServerRow(
-            server: server,
-            overrideURL: server.urls.first { $0.source == .override }?.url,
-            isRemote: !context.device.isLocal,
-            onSetURL: canSetURL
-                ? { projects.setURLOverride(space: space, signature: server.signature, url: $0) } : nil,
-            onToggleHidden: {
-                projects.setHidden(space: space, signature: server.signature, hidden: !server.isHidden)
-            })
+    private func hotReloadSection(_ snapshot: ProjectSnapshot) -> some View {
+        ProjectHotReloadCard(
+            snapshot: snapshot, isRemote: !context.device.isLocal,
+            overrideURL: { $0.urls.first { $0.source == .override }?.url },
+            onSetURL: { projects.setURLOverride(space: space, signature: $0, url: $1) },
+            onToggleHidden: { toggleHidden($0, in: snapshot) })
     }
 
-    private func hotReloadSection(_ snapshot: ProjectSnapshot) -> some View {
-        let visible = snapshot.devServers.filter { !$0.isHidden }
-        return ProjectCard("Hot reload", count: visible.count, id: .hot) {
-            if visible.isEmpty { ProjectCardNote("No dev servers are running for this project.") }
-            ProjectCardList(visible) { devServerRow($0, canSetURL: true) }
-            if !snapshot.staleOverrides.isEmpty {
-                ProjectCardNote("URL overrides without a running server: \(snapshot.staleOverrides.joined(separator: ", "))")
-            }
-        }
+    private func toggleHidden(_ signature: String, in snapshot: ProjectSnapshot) {
+        let server = (snapshot.devServers + snapshot.otherListeners).first { $0.signature == signature }
+        projects.setHidden(space: space, signature: signature, hidden: !(server?.isHidden ?? false))
     }
 
     private func containerRow(_ container: ContainerRow, suggested: Bool = false, attached: Bool = false) -> some View {
@@ -488,31 +478,17 @@ private struct ProjectPanel: View {
     }
 
     private func otherListenersSection(_ snapshot: ProjectSnapshot) -> some View {
-        let visible = snapshot.otherListeners.filter { !$0.isHidden }
-        return Group {
-            if !visible.isEmpty {
-                ProjectDisclosureCard("Other listeners", count: visible.count, id: .other, isExpanded: binding("other")) {
-                    ProjectCardList(visible) { devServerRow($0, canSetURL: false) }
-                }
-            }
-        }
+        ProjectOtherListenersCard(
+            listeners: snapshot.otherListeners, isRemote: !context.device.isLocal,
+            isExpanded: binding("other"), onToggleHidden: { toggleHidden($0, in: snapshot) })
     }
 
-    /// Hidden servers and listeners, collapsed; each row keeps its Unhide button.
     private func hiddenSection(_ snapshot: ProjectSnapshot) -> some View {
-        let devHidden = snapshot.devServers.filter(\.isHidden)
-        let otherHidden = snapshot.otherListeners.filter(\.isHidden)
-        let count = devHidden.count + otherHidden.count
-        return Group {
-            if count > 0 {
-                ProjectDisclosureCard("Hidden (\(count))", id: .hidden, isExpanded: binding("hidden")) {
-                    ProjectCardList(
-                        devHidden.map { Keyed(id: "dev-\($0.id)", value: ($0, true)) }
-                            + otherHidden.map { Keyed(id: "other-\($0.id)", value: ($0, false)) }
-                    ) { devServerRow($0.value.0, canSetURL: $0.value.1) }
-                }
-            }
-        }
+        ProjectHiddenCard(
+            devServers: snapshot.devServers, listeners: snapshot.otherListeners,
+            isRemote: !context.device.isLocal, isExpanded: binding("hidden"),
+            onSetURL: { projects.setURLOverride(space: space, signature: $0, url: $1) },
+            onToggleHidden: { toggleHidden($0, in: snapshot) })
     }
 
     @ViewBuilder

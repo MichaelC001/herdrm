@@ -179,4 +179,19 @@ final class ProjectViewUIUXTests: XCTestCase {
         }
         XCTAssertFalse(label.contains("2"), "hidden server leaked into the count: \(label)")
     }
+
+    func testDevServerRowShowsTagsAndMoreMenu() throws {
+        let entry = ProjectInspectorModel.Entry(snapshot: snapshot(), state: .live, lastProbe: Date(), rawProbe: nil, localVMs: nil)
+        let (model, _) = try model(entry: entry)
+        let (window, _) = host(model)
+        defer { window.close() }
+        settle()
+        let all = elements(in: window)
+        let shown = texts(all)
+        for expected in ["hot reload", "acme-dev-fe.service", "acme-frontend-3100.log", "Frontend"] {
+            XCTAssertTrue(shown.contains(expected), "missing \(expected) in \(shown.sorted())")
+        }
+        XCTAssertNotNil(all.first { $0.name == "More" }, "no More menu on the dev server row")
+        XCTAssertNil(all.first { $0.role == "AXButton" && $0.name == "Hide" }, "Hide must live in the menu, not inline")
+    }
 }
