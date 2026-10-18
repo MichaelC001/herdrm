@@ -1022,7 +1022,7 @@ final class LineBreakTerminalView: AppTerminalView {
     private var thumbnailNextDelivery = 0
     private var thumbnailNextRecord = 0
     /// Finished deliveries waiting for an earlier one to record.
-    private var thumbnailFinishedDeliveries: [Int: (images: [(NSImage, String)], expiry: TimeInterval)] = [:]
+    private var thumbnailFinishedDeliveries: [Int: (images: [(NSImage, String)], expected: Int, expiry: TimeInterval)] = [:]
     /// Bumped by `resetThumbnails`, so a decode finishing afterwards is dropped.
     private var thumbnailGeneration = 0
     /// A delivery that has not recorded within this many seconds counts as
@@ -1034,6 +1034,9 @@ final class LineBreakTerminalView: AppTerminalView {
     private struct ThumbnailDeliveryToken {
         let generation: Int
         let sequence: Int
+        /// Images Claude will attach for this delivery. Recording fewer means
+        /// Claude draws a box nothing accounts for.
+        let expectedImages: Int
     }
 
     /// Deliveries begun but not yet recorded. Scans wait for them: a scan
@@ -1064,22 +1067,30 @@ final class LineBreakTerminalView: AppTerminalView {
         thumbnailFinishedDeliveries = [:]
         thumbnailNextRecord = thumbnailNextDelivery
         thumbnailGeneration += 1
+        thumbnailBurstDirty = false
     }
 
     /// Right before a delivery: a baseline scan marks the boxes already on
     /// screen as seen, so this paste cannot bind to them, and forgets bindings
     /// whose box is gone. Returns the token for `endThumbnailDelivery`, or nil
     /// when thumbnails are off or the delivery must record nothing.
+    /// `expectedImages` is how many images Claude will attach for it.
     ///
-    /// Call it before the delivery snaps herdr's history scroll back: scrolled
-    /// up, the viewport shows history, the baseline has just forgotten bindings
-    /// whose box is only scrolled away, and a paste Claude then drops would let
-    /// this image bind to such a box. So that delivery records nothing.
-    private func beginThumbnailDelivery() -> ThumbnailDeliveryToken? {
+    /// Call it before the delivery snaps herdr's history scroll back. Scrolled
+    /// up, the viewport shows history, so no baseline can be trusted: every
+    /// pending entry, binding, seen number, in-flight decode and overlay is
+    /// dropped and this delivery records nothing. That path can then only
+    /// lose thumbnails, never draw an earlier paste into a later box.
+    private func beginThumbnailDelivery(expectedImages: Int) -> ThumbnailDeliveryToken? {
         guard thumbnailsEnabled else { return nil }
+        guard historyTarget == 0, historySent == 0 else {
+            resetThumbnails()
+            return nil
+        }
         scanForThumbnails(baseline: true)
-        guard historyTarget == 0, historySent == 0 else { return nil }
-        let token = ThumbnailDeliveryToken(generation: thumbnailGeneration, sequence: thumbnailNextDelivery)
+        let token = ThumbnailDeliveryToken(
+            generation: thumbnailGeneration, sequence: thumbnailNextDelivery, expectedImages: expectedImages
+        )
         thumbnailNextDelivery += 1
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.thumbnailDecodeTimeout) { [weak self] in
             self?.endThumbnailDelivery(token, images: [], expiry: 0)
@@ -1090,6 +1101,12 @@ final class LineBreakTerminalView: AppTerminalView {
     /// After the delivery, with its decoded images (main thread). Records it
     /// and every later delivery already waiting, in delivery order. A second
     /// finish of the same delivery (the timeout, or a late decode) is ignored.
+    ///
+    /// A delivery that records fewer images than it expected (a decode
+    /// failed or timed out) resets everything: its box would be a new number
+    /// with nothing of its own pending, so a stale entry, or a later
+    /// delivery's image, would bind into it. The reset also drops the later
+    /// deliveries still in flight.
     private func endThumbnailDelivery(
         _ token: ThumbnailDeliveryToken,
         images: [(NSImage, String)],
@@ -1099,8 +1116,12 @@ final class LineBreakTerminalView: AppTerminalView {
               token.sequence >= thumbnailNextRecord,
               thumbnailFinishedDeliveries[token.sequence] == nil
         else { return }
-        thumbnailFinishedDeliveries[token.sequence] = (images, expiry)
+        thumbnailFinishedDeliveries[token.sequence] = (images, token.expectedImages, expiry)
         while let next = thumbnailFinishedDeliveries.removeValue(forKey: thumbnailNextRecord) {
+            guard next.images.count >= next.expected else {
+                resetThumbnails()
+                return
+            }
             thumbnailNextRecord += 1
             recordPendingThumbnails(next.images, expiry: next.expiry)
         }
@@ -1139,7 +1160,7 @@ final class LineBreakTerminalView: AppTerminalView {
     }
 
     /// Image files decode in delivery order; one that fails is left out, so
-    /// the counts differ and nothing binds.
+    /// the delivery comes up short and `endThumbnailDelivery` resets.
     private nonisolated static func decodeThumbnails(_ urls: [URL]) -> [(NSImage, String)] {
         urls.compactMap { url in
             ImageThumbnailer.thumbnail(contentsOf: url).map { ($0, url.lastPathComponent) }
@@ -1782,7 +1803,7 @@ final class LineBreakTerminalView: AppTerminalView {
         if thumbnailsEnabled, let data = ImageThumbnailer.imageData(from: pasteboard) {
             decode = { ImageThumbnailer.thumbnail(fromImageData: data).map { [($0, "clipboard")] } ?? [] }
         }
-        forwardNativeClipboardPaste(decodingThumbnails: decode)
+        forwardNativeClipboardPaste(expectedImages: 1, decodingThumbnails: decode)
     }
 
     /// ^V for image files copied in Finder. The pasteboard's image for them is
@@ -1793,16 +1814,20 @@ final class LineBreakTerminalView: AppTerminalView {
         if !imageURLs.isEmpty {
             decode = { Self.decodeThumbnails(imageURLs) }
         }
-        forwardNativeClipboardPaste(decodingThumbnails: decode)
+        forwardNativeClipboardPaste(expectedImages: imageURLs.count, decodingThumbnails: decode)
     }
 
     /// Ask the remote program to paste from its own clipboard with a literal
     /// ^V byte — the "native clipboard" delivery path — recording what
-    /// `decode` returns as this delivery's thumbnails.
+    /// `decode` returns as this delivery's thumbnails. With thumbnails on but
+    /// nothing to decode (a JPEG-only or PDF clipboard), Claude may still
+    /// attach an image, so every pending entry and binding is dropped instead.
     private func forwardNativeClipboardPaste(
+        expectedImages: Int,
         decodingThumbnails decode: (@Sendable () -> [(NSImage, String)])?
     ) {
-        let thumbnailToken = decode == nil ? nil : beginThumbnailDelivery()
+        if thumbnailsEnabled, decode == nil { resetThumbnails() }
+        let thumbnailToken = decode == nil ? nil : beginThumbnailDelivery(expectedImages: expectedImages)
         forgetHistoryScroll()
         processHost?.session.sendInput(Data([0x16]))
         // No completion signal from Claude here, hence the short expiry.
@@ -1814,7 +1839,9 @@ final class LineBreakTerminalView: AppTerminalView {
     /// Types local paths, painting the image files among them into Claude's boxes.
     private func deliverTypedPaths(of fileURLs: [URL], _ deliver: () -> Void) {
         let imageURLs = thumbnailsEnabled ? fileURLs.filter(Self.isImageFile) : []
-        guard !imageURLs.isEmpty, let thumbnailToken = beginThumbnailDelivery() else { return deliver() }
+        guard !imageURLs.isEmpty,
+              let thumbnailToken = beginThumbnailDelivery(expectedImages: imageURLs.count)
+        else { return deliver() }
         deliver()
         endThumbnailDelivery(thumbnailToken, expiry: 60) { Self.decodeThumbnails(imageURLs) }
     }
@@ -1859,7 +1886,9 @@ final class LineBreakTerminalView: AppTerminalView {
                     devicePaths.append(try await service.stageAttachment(from: file.localURL))
                 }
                 try Task.checkCancellation()
-                let thumbnailToken = thumbnails == nil ? nil : beginThumbnailDelivery()
+                let thumbnailToken = thumbnails == nil
+                    ? nil
+                    : beginThumbnailDelivery(expectedImages: imageURLs.count)
                 sendPastedText(
                     devicePaths.map(paste.pathSyntax.format).joined(separator: " ") + paste.suffix
                 )
