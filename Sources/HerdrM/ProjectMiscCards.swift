@@ -59,14 +59,19 @@ struct ProjectLinkChip: View {
 
     var body: some View {
         if isRemote && url.loopbackOnHost {
-            label.foregroundStyle(Theme.textGhost).help("Only reachable from the host itself")
+            // Accessibility modifiers go on the element itself, before the context menu wraps it:
+            // applied after, the identifier lands on the wrapper and the enclosing card's wins.
+            label.foregroundStyle(Theme.textGhost)
+                .accessibilityIdentifier("project.link.\(url.url)")
+                .help("Only reachable from the host itself")
                 .contextMenu { Button("Copy URL") { ProjectURLActions.copy(url) } }
         } else {
             Button { ProjectURLActions.open(url) } label: { label.foregroundStyle(Theme.text) }
                 .buttonStyle(.plain)
+                .accessibilityLabel(Text(verbatim: url.label))
+                .accessibilityIdentifier("project.link.\(url.url)")
                 .help("Open this URL")
                 .contextMenu { Button("Copy URL") { ProjectURLActions.copy(url) } }
-                .accessibilityLabel(Text(verbatim: url.label))
         }
     }
 }
@@ -74,14 +79,46 @@ struct ProjectLinkChip: View {
 struct ProjectLinksCard: View {
     let urls: [ProjectURL]
     let isRemote: Bool
+    /// Chips per page; a project with dozens of published ports stays one screen tall.
+    static let pageSize = 12
+    @State private var page = 0
+
+    private var pageCount: Int { max(1, (urls.count + Self.pageSize - 1) / Self.pageSize) }
+
+    private var visible: [ProjectURL] {
+        let start = min(page, pageCount - 1) * Self.pageSize
+        return Array(urls[start..<min(start + Self.pageSize, urls.count)])
+    }
 
     var body: some View {
         if !urls.isEmpty {
-            ProjectCard("Links", count: urls.count, id: .links) {
-                FlowLayout {
-                    ForEach(urls, id: \.url) { ProjectLinkChip(url: $0, isRemote: isRemote) }
+            ProjectCard("Links", count: urls.count, id: .links, trailing: { pager }) {
+                // A grid, not FlowLayout: children of a custom Layout reach the accessibility
+                // tree only intermittently, and the columns read better for a dozen URLs.
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 190), spacing: ProjectMetrics.gridSpacing, alignment: .leading)],
+                    alignment: .leading, spacing: ProjectMetrics.gridSpacing
+                ) {
+                    ForEach(visible, id: \.url) { ProjectLinkChip(url: $0, isRemote: isRemote) }
                 }
                 .padding(.vertical, 6)
+            }
+            .onChange(of: urls.count) { page = min(page, pageCount - 1) }
+        }
+    }
+
+    @ViewBuilder
+    private var pager: some View {
+        if pageCount > 1 {
+            HStack(spacing: 2) {
+                ProjectIconButton(systemImage: "chevron.left", label: "Previous page") { page = max(0, page - 1) }
+                    .disabled(page == 0)
+                Text(verbatim: "\(page + 1)/\(pageCount)")
+                    .font(.system(size: 10.5).monospacedDigit())
+                    .foregroundStyle(Theme.textTertiary)
+                    .accessibilityIdentifier("project.links.page")
+                ProjectIconButton(systemImage: "chevron.right", label: "Next page") { page = min(pageCount - 1, page + 1) }
+                    .disabled(page == pageCount - 1)
             }
         }
     }

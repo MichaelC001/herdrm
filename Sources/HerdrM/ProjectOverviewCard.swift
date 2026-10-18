@@ -57,7 +57,8 @@ struct ProjectOverviewCard: View {
                 if let mac = topology.mac {
                     ViewThatFits(in: .horizontal) {
                         HStack(alignment: .top, spacing: 0) {
-                            macNode(mac)
+                            // The Mac node hugs its VM list; the host node takes the rest.
+                            macNode(mac).fixedSize(horizontal: true, vertical: false)
                             HorizontalEdge()
                             hostNode
                         }

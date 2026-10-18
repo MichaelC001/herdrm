@@ -56,14 +56,25 @@ final class ProjectViewUIUXTests: XCTestCase {
             otherVMs: [], files: ["compose.yaml"], envEntries: [], warnings: [], staleOverrides: [])
     }
 
-    private func host(_ model: AppModel, width: CGFloat = 760) -> (NSWindow, NSHostingView<AnyView>) {
-        let view = NSHostingView(rootView: AnyView(ProjectView(model: model, polling: false).frame(width: width, height: 900)))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 900), styleMask: [.titled], backing: .buffered, defer: false)
+    private func host(_ model: AppModel, width: CGFloat = 760, height: CGFloat = 900) -> (NSWindow, NSHostingView<AnyView>) {
+        let view = NSHostingView(rootView: AnyView(ProjectView(model: model, polling: false).frame(width: width, height: height)))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.title = "ProjectViewHarness \(UUID().uuidString)"
         window.contentView = view
         window.orderFrontRegardless()
         return (window, view)
+    }
+
+    /// Settles until `id` is in the accessibility tree or `timeout` elapses; returns the elements either way.
+    private func waitFor(_ window: NSWindow, id: String, timeout: TimeInterval = 3) -> [AccessibilityProbe.Element] {
+        let end = Date().addingTimeInterval(timeout)
+        var all = elements(in: window)
+        while element(all, id: id) == nil, Date() < end {
+            settle(0.2)
+            all = elements(in: window)
+        }
+        return all
     }
 
     private func settle(_ seconds: TimeInterval = 0.4) {
@@ -268,6 +279,33 @@ final class ProjectViewUIUXTests: XCTestCase {
         }
         XCTAssertNotNil(element(all, id: "project.host.meter.load"))
         XCTAssertNotNil(element(all, id: "project.host.meter.memory"))
+    }
+
+    func testLinksCardPaginatesPastTwelveChips() throws {
+        // Fourteen public URLs on one container, nothing else: 14 links make two pages, and the
+        // short page keeps the Links card inside the 900 pt window the probe can read.
+        let urls = (0..<14).map { ProjectURL(label: "http://localhost:\(3200 + $0)", url: "http://localhost:\(3200 + $0)", source: .detected, loopbackOnHost: false) }
+        var web = container("c1", name: "acme-web-1", service: "web")
+        web.urls = urls
+        var snap = snapshot(compose: [ComposeGroup(name: "acme", workingDir: root, configFiles: [], match: .name, running: 1, total: 1, containers: [web])])
+        snap.devServers = []
+        snap.otherListeners = []
+        snap.vms = []
+        let entry = ProjectInspectorModel.Entry(snapshot: snap, state: .live, lastProbe: Date(), rawProbe: nil, localVMs: nil)
+        let (model, _) = try model(entry: entry)
+        let (window, _) = host(model)
+        defer { window.close() }
+        settle()
+        var all = waitFor(window, id: "project.link.http://localhost:3200")
+        XCTAssertTrue(texts(all).contains("1/2"), "page indicator missing; ids: \(all.compactMap(\.identifier).filter { $0.hasPrefix("project.link") })")
+        XCTAssertNotNil(element(all, id: "project.link.http://localhost:3200"), "first page shows the first chips")
+        XCTAssertNil(element(all, id: "project.link.http://localhost:3213"), "page 2 chip must not be on page 1")
+        AccessibilityProbe.press(try XCTUnwrap(all.first { $0.role == "AXButton" && $0.name == "Next page" }))
+        settle()
+        all = waitFor(window, id: "project.link.http://localhost:3213")
+        XCTAssertTrue(texts(all).contains("2/2"), "page indicator did not advance; ids: \(all.compactMap(\.identifier).filter { $0.hasPrefix("project.link") })")
+        XCTAssertNotNil(element(all, id: "project.link.http://localhost:3213"))
+        XCTAssertNil(element(all, id: "project.link.http://localhost:3200"))
     }
 
     func testLinksCardShowsChips() throws {

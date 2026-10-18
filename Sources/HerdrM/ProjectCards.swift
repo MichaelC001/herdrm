@@ -11,7 +11,6 @@ enum ProjectMetrics {
     static let cardRadius: CGFloat = 10
     static let cardSpacing: CGFloat = 14
     static let pagePadding: CGFloat = 14
-    static let contentMaxWidth: CGFloat = 900
     static let tileSize: CGFloat = 22
     static let tileRadius: CGFloat = 6
     static let tileGlyph: CGFloat = 11

@@ -158,8 +158,7 @@ private struct ProjectPanel: View {
                     }
                     .padding(.horizontal, ProjectMetrics.pagePadding)
                     .padding(.vertical, 12)
-                    .frame(maxWidth: ProjectMetrics.contentMaxWidth, alignment: .leading)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
