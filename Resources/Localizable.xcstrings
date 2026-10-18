@@ -7394,6 +7394,22 @@
           }
         }
       }
+    },
+    "Warnings": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Warnings"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "警告"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

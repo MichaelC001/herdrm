@@ -151,7 +151,7 @@ private struct ProjectPanel: View {
                         filesSection(snapshot)
                         otherListenersSection(snapshot)
                         hiddenSection(snapshot)
-                        warnings(snapshot)
+                        ProjectWarningsFootnote(warnings: snapshot.warnings)
                     }
                     .padding(.horizontal, ProjectMetrics.pagePadding)
                     .padding(.vertical, 12)
@@ -378,52 +378,13 @@ private struct ProjectPanel: View {
     }
 
     private func linksSection(_ snapshot: ProjectSnapshot) -> some View {
-        let all = snapshot.devServers.flatMap(\.urls)
-            + (snapshot.compose.flatMap(\.containers) + snapshot.attachedContainers).flatMap(\.urls)
-        var seen = Set<String>()
-        let urls = all.filter { seen.insert($0.url).inserted }
-        return Group {
-            if !urls.isEmpty {
-                ProjectCard("Links", count: urls.count, id: .links) {
-                    ProjectCardList(urls.map { Keyed(id: $0.url, value: $0) }) { item in
-                        HStack(spacing: 8) {
-                            ProjectURLButtons(urls: [item.value], isRemote: !context.device.isLocal)
-                            Spacer()
-                        }
-                        .frame(minHeight: ProjectMetrics.rowHeight)
-                    }
-                }
-            }
-        }
+        ProjectLinksCard(urls: projectURLs(snapshot), isRemote: !context.device.isLocal)
     }
 
     private func filesSection(_ snapshot: ProjectSnapshot) -> some View {
-        // Env values can be secrets: only the variable names are shown, grouped by file.
-        let byFile = Dictionary(grouping: snapshot.envEntries, by: \.file)
-        return Group {
-            if !snapshot.files.isEmpty || !byFile.isEmpty {
-                ProjectCard("Project files", count: snapshot.files.count, id: .files) {
-                    ProjectCardList(snapshot.files.map { Keyed(id: $0, value: $0) }) { item in
-                        Text(verbatim: item.value)
-                            .font(.system(size: 11.5, design: .monospaced))
-                            .foregroundStyle(Theme.textSecondary)
-                            .frame(minHeight: ProjectMetrics.rowHeight, alignment: .leading)
-                    }
-                    ForEach(byFile.keys.sorted(), id: \.self) { file in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(verbatim: file)
-                                .font(.system(size: 11.5, design: .monospaced))
-                                .foregroundStyle(Theme.textSecondary)
-                            Text(verbatim: (byFile[file] ?? []).map(\.key).joined(separator: ", "))
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(Theme.textTertiary)
-                                .lineLimit(3)
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-            }
-        }
+        ProjectFilesCard(
+            files: snapshot.files,
+            envByFile: Dictionary(grouping: snapshot.envEntries, by: \.file).mapValues { $0.map(\.key) })
     }
 
     private func otherListenersSection(_ snapshot: ProjectSnapshot) -> some View {
@@ -439,21 +400,13 @@ private struct ProjectPanel: View {
             onSetURL: { projects.setURLOverride(space: space, signature: $0, url: $1) },
             onToggleHidden: { toggleHidden($0, in: snapshot) })
     }
-
-    @ViewBuilder
-    private func warnings(_ snapshot: ProjectSnapshot) -> some View {
-        if !snapshot.warnings.isEmpty {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(snapshot.warnings, id: \.self) { warning in
-                    Text(verbatim: warning).font(.system(size: 11)).foregroundStyle(Theme.textTertiary)
-                }
-            }
-        }
-    }
 }
 
-/// Pairs a value with a stable id so plain arrays can feed `ProjectCardList`.
-private struct Keyed<Value>: Identifiable {
-    let id: String
-    let value: Value
+/// Every URL of the project, first occurrence of each wins: dev servers (hidden ones too), then
+/// compose containers, then attached containers.
+func projectURLs(_ snapshot: ProjectSnapshot) -> [ProjectURL] {
+    let all = snapshot.devServers.flatMap(\.urls)
+        + (snapshot.compose.flatMap(\.containers) + snapshot.attachedContainers).flatMap(\.urls)
+    var seen = Set<String>()
+    return all.filter { seen.insert($0.url).inserted }
 }

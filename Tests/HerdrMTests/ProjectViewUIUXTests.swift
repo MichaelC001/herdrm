@@ -269,4 +269,19 @@ final class ProjectViewUIUXTests: XCTestCase {
         XCTAssertNotNil(element(all, id: "project.host.meter.load"))
         XCTAssertNotNil(element(all, id: "project.host.meter.memory"))
     }
+
+    func testLinksCardShowsChips() throws {
+        let open = server("vite@web2", framework: "vite", port: 3200, publicBind: true)
+        let entry = ProjectInspectorModel.Entry(snapshot: snapshot(extraServers: [open]), state: .live, lastProbe: Date(), rawProbe: nil, localVMs: nil)
+        let (model, _) = try model(entry: entry)
+        let (window, _) = host(model)
+        defer { window.close() }
+        settle()
+        let all = elements(in: window)
+        XCTAssertTrue(texts(all).contains("Links"))
+        XCTAssertNotNil(element(all, id: "project.section.links"))
+        let chips = all.filter { $0.role == "AXButton" && $0.name == "http://localhost:3200" }
+        XCTAssertFalse(chips.isEmpty, "public URL must be a clickable chip")
+        XCTAssertTrue(all.filter { $0.role == "AXButton" && $0.name == "http://localhost:3100" }.isEmpty, "remote loopback URL must not be a button anywhere")
+    }
 }
