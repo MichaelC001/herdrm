@@ -76,6 +76,28 @@ struct ProjectLinkChip: View {
     }
 }
 
+/// Previous/next control for a card that shows `pageSize` items at a time; hidden for one page.
+struct ProjectPager: View {
+    @Binding var page: Int
+    let pageCount: Int
+    let identifier: String
+
+    var body: some View {
+        if pageCount > 1 {
+            HStack(spacing: 2) {
+                ProjectIconButton(systemImage: "chevron.left", label: "Previous page") { page = max(0, page - 1) }
+                    .disabled(page == 0)
+                Text(verbatim: "\(page + 1)/\(pageCount)")
+                    .font(.system(size: 10.5).monospacedDigit())
+                    .foregroundStyle(Theme.textTertiary)
+                    .accessibilityIdentifier(identifier)
+                ProjectIconButton(systemImage: "chevron.right", label: "Next page") { page = min(pageCount - 1, page + 1) }
+                    .disabled(page == pageCount - 1)
+            }
+        }
+    }
+}
+
 struct ProjectLinksCard: View {
     let urls: [ProjectURL]
     let isRemote: Bool
@@ -107,20 +129,8 @@ struct ProjectLinksCard: View {
         }
     }
 
-    @ViewBuilder
     private var pager: some View {
-        if pageCount > 1 {
-            HStack(spacing: 2) {
-                ProjectIconButton(systemImage: "chevron.left", label: "Previous page") { page = max(0, page - 1) }
-                    .disabled(page == 0)
-                Text(verbatim: "\(page + 1)/\(pageCount)")
-                    .font(.system(size: 10.5).monospacedDigit())
-                    .foregroundStyle(Theme.textTertiary)
-                    .accessibilityIdentifier("project.links.page")
-                ProjectIconButton(systemImage: "chevron.right", label: "Next page") { page = min(pageCount - 1, page + 1) }
-                    .disabled(page == pageCount - 1)
-            }
-        }
+        ProjectPager(page: $page, pageCount: pageCount, identifier: "project.links.page")
     }
 }
 
@@ -131,11 +141,7 @@ struct ProjectFilesCard: View {
     let envByFile: [String: [String]]
 
     private static let keyLimit = 12
-
-    private struct FileItem: Identifiable {
-        let name: String
-        var id: String { name }
-    }
+    @State private var page = 0
 
     private func fileRow(_ name: String) -> some View {
         HStack(spacing: 8) {
@@ -167,17 +173,42 @@ struct ProjectFilesCard: View {
         .frame(minHeight: ProjectMetrics.rowHeight)
     }
 
+    /// Files first, then env files, twelve rows a page.
+    private enum Row: Identifiable {
+        case file(String)
+        case env(file: String, keys: [String])
+        var id: String {
+            switch self {
+            case .file(let name): "file:\(name)"
+            case .env(let file, _): "env:\(file)"
+            }
+        }
+    }
+
+    private var rows: [Row] {
+        files.map(Row.file) + envByFile.keys.sorted().map { Row.env(file: $0, keys: envByFile[$0] ?? []) }
+    }
+
+    private var pageCount: Int { max(1, (rows.count + ProjectLinksCard.pageSize - 1) / ProjectLinksCard.pageSize) }
+
+    private var visible: [Row] {
+        let start = min(page, pageCount - 1) * ProjectLinksCard.pageSize
+        return Array(rows[start..<min(start + ProjectLinksCard.pageSize, rows.count)])
+    }
+
     var body: some View {
         if !files.isEmpty || !envByFile.isEmpty {
-            ProjectCard("Project files", count: files.count, id: .files) {
-                ProjectCardList(files.map { FileItem(name: $0) }) { fileRow($0.name) }
-                ForEach(Array(envByFile.keys.sorted().enumerated()), id: \.element) { index, file in
-                    if index > 0 || !files.isEmpty {
-                        Rectangle().fill(Theme.hairline).frame(height: 1).padding(.leading, 30)
+            ProjectCard("Project files", count: files.count, id: .files, trailing: {
+                ProjectPager(page: $page, pageCount: pageCount, identifier: "project.files.page")
+            }) {
+                ProjectCardList(visible) { row in
+                    switch row {
+                    case .file(let name): fileRow(name)
+                    case .env(let file, let keys): envRow(file, keys: keys)
                     }
-                    envRow(file, keys: envByFile[file] ?? [])
                 }
             }
+            .onChange(of: rows.count) { page = min(page, pageCount - 1) }
         }
     }
 }

@@ -308,6 +308,31 @@ final class ProjectViewUIUXTests: XCTestCase {
         XCTAssertNil(element(all, id: "project.link.http://localhost:3200"))
     }
 
+    func testFilesCardPaginatesPastTwelveRows() throws {
+        var snap = snapshot()
+        snap.files = (0..<20).map { "file-\($0).yaml" }
+        snap.devServers = []
+        snap.otherListeners = []
+        snap.vms = []
+        let entry = ProjectInspectorModel.Entry(snapshot: snap, state: .live, lastProbe: Date(), rawProbe: nil, localVMs: nil)
+        let (model, _) = try model(entry: entry)
+        let (window, _) = host(model)
+        defer { window.close() }
+        settle()
+        var all = waitFor(window, id: "project.files.page")
+        var shown = texts(all)
+        XCTAssertTrue(shown.contains("1/2"), "page indicator missing: \(shown.sorted())")
+        XCTAssertTrue(shown.contains("file-0.yaml"))
+        XCTAssertFalse(shown.contains("file-19.yaml"), "page 2 row must not be on page 1")
+        AccessibilityProbe.press(try XCTUnwrap(all.first { $0.role == "AXButton" && $0.name == "Next page" }))
+        settle()
+        all = elements(in: window)
+        shown = texts(all)
+        XCTAssertTrue(shown.contains("2/2"))
+        XCTAssertTrue(shown.contains("file-19.yaml"))
+        XCTAssertFalse(shown.contains("file-0.yaml"))
+    }
+
     func testLinksCardShowsChips() throws {
         let open = server("vite@web2", framework: "vite", port: 3200, publicBind: true)
         let entry = ProjectInspectorModel.Entry(snapshot: snapshot(extraServers: [open]), state: .live, lastProbe: Date(), rawProbe: nil, localVMs: nil)
