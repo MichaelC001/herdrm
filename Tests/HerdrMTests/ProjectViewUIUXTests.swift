@@ -330,4 +330,26 @@ final class ProjectViewUIUXTests: XCTestCase {
         XCTAssertTrue(texts.contains("This Mac"))
         XCTAssertFalse(texts.contains("ssh"))
     }
+
+    func testNarrowPaneKeepsEveryCardInsideTheWindow() throws {
+        let long = container("c2", name: "acme-very-long-container-name-for-truncation-1", service: nil)
+        let groups = [ComposeGroup(name: "acme", workingDir: root, configFiles: [], match: .name, running: 2, total: 2, containers: [container("c1", name: "acme-web-1", service: "web"), long])]
+        let entry = ProjectInspectorModel.Entry(snapshot: snapshot(compose: groups), state: .live, lastProbe: Date(), rawProbe: nil, localVMs: nil)
+        let (model, _) = try model(entry: entry)
+        let (window, _) = host(model, width: 500)
+        defer { window.close() }
+        settle()
+        let all = elements(in: window)
+        let bounds = try XCTUnwrap(all.first { $0.role == "AXWindow" }?.frame)
+        var checked = 0
+        for element in all where element.identifier?.hasPrefix("project.") == true {
+            // A hidden element legitimately has no frame.
+            guard let frame = element.frame else { continue }
+            checked += 1
+            XCTAssertGreaterThanOrEqual(frame.minX, bounds.minX - 0.5, "\(element.identifier!) clips left")
+            XCTAssertLessThanOrEqual(frame.maxX, bounds.maxX + 0.5, "\(element.identifier!) clips right")
+        }
+        XCTAssertGreaterThan(checked, 5, "the clipping check must actually see framed project elements")
+        XCTAssertNotNil(element(all, id: "project.overview.lane.docker"))
+    }
 }
