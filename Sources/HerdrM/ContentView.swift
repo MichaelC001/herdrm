@@ -810,7 +810,7 @@ struct DetailView: View {
                 dark: colorScheme == .dark,
                 mouseReporting: terminalMouseReporting,
                 copyOnSelect: terminalCopyOnSelect,
-                // A selected shell or the file manager covers the attach side.
+                // A selected shell or a covering detail mode hides the attach side.
                 isVisible: isVisible && model.selectedShellID == nil && !model.isDetailCovered,
                 historyService: model.service(for: session.device),
                 onAttachmentError: { model.actionError = $0 },

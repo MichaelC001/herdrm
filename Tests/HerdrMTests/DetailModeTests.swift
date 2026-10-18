@@ -4,6 +4,19 @@ import XCTest
 
 @MainActor
 final class DetailModeTests: XCTestCase {
+    /// A model with a selected local Claude agent, so the covered-terminal gates have something to hide.
+    private func modelWithSelectedClaudeAgent() throws -> AppModel {
+        let model = AppModel()
+        model.devices = [Device.local]
+        var state = DeviceSessionState()
+        let json: [String: Any] = ["agent": "claude", "name": "Agent 1", "workspace_id": "ws-0", "tab_id": "tab-0", "pane_id": "pane-0"]
+        let data = try JSONSerialization.data(withJSONObject: json)
+        state.agents = [try JSONDecoder().decode(AgentInfo.self, from: data)]
+        model.sessions[Device.local.id] = state
+        model.selectedPane = PaneRef(deviceID: Device.local.id, paneID: "pane-0")
+        return model
+    }
+
     func testFileManagerShimMapsToDetailMode() {
         let model = AppModel()
         model.isFileManagerActive = true
@@ -14,8 +27,9 @@ final class DetailModeTests: XCTestCase {
         XCTAssertFalse(model.isDetailCovered)
     }
 
-    func testOpenProjectCoversTheTerminalAndSelectingAnAgentUncoversIt() {
-        let model = AppModel()
+    func testOpenProjectCoversTheTerminalAndSelectingAnAgentUncoversIt() throws {
+        let model = try modelWithSelectedClaudeAgent()
+        XCTAssertNotNil(model.statsDevice, "precondition: the selected local agent has stats")
         model.openProject(nil)
         XCTAssertEqual(model.detailMode, .project)
         XCTAssertFalse(model.isFileManagerActive)
@@ -34,8 +48,9 @@ final class DetailModeTests: XCTestCase {
         XCTAssertEqual(model.detailMode, .project)
     }
 
-    func testProjectModeHidesTheClaudeHistory() {
-        let model = AppModel()
+    func testProjectModeHidesTheClaudeHistory() throws {
+        let model = try modelWithSelectedClaudeAgent()
+        XCTAssertTrue(model.isClaudeHistorySelected, "precondition: a Claude agent is selected")
         model.openProject(nil)
         XCTAssertFalse(model.isClaudeHistorySelected)
     }
