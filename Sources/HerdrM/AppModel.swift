@@ -398,6 +398,7 @@ final class AppModel: ObservableObject {
     func projectContext(for space: SpaceRef) -> ProjectContext? {
         guard let device = device(space.deviceID) else { return nil }
         let state = session(space.deviceID)
+        guard let label = state.workspaces.first(where: { $0.workspaceID == space.workspaceID })?.label else { return nil }
         let agents = state.agents.filter { $0.workspaceID == space.workspaceID }
         let panes = state.panes.filter { $0.workspaceID == space.workspaceID }
         var focused: String?
@@ -410,7 +411,6 @@ final class AppModel: ObservableObject {
         for cwd in [focused] + agents.map(\.cwd) + panes.map(\.cwd) {
             if let cwd, !cwd.isEmpty, !cwds.contains(cwd) { cwds.append(cwd) }
         }
-        let label = state.workspaces.first { $0.workspaceID == space.workspaceID }?.label ?? ""
         return ProjectContext(device: device, workspaceLabel: label, cwds: cwds, focusedCwd: focused)
     }
 

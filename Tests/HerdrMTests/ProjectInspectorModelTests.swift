@@ -49,12 +49,15 @@ final class ProjectInspectorModelTests: XCTestCase {
         private let lock = NSLock()
         private var _calls: [Call] = []
         private var heldContinuations: [CheckedContinuation<Void, Never>] = []
-        var frames: [UUID: String] = [:]
-        var fallbackFrame = ProjectInspectorModelTests.emptyFrame
-        var failing = false
-        /// How many leading calls wait for `releaseHeld()`.
-        var holdFirst = 0
+        private var frames: [UUID: String] = [:]
+        private var failing = false
+        private var holdFirst = 0
         private var started = 0
+
+        func setFrame(_ frame: String, for id: UUID) { lock.lock(); frames[id] = frame; lock.unlock() }
+        func setFailing(_ value: Bool) { lock.lock(); failing = value; lock.unlock() }
+        /// How many leading calls wait for `releaseHeld()`.
+        func setHoldFirst(_ count: Int) { lock.lock(); holdFirst = count; lock.unlock() }
 
         var calls: [Call] { lock.lock(); defer { lock.unlock() }; return _calls }
 
@@ -63,13 +66,14 @@ final class ProjectInspectorModelTests: XCTestCase {
                 lock.lock(); defer { lock.unlock() }
                 _calls.append(Call(device: device, sections: sections, cwds: cwds))
                 started += 1
-                return (started <= holdFirst, self.failing, frames[device.id] ?? fallbackFrame)
+                return (started <= holdFirst, self.failing, frames[device.id] ?? ProjectInspectorModelTests.emptyFrame)
             }()
             if hold {
                 await withCheckedContinuation { continuation in
                     lock.lock(); heldContinuations.append(continuation); lock.unlock()
                 }
             }
+            if Task.isCancelled { throw CancellationError() }
             if failing { throw FakeError() }
             return frame
         }
@@ -108,7 +112,7 @@ final class ProjectInspectorModelTests: XCTestCase {
 
     func testProbeResolvesRootThenClassifies() async {
         let runner = FakeRunner()
-        runner.frames[devbox.id] = Self.devboxFrame
+        runner.setFrame(Self.devboxFrame, for: devbox.id)
         let model = makeModel(runner)
         await model.probe(space: space(), context: context())
 
@@ -122,8 +126,8 @@ final class ProjectInspectorModelTests: XCTestCase {
 
     func testRemoteSpaceAlsoProbesLocalVMs() async {
         let runner = FakeRunner()
-        runner.frames[devbox.id] = Self.devboxFrame
-        runner.frames[Device.local.id] = Self.hostFrame
+        runner.setFrame(Self.devboxFrame, for: devbox.id)
+        runner.setFrame(Self.hostFrame, for: Device.local.id)
         let model = makeModel(runner)
         await model.probe(space: space(), context: context())
 
@@ -136,7 +140,7 @@ final class ProjectInspectorModelTests: XCTestCase {
 
     func testLocalSpaceProbesOnceIncludingVMs() async {
         let runner = FakeRunner()
-        runner.frames[Device.local.id] = Self.devboxFrame
+        runner.setFrame(Self.devboxFrame, for: Device.local.id)
         let model = makeModel(runner)
         let local = Device.local
         await model.probe(space: space(local), context: context(local))
@@ -148,8 +152,8 @@ final class ProjectInspectorModelTests: XCTestCase {
 
     func testLateResultForAnotherKeyIsIgnored() async {
         let runner = FakeRunner()
-        runner.frames[devbox.id] = Self.devboxFrame
-        runner.holdFirst = 1
+        runner.setFrame(Self.devboxFrame, for: devbox.id)
+        runner.setHoldFirst(1)
         let model = makeModel(runner)
         let first = Task { await model.probe(space: space(), context: context()) }
         await waitUntil { runner.heldCount == 1 }
@@ -157,9 +161,9 @@ final class ProjectInspectorModelTests: XCTestCase {
         let reprobe = model.setRoot(space: space(), context: context(), root: "/other")
         XCTAssertEqual(model.keyBySpace[space()], "\(devbox.id.uuidString):/other")
         // The re-probe returns an empty frame; only the held devbox frame has dev servers.
-        runner.frames[devbox.id] = Self.emptyFrame
+        runner.setFrame(Self.emptyFrame, for: devbox.id)
         runner.releaseHeld()
-        await first.value
+        _ = await first.value
         await reprobe?.value
 
         let other = model.entries["\(devbox.id.uuidString):/other"]
@@ -170,12 +174,12 @@ final class ProjectInspectorModelTests: XCTestCase {
 
     func testFailureKeepsLastSnapshotAndMarksFailed() async {
         let runner = FakeRunner()
-        runner.frames[devbox.id] = Self.devboxFrame
+        runner.setFrame(Self.devboxFrame, for: devbox.id)
         let model = makeModel(runner)
         await model.probe(space: space(), context: context())
         let good = model.entry(for: space())
 
-        runner.failing = true
+        runner.setFailing(true)
         await model.probe(space: space(), context: context())
         let after = model.entry(for: space())
         guard case .failed = after?.state else { return XCTFail("expected failed, got \(String(describing: after?.state))") }
@@ -186,13 +190,14 @@ final class ProjectInspectorModelTests: XCTestCase {
 
     func testOverrideMutationReclassifiesWithoutProbe() async throws {
         let runner = FakeRunner()
-        runner.frames[devbox.id] = Self.devboxFrame
+        runner.setFrame(Self.devboxFrame, for: devbox.id)
         let model = makeModel(runner)
         await model.probe(space: space(), context: context())
         let callCount = runner.calls.count
         let server = try XCTUnwrap(model.entry(for: space())?.snapshot?.devServers.first)
 
         model.setURLOverride(space: space(), signature: server.signature, url: "https://app.example.test")
+        await model.settleMutations()
 
         XCTAssertEqual(runner.calls.count, callCount)
         let updated = model.entry(for: space())?.snapshot?.devServers.first { $0.signature == server.signature }
@@ -218,5 +223,56 @@ final class ProjectInspectorModelTests: XCTestCase {
         XCTAssertEqual(ProjectInspectorModel.pollDelay(failures: 5), 32)
         XCTAssertEqual(ProjectInspectorModel.pollDelay(failures: 6), 60)
         XCTAssertEqual(ProjectInspectorModel.pollDelay(failures: 40), 60)
+    }
+
+    func testSavedRootOverrideAppliesTheFirstProbe() async {
+        let runner = FakeRunner()
+        runner.setFrame(Self.devboxFrame, for: devbox.id)
+        let model = makeModel(runner)
+        ProjectStore(directory: storeDirectory).setSpaceRoot(deviceID: devbox.id, workspaceLabel: "acme", root: "/home/dev/acme-app")
+        await model.probe(space: space(), context: context())
+
+        XCTAssertEqual(model.entry(for: space())?.state, .live)
+        XCTAssertNotNil(model.entry(for: space())?.snapshot)
+        XCTAssertTrue(runner.calls.first?.cwds.contains("/home/dev/acme-app") ?? false)
+    }
+
+    func testCancellingAProbeDoesNotMarkItFailed() async {
+        let runner = FakeRunner()
+        runner.setHoldFirst(1)
+        let model = makeModel(runner)
+        let task = Task { await model.probe(space: space(), context: context()) }
+        await waitUntil { runner.heldCount == 1 }
+        task.cancel()
+        runner.releaseHeld()
+        _ = await task.value
+
+        if case .failed = model.entry(for: space())?.state { XCTFail("cancellation must not fail the entry") }
+    }
+
+    func testEmptyCwdListNeverCallsTheRunner() async {
+        let runner = FakeRunner()
+        let model = makeModel(runner)
+        var empty = context()
+        empty.cwds = []
+        let outcome = await model.probe(space: space(), context: empty)
+
+        XCTAssertEqual(outcome, .skipped)
+        XCTAssertTrue(runner.calls.isEmpty)
+        guard case .failed(let message) = model.entry(for: space())?.state else { return XCTFail("expected failed") }
+        XCTAssertTrue(message.contains("No project directory"))
+    }
+
+    func testDroppedLateResultNeitherAppliesNorCountsAsFailure() async {
+        let runner = FakeRunner()
+        runner.setHoldFirst(1)
+        let model = makeModel(runner)
+        let first = Task { await model.probe(space: space(), context: context()) }
+        await waitUntil { runner.heldCount == 1 }
+        let reprobe = model.setRoot(space: space(), context: context(), root: "/other")
+        runner.releaseHeld()
+        let outcome = await first.value
+        await reprobe?.value
+        XCTAssertEqual(outcome, .dropped)
     }
 }

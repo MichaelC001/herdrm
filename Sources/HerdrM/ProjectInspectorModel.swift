@@ -32,6 +32,9 @@ final class ProjectInspectorModel: ObservableObject {
     private let now: () -> Date
     private var inFlight: [UUID: Int] = [:]
     private var contexts: [SpaceRef: ProjectContext] = [:]
+    private var generation: [SpaceRef: Int] = [:]
+    private var reclassifySeq: [String: Int] = [:]
+    private var reclassifyTasks: [Task<Void, Never>] = []
 
     init(
         runner: ProjectProbeRunning = DeviceProjectProbeRunner(), store: ProjectStore = ProjectStore(),
@@ -55,6 +58,16 @@ final class ProjectInspectorModel: ObservableObject {
 
     // MARK: - Probing
 
+    enum ProbeOutcome: Equatable {
+        /// The snapshot was stored.
+        case applied
+        /// A newer probe or a root change superseded this one, or the caller was cancelled.
+        case dropped
+        /// Nothing to probe (unsupported device, no directory yet); not a transient failure.
+        case skipped
+        case failed
+    }
+
     /// Seconds to wait before the next tick: 15 while healthy, 2 doubling to 60 after failures.
     nonisolated static func pollDelay(failures: Int) -> TimeInterval {
         guard failures > 0 else { return 15 }
@@ -66,41 +79,55 @@ final class ProjectInspectorModel: ObservableObject {
         var failures = 0
         while !Task.isCancelled {
             if inFlight[context.device.id, default: 0] == 0 {
-                failures = await probe(space: space, context: context) ? 0 : failures + 1
+                switch await probe(space: space, context: context) {
+                case .applied: failures = 0
+                case .failed: failures += 1
+                case .dropped, .skipped: break
+                }
             }
             do { try await Task.sleep(for: .seconds(Self.pollDelay(failures: failures))) } catch { return }
         }
     }
 
-    /// One probe. Returns false when the probe failed. A result for a Space whose project key
-    /// changed during the probe (see `setRoot`) is dropped.
+    /// One probe. A result for a Space whose project key changed during the probe (see
+    /// `setRoot`), or that a newer probe of the same Space superseded, is dropped.
     @discardableResult
-    func probe(space: SpaceRef, context: ProjectContext) async -> Bool {
+    func probe(space: SpaceRef, context: ProjectContext) async -> ProbeOutcome {
         contexts[space] = context
         let device = context.device
-        let startKey = settledKey(space)
         let overrideRoot = store.spaceRoot(deviceID: device.id, workspaceLabel: context.workspaceLabel)
+        let startKey = settledKey(space) ?? overrideRoot.map { Self.key(device: device, root: $0) }
+        let failKey = startKey ?? Self.pendingKey(space)
 
         guard ProjectProbeScript.isSupported(device) else {
             fail(
-                space: space, key: startKey ?? Self.pendingKey(space),
+                space: space, key: failKey,
                 message: String(localized: "Project details need a shell (tailcat and Windows devices are not supported)"))
-            return false
+            return .skipped
+        }
+        let cwds = Self.unique(context.cwds + (overrideRoot.map { [$0] } ?? []))
+        guard !cwds.isEmpty else {
+            fail(space: space, key: failKey, message: String(localized: "No project directory found for this Space"))
+            return .skipped
         }
 
-        if let key = startKey ?? overrideRoot.map({ Self.key(device: device, root: $0) }), entries[key]?.snapshot == nil {
-            update(key: key) { $0.state = .probing }
-            keyBySpace[space] = keyBySpace[space] ?? key
-        }
+        generation[space, default: 0] += 1
+        let mine = generation[space, default: 0]
+        func current() -> Bool { generation[space] == mine && settledKey(space) == startKey }
 
-        inFlight[device.id, default: 0] += 1
-        defer { inFlight[device.id, default: 1] -= 1 }
+        if entries[failKey]?.snapshot == nil {
+            update(key: failKey) { $0.state = .probing }
+            if keyBySpace[space] == nil { keyBySpace[space] = failKey }
+        }
 
         let local = device.isLocal
+        let busy = local ? [device.id] : [device.id, localDevice.id]
+        busy.forEach { inFlight[$0, default: 0] += 1 }
+        defer { busy.forEach { inFlight[$0, default: 1] -= 1 } }
+
         let sections = local ? ProjectProbeScript.allSections : ProjectProbeScript.allSections.filter { $0 != "vms" }
         let runner = self.runner
         let localDevice = self.localDevice
-        let cwds = Self.unique(context.cwds)
 
         let main: ProjectProbe
         var localVMs: ProjectProbe?
@@ -110,21 +137,24 @@ final class ProjectInspectorModel: ObservableObject {
             main = ProjectProbeParser.parse(try await mainText)
             localVMs = await vmText.map(ProjectProbeParser.parse)
         } catch {
-            guard settledKey(space) == startKey else { return true }
-            fail(space: space, key: startKey ?? Self.pendingKey(space), message: error.localizedDescription)
-            return false
+            // The view's task was cancelled mid-probe: not a failure of the device.
+            if error is CancellationError || Task.isCancelled {
+                update(key: failKey) { if $0.state == .probing { $0.state = .idle } }
+                return .dropped
+            }
+            guard current() else { return .dropped }
+            fail(space: space, key: failKey, message: error.localizedDescription)
+            return .failed
         }
         if local { localVMs = main }
-        guard settledKey(space) == startKey else { return true }
+        guard current() else { return .dropped }
 
         let home = homeDirectory(for: device, probe: main)
         guard let resolved = ProjectRootResolver.resolve(
             roots: main.roots, focusedCwd: context.focusedCwd, home: home, override: overrideRoot)
         else {
-            fail(
-                space: space, key: startKey ?? Self.pendingKey(space),
-                message: String(localized: "No project directory found for this Space"))
-            return false
+            fail(space: space, key: failKey, message: String(localized: "No project directory found for this Space"))
+            return .failed
         }
 
         let identity = ProjectIdentity(deviceID: device.id, root: resolved.root, worktreeRoots: resolved.worktreeRoots)
@@ -134,12 +164,12 @@ final class ProjectInspectorModel: ObservableObject {
             ProjectClassifier.classify(
                 probe: main, localVMs: localVMs, identity: identity, device: device, overrides: overrides, now: stamp)
         }.value
-        guard settledKey(space) == startKey else { return true }
+        guard current() else { return .dropped }
 
         if let old = keyBySpace[space], old != identity.key, Self.isPending(old) { entries[old] = nil }
         keyBySpace[space] = identity.key
         entries[identity.key] = Entry(snapshot: snapshot, state: .live, lastProbe: stamp, rawProbe: main, localVMs: localVMs)
-        return true
+        return .applied
     }
 
     // MARK: - Mutations (re-classify from the cached probe, no network)
@@ -202,6 +232,7 @@ final class ProjectInspectorModel: ObservableObject {
     @discardableResult
     func setRoot(space: SpaceRef, context: ProjectContext, root: String?) -> Task<Void, Never>? {
         store.setSpaceRoot(deviceID: context.device.id, workspaceLabel: context.workspaceLabel, root: root)
+        if let old = keyBySpace[space], Self.isPending(old) { entries[old] = nil }
         keyBySpace[space] = root.map { Self.key(device: context.device, root: $0) }
         return Task { [weak self] in await self?.probe(space: space, context: context) }
     }
@@ -214,14 +245,35 @@ final class ProjectInspectorModel: ObservableObject {
         reclassify(space: space, key: key)
     }
 
+    /// Re-classifies the cached probe off the main actor; the caller sees the result after
+    /// `settleMutations()`. Only the newest request for a key, against an unchanged probe, applies.
     private func reclassify(space: SpaceRef, key: String) {
-        guard var entry = entries[key], let probe = entry.rawProbe, let identity = entry.snapshot?.identity,
+        guard let entry = entries[key], let probe = entry.rawProbe, let identity = entry.snapshot?.identity,
               let device = contexts[space]?.device
         else { return }
-        entry.snapshot = ProjectClassifier.classify(
-            probe: probe, localVMs: entry.localVMs, identity: identity, device: device,
-            overrides: store.overrides(for: key), now: entry.lastProbe ?? now())
-        entries[key] = entry
+        reclassifySeq[key, default: 0] += 1
+        let seq = reclassifySeq[key, default: 0]
+        let localVMs = entry.localVMs
+        let overrides = store.overrides(for: key)
+        let stamp = entry.lastProbe ?? now()
+        reclassifyTasks.append(Task { [weak self] in
+            let snapshot = await Task.detached {
+                ProjectClassifier.classify(
+                    probe: probe, localVMs: localVMs, identity: identity, device: device, overrides: overrides, now: stamp)
+            }.value
+            guard let self, self.reclassifySeq[key] == seq, var current = self.entries[key], current.rawProbe == probe
+            else { return }
+            current.snapshot = snapshot
+            self.entries[key] = current
+        })
+    }
+
+    /// Waits until every mutator's re-classification has been applied.
+    func settleMutations() async {
+        while let task = reclassifyTasks.first {
+            await task.value
+            reclassifyTasks.removeFirst()
+        }
     }
 
     private func fail(space: SpaceRef, key: String, message: String) {
@@ -252,16 +304,17 @@ final class ProjectInspectorModel: ObservableObject {
         return paths.filter { !$0.isEmpty && seen.insert($0).inserted }
     }
 
-    /// Local: the real home. Remote: the `/home/<user>` or `/Users/<user>` prefix of a probed cwd,
-    /// else `/home/<ssh user>`.
+    /// Local: the real home. Remote: the `$HOME` the probe reported, else the `/home/<user>` or
+    /// `/Users/<user>` prefix of a probed cwd, else the ssh user's conventional home.
     private func homeDirectory(for device: Device, probe: ProjectProbe) -> String {
         if device.isLocal { return NSHomeDirectory() }
+        if let home = probe.host?.home, home.hasPrefix("/") { return home }
         for root in probe.roots {
             let parts = root.cwd.split(separator: "/", omittingEmptySubsequences: true)
             if parts.count >= 2, parts[0] == "home" || parts[0] == "Users" { return "/\(parts[0])/\(parts[1])" }
         }
-        if let target = device.sshTarget, let user = target.split(separator: "@").first, target.contains("@") {
-            return "/home/\(user)"
+        if let target = device.sshTarget, target.contains("@"), let user = target.split(separator: "@").first {
+            return user == "root" ? "/root" : "/home/\(user)"
         }
         return "/root"
     }

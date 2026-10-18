@@ -16,12 +16,15 @@ public struct ProbeHost: Equatable, Sendable {
     public var dockerServerVersion: String?
     public var dockerError: String?
     public var systemdUserState: String?
+    public var home: String?
 
     public init(
         os: String = "", hostname: String = "", cpuCount: Int? = nil, load1: Double? = nil,
         memTotalKB: UInt64? = nil, memAvailableKB: UInt64? = nil, uptimeSeconds: Double? = nil,
-        dockerServerVersion: String? = nil, dockerError: String? = nil, systemdUserState: String? = nil
+        dockerServerVersion: String? = nil, dockerError: String? = nil, systemdUserState: String? = nil,
+        home: String? = nil
     ) {
+        self.home = home
         self.os = os
         self.hostname = hostname
         self.cpuCount = cpuCount

@@ -11,8 +11,16 @@ public protocol ProjectProbeRunning: Sendable {
 public struct DeviceProjectProbeRunner: ProjectProbeRunning {
     public init() {}
 
+    /// Drops directories whose quoting a remote login shell could misread: a fish shell treats a
+    /// backslash as an escape even inside single quotes. Such paths are not probed.
+    public static func safeCwds(_ cwds: [String]) -> [String] {
+        cwds.filter { cwd in
+            !cwd.unicodeScalars.contains { $0 == "\\" || $0 == "'" || $0.value < 0x20 || $0.value == 0x7f }
+        }
+    }
+
     public func run(device: Device, sections: [String], cwds: [String]) async throws -> String {
-        let command = ProjectProbeScript.remoteCommand(sections: sections, cwds: cwds)
+        let command = ProjectProbeScript.remoteCommand(sections: sections, cwds: Self.safeCwds(cwds))
         let data = try await DeviceFileService(device: device).run(command, timeout: 20)
         return String(decoding: data, as: UTF8.self)
     }

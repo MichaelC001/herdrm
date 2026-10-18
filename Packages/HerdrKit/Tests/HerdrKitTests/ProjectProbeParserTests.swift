@@ -135,6 +135,7 @@ final class ProjectProbeParserTests: XCTestCase {
         @@host
         os Linux
         hostname devbox
+        home /home/dev
         ncpu 8
         load 17.59 17.00 16.36
         memtotal_kb 65786260
@@ -145,6 +146,7 @@ final class ProjectProbeParserTests: XCTestCase {
         @@pp-end
         """
         let host = ProjectProbeParser.parse(linux).host
+        XCTAssertEqual(host?.home, "/home/dev")
         XCTAssertEqual(host?.os, "Linux")
         XCTAssertEqual(host?.hostname, "devbox")
         XCTAssertEqual(host?.cpuCount, 8)

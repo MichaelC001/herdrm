@@ -334,6 +334,7 @@ public enum ProjectProbeParser {
             switch key {
             case "os": host.os = value
             case "hostname": host.hostname = value
+            case "home": host.home = value.isEmpty ? nil : value
             case "ncpu": host.cpuCount = Int(value)
             case "load": host.load1 = value.split(separator: " ").first.flatMap { Double($0) }
             case "memtotal_kb": host.memTotalKB = UInt64(value)

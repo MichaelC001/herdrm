@@ -95,6 +95,7 @@ while :; do
   if has host; then
     echo "@@host"
     echo "os $os"; echo "hostname $(hostname 2>/dev/null || uname -n)"
+    echo "home $HOME"
     if [ "$os" = Linux ]; then
       echo "ncpu $(getconf _NPROCESSORS_ONLN 2>/dev/null)"
       read -r l1 l5 l15 _ < /proc/loadavg; echo "load $l1 $l5 $l15"
