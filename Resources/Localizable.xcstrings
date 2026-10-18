@@ -5858,6 +5858,182 @@
           }
         }
       }
+    },
+    "agents use %@ of their %@ cap": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "agents use %1$@ of their %2$@ cap"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent 已用 %1$@，上限 %2$@"
+          }
+        }
+      }
+    },
+    "%@ of RAM free": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ of RAM free"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可用内存 %@"
+          }
+        }
+      }
+    },
+    "swap %@ of %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "swap %1$@ of %2$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "交换 %1$@ / %2$@"
+          }
+        }
+      }
+    },
+    "load %@ per CPU": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "load %@ per CPU"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每个 CPU 负载 %@"
+          }
+        }
+      }
+    },
+    "Full: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Full: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已满：%@"
+          }
+        }
+      }
+    },
+    "Busy: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Busy: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "繁忙：%@"
+          }
+        }
+      }
+    },
+    "%@ has no room for another agent: %@.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ has no room for another agent: %2$@."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ 没有空间再运行一个 Agent：%2$@。"
+          }
+        }
+      }
+    },
+    "A new agent or test run here is likely to be killed for memory.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A new agent or test run here is likely to be killed for memory."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在这里新开的 Agent 或测试运行很可能因内存不足被终止。"
+          }
+        }
+      }
+    },
+    "Room is getting short. Run one test suite at a time.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Room is getting short. Run one test suite at a time."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "空间越来越少。请一次只运行一个测试套件。"
+          }
+        }
+      }
+    },
+    "%@ is full": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ is full"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 已满"
+          }
+        }
+      }
+    },
+    "Start Anyway": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start Anyway"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仍然启动"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

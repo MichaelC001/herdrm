@@ -347,6 +347,15 @@ final class AppModel: ObservableObject {
     }
     @Published var closeRequest: CloseRequest?
 
+    /// New Agent on a host with no room left (`HostCapacity.Level.critical`): the
+    /// alert names the reasons and starts the agent only if asked to.
+    struct CapacityWarning {
+        let title: String
+        let message: String
+        let proceed: () -> Void
+    }
+    @Published var capacityWarning: CapacityWarning?
+
     private let store = DeviceStore()
     private var services: [UUID: HerdrService] = [:]
     private var sessionTasks: [UUID: Task<Void, Never>] = [:]
@@ -2681,9 +2690,27 @@ final class AppModel: ObservableObject {
         args: [String],
         grazrAccount: GrazrAccount? = nil,
         recordedArguments: [String]? = nil,
-        closingPane: String? = nil
+        closingPane: String? = nil,
+        ignoringCapacity: Bool = false
     ) {
         Task {
+            // A host whose agents are about to be OOM-killed asks first. A host that
+            // cannot be sampled in time starts the agent as before.
+            if !ignoringCapacity, let capacity = await hostCapacity(device), capacity.level == .critical {
+                capacityWarning = CapacityWarning(
+                    title: String(localized: "\(device.name) is full"),
+                    message: HostCapacityFormat.summary(capacity, device: device.name)
+                        + "\n\n" + HostCapacityFormat.levelHelp(.critical),
+                    proceed: { [weak self] in
+                        self?.startNewAgent(
+                            device: device, kind: kind, workspaceID: workspaceID, args: args,
+                            grazrAccount: grazrAccount, recordedArguments: recordedArguments,
+                            closingPane: closingPane, ignoringCapacity: true
+                        )
+                    }
+                )
+                return
+            }
             // An account not signed in for pinned agents yet is signed in
             // first; the agent starts once grazr has the token.
             if let grazrAccount, !grazrAccount.hasToken(now: Date()) {
@@ -2742,6 +2769,29 @@ final class AppModel: ObservableObject {
                 }
                 actionError = actionErrorMessage(error, device: device)
             }
+        }
+    }
+
+    /// One sample of `device` for New Agent's capacity check, or nil when the host
+    /// is not Linux, cannot be sampled, or takes longer than `timeout`.
+    private func hostCapacity(_ device: Device, timeout: Double = 4) async -> HostCapacity? {
+        guard MachineStatsStream.isSupported(device) else { return nil }
+        return await withTaskGroup(of: HostCapacity?.self) { group in
+            group.addTask {
+                do {
+                    for try await sample in MachineStatsStream.samples(device: device, frames: 1) {
+                        return MachineStatsComputer.snapshot(previous: nil, current: sample).capacity
+                    }
+                } catch {}
+                return nil
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
         }
     }
 

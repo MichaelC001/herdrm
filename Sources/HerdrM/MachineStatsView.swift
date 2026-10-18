@@ -18,7 +18,9 @@ enum MachineStatsDefaults {
 }
 
 /// CPU / RAM / DISK meters for the selected pane's host, in the sidebar footer
-/// just above the device switcher. Clicking opens `MachineStatsPanel`. Runs the
+/// just above the device switcher, plus AGENTS (herdr's panes against herdr's
+/// memory cap) on a Linux host that caps herdr, and a warning when that host has
+/// no room for another agent. Clicking opens `MachineStatsPanel`. Runs the
 /// sampler while it is on screen and the window is visible.
 struct SidebarMachineStats: View {
     @ObservedObject var stats: MachineStatsModel
@@ -39,7 +41,16 @@ struct SidebarMachineStats: View {
                 SidebarMeter(label: "CPU", percent: snapshot?.cpuPercent)
                 SidebarMeter(label: "RAM", percent: snapshot.map { $0.memFraction * 100 })
                 SidebarMeter(label: "DISK", percent: snapshot?.fullestDisk.map { $0.fraction * 100 })
-                if case .failed(let message) = stats.state, snapshot == nil {
+                if let agents = snapshot?.agentsMemFraction {
+                    SidebarMeter(label: "AGENTS", percent: agents * 100)
+                }
+                if let capacity = snapshot?.capacity, capacity.level == .critical {
+                    Image(systemName: "exclamationmark.octagon.fill")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Theme.danger)
+                        .help(HostCapacityFormat.summary(capacity, device: device.name))
+                        .accessibilityIdentifier("sidebar.machineStats.full")
+                } else if case .failed(let message) = stats.state, snapshot == nil {
                     Image(systemName: "exclamationmark.triangle")
                         .font(.system(size: 10.5))
                         .foregroundStyle(Theme.warning)
@@ -297,6 +308,24 @@ struct MachineStatsPanel: View {
                 value: String(localized: "\(MachineStatsFormat.bytes(snapshot.memUsedBytes)) of \(MachineStatsFormat.bytes(snapshot.memTotalBytes))"),
                 percent: snapshot.memFraction * 100
             )
+            if let used = snapshot.agentsMemBytes, let limit = snapshot.agentsMemLimitBytes,
+               let fraction = snapshot.agentsMemFraction {
+                ResourceBar(
+                    title: String(localized: "Agents"),
+                    value: String(localized: "\(MachineStatsFormat.bytes(used)) of \(MachineStatsFormat.bytes(limit))"),
+                    percent: fraction * 100
+                )
+            }
+            if let capacity = snapshot.capacity, capacity.level != .ok {
+                Label(
+                    HostCapacityFormat.reasons(capacity),
+                    systemImage: capacity.level == .critical ? "exclamationmark.octagon.fill" : "exclamationmark.triangle"
+                )
+                .font(.system(size: 11))
+                .foregroundStyle(capacity.level == .critical ? Theme.danger : Theme.warning)
+                .help(HostCapacityFormat.levelHelp(capacity.level))
+                .accessibilityIdentifier("machineStats.capacity")
+            }
             if snapshot.swapTotalBytes > 0, snapshot.swapUsedBytes > 0 {
                 ResourceBar(
                     title: String(localized: "Swap"),
