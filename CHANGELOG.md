@@ -5,6 +5,22 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
+## [Unreleased]
+
+### Added
+- **Project panel.** Each space has a Project view in the right pane, opened
+  from its "Project" row in the sidebar or "Project…" in the space's menu. It
+  probes the space's device and lists the project's hot-reload servers with
+  their ports, bind addresses, systemd units and log files. Docker Compose
+  projects and containers show health and published ports, alongside the
+  host's load, memory and Docker version. Local Parallels, VMPal and Lima VMs
+  can be attached, declared or suggested for the project. Its URLs can be
+  opened or copied, or overridden with the public address actually used.
+  Overrides, attached containers and VMs, hidden listeners, linked hosts and a
+  custom project root persist per project in HerdrM's own store. Status
+  refreshes every 15 seconds while the panel is visible. The panel is read-only
+  in this release; start, stop and logs come next.
+
 ## [0.6.18] - 2026-10-17
 
 ### Added
