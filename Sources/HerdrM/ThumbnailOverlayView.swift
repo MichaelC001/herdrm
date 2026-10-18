@@ -34,6 +34,7 @@ final class ThumbnailOverlayView: NSView {
         self.background = background
         super.init(frame: .zero)
         wantsLayer = true
+        layerContentsRedrawPolicy = .duringViewResize
     }
 
     @available(*, unavailable)
@@ -41,13 +42,16 @@ final class ThumbnailOverlayView: NSView {
 
     override var isFlipped: Bool { true }
 
+    /// The fill is forced opaque in `draw`, so the layer can skip blending with the terminal beneath.
+    override var isOpaque: Bool { true }
+
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override func draw(_ dirtyRect: NSRect) {
-        background.setFill()
+        background.withAlphaComponent(1).setFill()
         bounds.fill()
         image.draw(in: ThumbnailOverlayGeometry.fittedRect(imageSize: image.size, in: bounds),
-                   from: .zero, operation: .copy, fraction: 1,
+                   from: .zero, operation: .sourceOver, fraction: 1,
                    respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high.rawValue])
     }
 }

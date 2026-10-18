@@ -26,4 +26,10 @@ final class ThumbnailOverlayGeometryTests: XCTestCase {
         view.frame = NSRect(x: 0, y: 0, width: 50, height: 50)
         XCTAssertNil(view.hitTest(NSPoint(x: 10, y: 10)))
     }
+
+    func testOverlayIsOpaqueEvenWithATranslucentBackground() {
+        let view = ThumbnailOverlayView(image: NSImage(size: NSSize(width: 4, height: 4)),
+                                        background: NSColor.black.withAlphaComponent(0.5))
+        XCTAssertTrue(view.isOpaque)
+    }
 }
