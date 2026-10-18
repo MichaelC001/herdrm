@@ -141,9 +141,12 @@ private struct ProjectPanel: View {
     private func loaded(_ snapshot: ProjectSnapshot) -> some View {
         VStack(spacing: 0) {
             if case .failed(let message) = entry?.state { errorBanner(message) }
-            ScrollViewReader { _ in
+            ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: ProjectMetrics.cardSpacing) {
+                        ProjectOverviewCard(
+                            topology: ProjectTopology.make(snapshot: snapshot, device: context.device, linked: linkedHosts),
+                            scrollTo: { id in withAnimation { proxy.scrollTo(id, anchor: .top) } })
                         hotReloadSection(snapshot)
                         dockerSection(snapshot)
                         hostsSection(snapshot)

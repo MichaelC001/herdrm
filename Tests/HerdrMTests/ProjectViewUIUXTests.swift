@@ -295,4 +295,36 @@ final class ProjectViewUIUXTests: XCTestCase {
         ]
         XCTAssertEqual(projectEnvKeys(snap), [".env": ["DB_URL", "API_KEY"], ".env.local": ["DB_URL"]])
     }
+
+    func testOverviewShowsLanesForRemoteSpace() throws {
+        let hidden = server("vite@web", framework: "vite-hidden-fw", port: 5173, hidden: true)
+        let entry = ProjectInspectorModel.Entry(snapshot: snapshot(extraServers: [hidden]), state: .live, lastProbe: Date(), rawProbe: nil, localVMs: nil)
+        let (model, _) = try model(entry: entry)
+        let (window, _) = host(model)
+        defer { window.close() }
+        settle()
+        let all = elements(in: window)
+        for id in ["project.overview.node.mac", "project.overview.node.host", "project.overview.lane.hot", "project.overview.lane.docker", "project.overview.lane.vms"] {
+            XCTAssertNotNil(element(all, id: id), "missing \(id)")
+        }
+        let texts = texts(all)
+        for expected in ["Architecture", "Mac", "devbox", "ssh"] { XCTAssertTrue(texts.contains(expected), "missing \(expected)") }
+        XCTAssertFalse(texts.contains("vite-hidden-fw"), "hidden server leaked into the overview")
+    }
+
+    func testOverviewCollapsesToThisMacForLocalSpace() throws {
+        var snap = snapshot()
+        snap.identity = ProjectIdentity(deviceID: Device.local.id, root: root, worktreeRoots: [root])
+        let entry = ProjectInspectorModel.Entry(snapshot: snap, state: .live, lastProbe: Date(), rawProbe: nil, localVMs: nil)
+        let (model, _) = try model(entry: entry, device: .local)
+        let (window, _) = host(model)
+        defer { window.close() }
+        settle()
+        let all = elements(in: window)
+        XCTAssertNil(element(all, id: "project.overview.node.mac"))
+        XCTAssertNotNil(element(all, id: "project.overview.node.host"))
+        let texts = texts(all)
+        XCTAssertTrue(texts.contains("This Mac"))
+        XCTAssertFalse(texts.contains("ssh"))
+    }
 }

@@ -101,6 +101,17 @@ private func copyToPasteboard(_ string: String) {
     NSPasteboard.general.setString(string, forType: .string)
 }
 
+extension VMRow {
+    /// Localized provider name shown as a tag.
+    var providerName: LocalizedStringKey {
+        switch provider {
+        case .parallels: "Parallels"
+        case .vmpal: "VMPal"
+        case .lima: "Lima"
+        }
+    }
+}
+
 struct VMRowView: View {
     let vm: VMRow
     var onAttach: (() -> Void)?
@@ -115,14 +126,6 @@ struct VMRowView: View {
         }
     }
 
-    private var providerName: LocalizedStringKey {
-        switch vm.provider {
-        case .parallels: "Parallels"
-        case .vmpal: "VMPal"
-        case .lima: "Lima"
-        }
-    }
-
     var body: some View {
         HStack(spacing: 8) {
             ProjectKindTile(kind: .vm)
@@ -130,7 +133,7 @@ struct VMRowView: View {
             Text(verbatim: vm.name)
                 .font(.system(size: ProjectMetrics.textSize))
                 .foregroundStyle(Theme.text)
-            ProjectTag(providerName)
+            ProjectTag(vm.providerName)
             Text(verbatim: vm.state)
                 .font(.system(size: 11.5))
                 .foregroundStyle(Theme.textTertiary)
