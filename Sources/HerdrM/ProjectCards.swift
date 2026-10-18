@@ -92,54 +92,94 @@ enum ProjectSectionID: String {
     case overview, hot, docker, hosts, links, files, other, hidden
 }
 
+/// Makes a card's label row a toggle; a collapsed card draws no body at all.
+struct ProjectDisclosure {
+    let isExpanded: Bool
+    let toggle: () -> Void
+}
+
 /// A caps label with an optional count and trailing control above an inset rounded card.
 struct ProjectCard<Trailing: View, Content: View>: View {
     let title: LocalizedStringKey
     let count: Int?
     let id: ProjectSectionID?
+    let disclosure: ProjectDisclosure?
     let trailing: Trailing
     let content: Content
 
     init(
         _ title: LocalizedStringKey, count: Int? = nil, id: ProjectSectionID? = nil,
+        disclosure: ProjectDisclosure? = nil,
         @ViewBuilder trailing: () -> Trailing = { EmptyView() },
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.count = count
         self.id = id
+        self.disclosure = disclosure
         self.trailing = trailing()
         self.content = content()
     }
 
+    private var labelRow: some View {
+        HStack(spacing: 6) {
+            if let disclosure {
+                Button(action: disclosure.toggle) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundStyle(Theme.textTertiary)
+                            .rotationEffect(.degrees(disclosure.isExpanded ? 90 : 0))
+                            .frame(width: 10)
+                        labelAndCount
+                        Spacer(minLength: 8)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(title)
+            } else {
+                labelAndCount
+                Spacer(minLength: 8)
+            }
+            trailing
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private var labelAndCount: some View {
+        HStack(spacing: 6) {
+            SheetSectionLabel(title)
+            if let count, count > 0 {
+                Text(verbatim: "\(count)").font(.system(size: 10.5)).foregroundStyle(Theme.textGhost)
+            }
+        }
+    }
+
     var body: some View {
         let card = VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                SheetSectionLabel(title)
-                if let count, count > 0 {
-                    Text(verbatim: "\(count)").font(.system(size: 10.5)).foregroundStyle(Theme.textGhost)
-                }
-                Spacer(minLength: 8)
-                trailing
-            }
-            .padding(.horizontal, 4)
-            VStack(alignment: .leading, spacing: 0) { content }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(
-                    RoundedRectangle(cornerRadius: ProjectMetrics.cardRadius).fill(Theme.cardBackground)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: ProjectMetrics.cardRadius)
-                        .strokeBorder(Theme.hairline, lineWidth: 1)
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
+            labelRow
+            if disclosure?.isExpanded ?? true { cardBody }
         }
         if let id {
             card.id(id).accessibilityIdentifier("project.section.\(id.rawValue)")
         } else {
             card
         }
+    }
+
+    private var cardBody: some View {
+        VStack(alignment: .leading, spacing: 0) { content }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: ProjectMetrics.cardRadius).fill(Theme.cardBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: ProjectMetrics.cardRadius)
+                    .strokeBorder(Theme.hairline, lineWidth: 1)
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -206,21 +246,11 @@ struct ProjectDisclosureCard<Content: View>: View {
     }
 
     var body: some View {
-        ProjectCard(title, count: count, id: id) {
-            Button {
-                isExpanded.toggle()
-            } label: {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9.5, weight: .semibold))
-                    .foregroundStyle(Theme.textTertiary)
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    .frame(width: 20, height: 20)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(title)
-        } content: {
-            if isExpanded { content }
+        ProjectCard(
+            title, count: count, id: id,
+            disclosure: ProjectDisclosure(isExpanded: isExpanded, toggle: { isExpanded.toggle() })
+        ) {
+            content
         }
     }
 }
@@ -232,10 +262,9 @@ struct ProjectSummaryStrip: View {
 
     private struct Item: Identifiable {
         let kind: ProjectKind
-        let label: LocalizedStringKey
-        let name: String
+        let label: String
         let value: String
-        var id: String { name }
+        var id: String { label }
     }
 
     private var items: [Item] {
@@ -244,15 +273,15 @@ struct ProjectSummaryStrip: View {
         let running = snapshot.compose.reduce(0) { $0 + $1.running }
             + snapshot.attachedContainers.filter { $0.state == "running" }.count
         var items: [Item] = []
-        if devServers > 0 { items.append(Item(kind: .hotReload, label: "Dev servers", name: "Dev servers", value: "\(devServers)")) }
-        if total > 0 { items.append(Item(kind: .compose, label: "Containers", name: "Containers", value: "\(running)/\(total)")) }
-        if !snapshot.vms.isEmpty { items.append(Item(kind: .vm, label: "VMs", name: "VMs", value: "\(snapshot.vms.count)")) }
-        items.append(Item(kind: .host, label: "Hosts", name: "Hosts", value: "\(1 + linkedHostCount)"))
+        if devServers > 0 { items.append(Item(kind: .hotReload, label: String(localized: "Dev servers"), value: "\(devServers)")) }
+        if total > 0 { items.append(Item(kind: .compose, label: String(localized: "Containers"), value: "\(running)/\(total)")) }
+        if !snapshot.vms.isEmpty { items.append(Item(kind: .vm, label: String(localized: "VMs"), value: "\(snapshot.vms.count)")) }
+        items.append(Item(kind: .host, label: String(localized: "Hosts"), value: "\(1 + linkedHostCount)"))
         return items
     }
 
     private var summaryText: String {
-        items.map { "\($0.name) \($0.value)" }.joined(separator: " · ")
+        items.map { "\($0.label) \($0.value)" }.joined(separator: " · ")
     }
 
     var body: some View {
@@ -263,7 +292,7 @@ struct ProjectSummaryStrip: View {
                     Image(systemName: item.kind.symbol)
                         .font(.system(size: 9.5))
                         .foregroundStyle(item.kind.tint)
-                    Text(item.label).foregroundStyle(Theme.textSecondary)
+                    Text(verbatim: item.label).foregroundStyle(Theme.textSecondary)
                     Text(verbatim: item.value).monospacedDigit().foregroundStyle(Theme.text)
                 }
             }
