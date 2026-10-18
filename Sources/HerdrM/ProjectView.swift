@@ -296,6 +296,13 @@ private struct ProjectPanel: View {
         .accessibilityLabel("Project options")
     }
 
+    /// Devices linked to this project, resolved through the app model.
+    private var linkedHosts: [(device: Device, root: String)] {
+        projects.linkedDevices(for: space).compactMap { link in
+            model.device(link.deviceID).map { (device: $0, root: link.root) }
+        }
+    }
+
     /// Other SSH devices that are not linked to this project yet.
     private var linkableHosts: [Device] {
         let linked = Set(projects.linkedDevices(for: space).map(\.deviceID))
@@ -363,32 +370,11 @@ private struct ProjectPanel: View {
     }
 
     private func hostsSection(_ snapshot: ProjectSnapshot) -> some View {
-        ProjectCard("Hosts & VMs", count: snapshot.vms.count, id: .hosts) {
-            HostHealthRow(host: snapshot.host)
-            ProjectCardList(snapshot.vms) { vm in
-                VMRowView(
-                    vm: vm,
-                    onAttach: vm.match == .suggested ? { projects.attachVM(space: space, vm: vm) } : nil,
-                    onDetach: vm.match == .attached ? { projects.detachVM(space: space, id: vm.id) } : nil)
-            }
-            ForEach(projects.linkedDevices(for: space), id: \.deviceID) { link in
-                if let device = model.device(link.deviceID) {
-                    LinkedHostRow(device: device, root: link.root) {
-                        projects.unlinkDevice(space: space, deviceID: link.deviceID)
-                    }
-                }
-            }
-            if !snapshot.otherVMs.isEmpty {
-                Menu("Attach VM…") {
-                    ForEach(snapshot.otherVMs) { vm in
-                        Button("\(vm.name) (\(vm.provider.rawValue))") { projects.attachVM(space: space, vm: vm) }
-                    }
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .frame(minHeight: ProjectMetrics.rowHeight)
-            }
-        }
+        ProjectHostsCard(
+            snapshot: snapshot, linked: linkedHosts,
+            onAttachVM: { projects.attachVM(space: space, vm: $0) },
+            onDetachVM: { projects.detachVM(space: space, id: $0) },
+            onUnlink: { projects.unlinkDevice(space: space, deviceID: $0) })
     }
 
     private func linksSection(_ snapshot: ProjectSnapshot) -> some View {

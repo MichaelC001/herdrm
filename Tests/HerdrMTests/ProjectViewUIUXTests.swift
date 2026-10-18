@@ -254,4 +254,19 @@ final class ProjectViewUIUXTests: XCTestCase {
         XCTAssertNil(element(elements(in: window), id: "project.containerDetail"), "stale selection must be pruned")
         XCTAssertNotNil(element(elements(in: window), id: "project.container.c9"))
     }
+
+    func testHostCardShowsMetersAndProviderTag() throws {
+        let entry = ProjectInspectorModel.Entry(snapshot: snapshot(), state: .live, lastProbe: Date(), rawProbe: nil, localVMs: nil)
+        let (model, _) = try model(entry: entry)
+        let (window, _) = host(model)
+        defer { window.close() }
+        settle()
+        let all = elements(in: window)
+        let texts = texts(all)
+        for expected in ["Lima", "Load", "Memory", "acme-vm", "devbox"] {
+            XCTAssertTrue(texts.contains(expected), "missing \(expected) in \(texts.sorted())")
+        }
+        XCTAssertNotNil(element(all, id: "project.host.meter.load"))
+        XCTAssertNotNil(element(all, id: "project.host.meter.memory"))
+    }
 }
