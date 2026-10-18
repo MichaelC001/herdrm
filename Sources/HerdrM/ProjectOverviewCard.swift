@@ -94,7 +94,11 @@ struct ProjectOverviewCard: View {
         let host = topology.host
         return TopologyNode(identifier: "project.overview.node.host") {
             NodeTitle {
-                DeviceIcon(osID: host.device.osID, isLocal: host.device.isLocal, size: 12)
+                if topology.isRemote {
+                    DeviceIcon(osID: host.device.osID, isLocal: host.device.isLocal, size: 12)
+                } else {
+                    Image(systemName: "laptopcomputer").font(.system(size: 12))
+                }
             } name: {
                 if topology.isRemote { Text(verbatim: host.device.name) } else { Text("This Mac") }
             }
@@ -106,17 +110,20 @@ struct ProjectOverviewCard: View {
     }
 
     private func linkedNode(_ link: ProjectTopology.LinkedNode) -> some View {
-        TopologyNode(identifier: "project.overview.node.linked.\(link.id.uuidString)") {
-            NodeTitle {
-                DeviceIcon(osID: link.device.osID, isLocal: link.device.isLocal, size: 12)
-            } name: {
-                Text(verbatim: link.device.name)
+        TopologyNode(
+            identifier: "project.overview.node.linked.\(link.id.uuidString)",
+            buttonLabel: Text(verbatim: link.device.name), action: { scrollTo(.hosts) }
+        ) {
+            HStack(spacing: 8) {
+                DeviceChip(device: link.device)
+                Text(verbatim: link.root)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                ProjectTag("linked", tint: Theme.accent)
+                Spacer(minLength: 0)
             }
-            Text(verbatim: link.root)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Theme.textSecondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
         }
     }
 
@@ -130,7 +137,8 @@ struct ProjectOverviewCard: View {
     }
 
     private func hotLane(_ servers: [DevServer]) -> some View {
-        TopologyLane(title: "Hot reload", id: "hot", label: "Hot reload lane", action: { scrollTo(.hot) }) {
+        TopologyLane(title: "Hot reload", id: "hot", label: "Hot reload lane",
+            summary: servers.map { "\($0.framework) :\($0.port)" }.joined(separator: ", "), action: { scrollTo(.hot) }) {
             if servers.isEmpty {
                 GhostLine("No dev servers")
             } else {
@@ -147,7 +155,7 @@ struct ProjectOverviewCard: View {
     }
 
     private func dockerLane(_ host: ProjectTopology.HostNode) -> some View {
-        TopologyLane(title: "Docker", id: "docker", label: "Docker lane", action: { scrollTo(.docker) }) {
+        TopologyLane(title: "Docker", id: "docker", label: "Docker lane", summary: dockerSummary(host), action: { scrollTo(.docker) }) {
             ForEach(host.compose) { group in
                 HStack(spacing: 5) {
                     StatusDot(color: group.total > 0 && group.running == group.total ? Theme.success : Theme.textSecondary)
@@ -172,8 +180,16 @@ struct ProjectOverviewCard: View {
         }
     }
 
+    private func dockerSummary(_ host: ProjectTopology.HostNode) -> String {
+        var parts = host.compose.map { "\($0.name) \($0.running)/\($0.total)" }
+        if host.attachedCount > 0 { parts.append("\(host.attachedCount) attached") }
+        if host.dockerError != nil { parts.append("Docker down") }
+        return parts.joined(separator: ", ")
+    }
+
     private func vmsLane(_ vms: [VMRow]) -> some View {
-        TopologyLane(title: "VMs", id: "vms", label: "VMs lane", action: { scrollTo(.hosts) }) {
+        TopologyLane(title: "VMs", id: "vms", label: "VMs lane",
+            summary: vms.map { "\($0.name) \($0.state)" }.joined(separator: ", "), action: { scrollTo(.hosts) }) {
             if vms.isEmpty {
                 GhostLine("No VMs")
             } else {
@@ -193,16 +209,30 @@ struct ProjectOverviewCard: View {
 
 private struct TopologyNode<Content: View>: View {
     let identifier: String
+    var buttonLabel: Text?
+    var action: (() -> Void)?
     @ViewBuilder let content: Content
 
-    var body: some View {
+    private var box: some View {
         VStack(alignment: .leading, spacing: 8) { content }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 8).fill(Theme.itemWash))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.hairline, lineWidth: 1))
-            .accessibilityIdentifier(identifier)
-            .accessibilityElement(children: .contain)
+    }
+
+    var body: some View {
+        Group {
+            if let action {
+                Button(action: action) { box.contentShape(Rectangle()) }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(buttonLabel ?? Text(verbatim: identifier))
+            } else {
+                box
+            }
+        }
+        .accessibilityIdentifier(identifier)
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -222,6 +252,8 @@ private struct TopologyLane<Lines: View>: View {
     let title: LocalizedStringKey
     let id: String
     let label: LocalizedStringKey
+    /// Spoken value: the lane's lines flattened, since the label replaces its children.
+    let summary: String
     let action: () -> Void
     @ViewBuilder let lines: Lines
 
@@ -238,6 +270,7 @@ private struct TopologyLane<Lines: View>: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+        .accessibilityValue(Text(verbatim: summary))
         .accessibilityIdentifier("project.overview.lane.\(id)")
         .accessibilityElement(children: .contain)
     }

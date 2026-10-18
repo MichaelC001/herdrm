@@ -310,6 +310,9 @@ final class ProjectViewUIUXTests: XCTestCase {
         let texts = texts(all)
         for expected in ["Architecture", "Mac", "devbox", "ssh"] { XCTAssertTrue(texts.contains(expected), "missing \(expected)") }
         XCTAssertFalse(texts.contains("vite-hidden-fw"), "hidden server leaked into the overview")
+        let hotValue = try XCTUnwrap(element(all, id: "project.overview.lane.hot")?.value)
+        XCTAssertTrue(hotValue.contains("Next.js"), hotValue)
+        XCTAssertFalse(hotValue.contains("vite-hidden-fw"), hotValue)
     }
 
     func testOverviewCollapsesToThisMacForLocalSpace() throws {
