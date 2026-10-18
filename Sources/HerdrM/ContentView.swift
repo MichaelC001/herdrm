@@ -323,6 +323,7 @@ struct DetailView: View {
     @ObservedObject var model: AppModel
     @Binding var sidebarCollapsed: Bool
     @State private var hasOpenedFileManager = false
+    @State private var hasOpenedProject = false
     /// Persisted here (Settings toggles the same key); the model mirrors it because
     /// selection logic there decides which panes stay attached.
     @AppStorage(TerminalDefaults.tabLayoutKey) private var tabLayoutEnabled = true
@@ -356,8 +357,9 @@ struct DetailView: View {
                         attachRetry = [:]
                     }
                 }
-                .onChange(of: model.isFileManagerActive) { _, active in
-                    if active { hasOpenedFileManager = true }
+                .onChange(of: model.detailMode) { _, mode in
+                    if mode == .files { hasOpenedFileManager = true }
+                    if mode == .project { hasOpenedProject = true }
                 }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -368,16 +370,22 @@ struct DetailView: View {
         ZStack {
             terminal
                 .clipped()
-                .opacity(model.isFileManagerActive ? 0 : 1)
-                .allowsHitTesting(!model.isFileManagerActive)
+                .opacity(model.isDetailCovered ? 0 : 1)
+                .allowsHitTesting(!model.isDetailCovered)
             if hasOpenedFileManager {
                 DeviceFilesView(model: model)
-                    .opacity(model.isFileManagerActive ? 1 : 0)
-                    .allowsHitTesting(model.isFileManagerActive)
+                    .opacity(model.detailMode == .files ? 1 : 0)
+                    .allowsHitTesting(model.detailMode == .files)
+            }
+            if hasOpenedProject {
+                ProjectView(model: model)
+                    .opacity(model.detailMode == .project ? 1 : 0)
+                    .allowsHitTesting(model.detailMode == .project)
             }
         }
         .onAppear {
-            if model.isFileManagerActive { hasOpenedFileManager = true }
+            if model.detailMode == .files { hasOpenedFileManager = true }
+            if model.detailMode == .project { hasOpenedProject = true }
         }
     }
 
@@ -397,6 +405,14 @@ struct DetailView: View {
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Theme.textTertiary)
                     Text("Files")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.text)
+                    Spacer()
+                } else if model.detailMode == .project {
+                    Image(systemName: "shippingbox")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.textTertiary)
+                    Text("Project")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.text)
                     Spacer()
@@ -544,7 +560,7 @@ struct DetailView: View {
                     dark: colorScheme == .dark,
                     mouseReporting: terminalMouseReporting,
                     copyOnSelect: terminalCopyOnSelect,
-                    isVisible: model.selectedShellID == session.id && !model.isFileManagerActive,
+                    isVisible: model.selectedShellID == session.id && !model.isDetailCovered,
                     onAttachmentError: { model.actionError = $0 },
                     onAttachmentUploadingChanged: { uploadingAttachment = $0 },
                     onExit: { _ in model.closeShellSession(session.id) }
@@ -610,7 +626,7 @@ struct DetailView: View {
                     dark: colorScheme == .dark,
                     mouseReporting: terminalMouseReporting,
                     copyOnSelect: terminalCopyOnSelect,
-                    isVisible: model.selectedShellID == nil && !model.isFileManagerActive,
+                    isVisible: model.selectedShellID == nil && !model.isDetailCovered,
                     onExit: { _ in model.shellSplitAxis = nil },
                     onViewReady: {
                         splitTracker.shellView = $0
@@ -795,7 +811,7 @@ struct DetailView: View {
                 mouseReporting: terminalMouseReporting,
                 copyOnSelect: terminalCopyOnSelect,
                 // A selected shell or the file manager covers the attach side.
-                isVisible: isVisible && model.selectedShellID == nil && !model.isFileManagerActive,
+                isVisible: isVisible && model.selectedShellID == nil && !model.isDetailCovered,
                 historyService: model.service(for: session.device),
                 onAttachmentError: { model.actionError = $0 },
                 onAttachmentUploadingChanged: { uploadingAttachment = $0 },

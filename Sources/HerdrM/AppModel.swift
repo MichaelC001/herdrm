@@ -286,9 +286,20 @@ final class AppModel: ObservableObject {
     /// from that space's menu; the sheet reads it once, then clears it.
     @Published var newItemSpace: SpaceRef?
     @Published var showSearch = false
-    @Published var isFileManagerActive = false {
+    /// What the right pane shows. `.terminal` is the attached terminal; the other
+    /// modes cover it with a view of their own.
+    enum DetailMode: Equatable { case terminal, files, project }
+    @Published var detailMode: DetailMode = .terminal {
         didSet { synchronizeConversationHistory() }
     }
+    /// True while the file manager specifically is showing. Setting it is the
+    /// shorthand the many "go back to the terminal" sites use.
+    var isFileManagerActive: Bool {
+        get { detailMode == .files }
+        set { detailMode = newValue ? .files : .terminal }
+    }
+    /// True whenever something other than the terminal fills the right pane.
+    var isDetailCovered: Bool { detailMode != .terminal }
     @Published var shellSplitAxis: SplitAxis?
     /// Set by `reveal` when a jump lands while the local-shell split is open, and consumed once the
     /// main window is key again. Only an actual jump sets it: dismissing the search with
@@ -807,7 +818,7 @@ final class AppModel: ObservableObject {
     }
 
     var isClaudeHistorySelected: Bool {
-        guard !isFileManagerActive, selectedShellID == nil,
+        guard !isDetailCovered, selectedShellID == nil,
               let entry = selectedEntry else { return false }
         return ["claude", "claude-code"].contains(entry.agent.agent.lowercased())
     }
@@ -1274,6 +1285,13 @@ final class AppModel: ObservableObject {
         selectedShellID = nil
     }
 
+    /// Shows the Project pane, on `space` when one is given.
+    func openProject(_ space: SpaceRef?) {
+        if let space { selectedSpace = space }
+        detailMode = .project
+        selectedShellID = nil
+    }
+
     func selectAgent(_ ref: PaneRef) {
         isFileManagerActive = false
         selectedPane = ref
@@ -1286,7 +1304,7 @@ final class AppModel: ObservableObject {
 
     /// The host the machine stats follow: the selected pane's device.
     var statsDevice: Device? {
-        guard !isFileManagerActive else { return nil }
+        guard !isDetailCovered else { return nil }
         guard let device = selectedShell?.device ?? selectedAttachedEntry?.device else { return nil }
         return MachineStatsStream.isSupported(device) ? device : nil
     }

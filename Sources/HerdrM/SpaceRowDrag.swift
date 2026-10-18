@@ -64,6 +64,7 @@ struct SpaceRowDragHost: View {
     let onClick: () -> Void
     let onNewAgent: () -> Void
     let onNewTerminal: () -> Void
+    let onOpenProject: () -> Void
     let onRename: () -> Void
     let onClose: () -> Void
     let onDragStart: (String) -> Void
@@ -79,6 +80,7 @@ struct SpaceRowDragHost: View {
             menuItems: [
                 .item(title: String(localized: "New Agent…"), action: onNewAgent),
                 .item(title: String(localized: "New Terminal…"), action: onNewTerminal),
+                .item(title: String(localized: "Project…"), action: onOpenProject),
                 .separator,
                 .item(title: String(localized: "Rename Space…"), action: onRename),
                 .separator,

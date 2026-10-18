@@ -69,4 +69,12 @@ final class SidebarSectionButtonsUIUXTests: XCTestCase {
         XCTAssertFalse(sidebar.model.showNewAgent)
         XCTAssertFalse(sidebar.model.showNewSpace)
     }
+
+    func testProjectActionRowFollowsFiles() throws {
+        let sidebar = try SidebarHarness(spaces: 3, agents: 4, pinnedHeaders: false)
+        let names = sidebar.actionRowNames()
+        let files = try XCTUnwrap(names.firstIndex(of: String(localized: "Files")), "\(names)")
+        let project = try XCTUnwrap(names.firstIndex(of: String(localized: "Project")), "\(names)")
+        XCTAssertEqual(project, files + 1, "\(names)")
+    }
 }
