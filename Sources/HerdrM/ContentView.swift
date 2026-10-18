@@ -391,13 +391,6 @@ struct DetailView: View {
 
     // MARK: - Titlebar strip (28pt, traditional)
 
-    /// "Project · name" once the Space's project is known, else plain "Project".
-    private var projectTitle: String {
-        let name = model.selectedSpace.flatMap { model.projects.identity(for: $0)?.name }
-        guard let name else { return String(localized: "Project") }
-        return String(localized: "Project · \(name)")
-    }
-
     private var titlebar: some View {
         HStack(spacing: 8) {
             if sidebarCollapsed {
@@ -419,7 +412,7 @@ struct DetailView: View {
                     Image(systemName: "shippingbox")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Theme.textTertiary)
-                    Text(projectTitle)
+                    ProjectTitleText(projects: model.projects, space: model.selectedSpace)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.text)
                     Spacer()

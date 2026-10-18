@@ -57,10 +57,12 @@ final class ProjectInspectorModel: ObservableObject {
     }
 
     /// Test seam: shows `entry` for `space` without probing.
+    #if DEBUG
     func _setEntryForTesting(space: SpaceRef, key: String, entry: Entry) {
         entries[key] = entry
         keyBySpace[space] = key
     }
+    #endif
 
     // MARK: - Probing
 
@@ -206,6 +208,10 @@ final class ProjectInspectorModel: ObservableObject {
         mutate(space) { if !$0.attachedContainers.contains(name) { $0.attachedContainers.append(name) } }
     }
 
+    func detachContainer(space: SpaceRef, name: String) {
+        mutate(space) { $0.attachedContainers.removeAll { $0 == name } }
+    }
+
     func dismissSuggestion(space: SpaceRef, name: String) {
         mutate(space) { if !$0.dismissedSuggestions.contains(name) { $0.dismissedSuggestions.append(name) } }
     }
@@ -220,6 +226,12 @@ final class ProjectInspectorModel: ObservableObject {
     /// `id` is a probed VM id or the provider-qualified `VMRow.id`.
     func detachVM(space: SpaceRef, id: String) {
         mutate(space) { $0.attachedVMs.removeAll { $0.id == id || "\($0.provider.rawValue):\($0.id)" == id } }
+    }
+
+    /// Hosts linked to the Space's project, from the saved overrides.
+    func linkedDevices(for space: SpaceRef) -> [LinkedDevice] {
+        guard let key = keyBySpace[space], !Self.isPending(key) else { return [] }
+        return store.overrides(for: key).linkedDevices
     }
 
     func linkDevice(space: SpaceRef, device: Device, root: String) {

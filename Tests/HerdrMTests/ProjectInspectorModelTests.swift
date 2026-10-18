@@ -205,6 +205,28 @@ final class ProjectInspectorModelTests: XCTestCase {
         XCTAssertEqual(updated?.urls.first?.url, "https://app.example.test")
     }
 
+    func testAttachThenDetachContainerAndLinkedDevices() async throws {
+        let runner = FakeRunner()
+        runner.setFrame(Self.devboxFrame, for: devbox.id)
+        let model = makeModel(runner)
+        await model.probe(space: space(), context: context())
+        let key = try XCTUnwrap(model.keyBySpace[space()])
+        let store = ProjectStore(directory: storeDirectory)
+
+        model.attachContainer(space: space(), name: "acme-db-1")
+        XCTAssertEqual(store.overrides(for: key).attachedContainers, ["acme-db-1"])
+        model.detachContainer(space: space(), name: "acme-db-1")
+        await model.settleMutations()
+        XCTAssertEqual(store.overrides(for: key).attachedContainers, [])
+
+        let other = Device(name: "buildbox", kind: .ssh(target: "dev@buildbox"))
+        model.linkDevice(space: space(), device: other, root: "/srv/acme")
+        XCTAssertEqual(model.linkedDevices(for: space()).map(\.deviceID), [other.id])
+        model.unlinkDevice(space: space(), deviceID: other.id)
+        await model.settleMutations()
+        XCTAssertEqual(model.linkedDevices(for: space()), [])
+    }
+
     func testUnsupportedDeviceNeverProbes() async {
         let runner = FakeRunner()
         let tailcat = Device(name: "cat", kind: .tailcat)

@@ -98,19 +98,30 @@ struct ProjectURLButtons: View {
     /// Non-nil adds a "Set URL…" popover that edits this service's override.
     var onSetURL: ((String?) -> Void)?
     var currentOverride: String?
+    /// The device is not this Mac: a loopback-only URL would open the Mac's own localhost.
+    var isRemote = false
     @State private var editing = false
 
     var body: some View {
         HStack(spacing: 4) {
             ForEach(Array(urls.enumerated()), id: \.offset) { _, url in
-                Button { ProjectURLActions.open(url) } label: {
+                if isRemote && url.loopbackOnHost {
                     Text(verbatim: url.label)
                         .font(.system(size: 11.5, design: .monospaced))
+                        .foregroundStyle(Theme.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .help("Only reachable from the host itself")
+                } else {
+                    Button { ProjectURLActions.open(url) } label: {
+                        Text(verbatim: url.label)
+                            .font(.system(size: 11.5, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .buttonStyle(.link)
+                    .help("Open this URL")
                 }
-                .buttonStyle(.link)
-                .help(url.loopbackOnHost ? "Only reachable from the host itself" : "Open this URL")
                 ProjectIconButton(systemImage: "doc.on.doc", label: "Copy URL") { ProjectURLActions.copy(url) }
             }
             if let onSetURL {
@@ -144,7 +155,7 @@ struct URLOverridePopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             SheetSectionLabel("URL override")
-            TextField("https://app.example.test", text: $text)
+            TextField(text: $text, prompt: Text(verbatim: "https://app.example.test")) { Text("URL override") }
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 280)
                 .onSubmit(save)
@@ -171,6 +182,7 @@ struct URLOverridePopover: View {
 struct DevServerRow: View {
     let server: DevServer
     let overrideURL: String?
+    var isRemote = false
     /// Nil hides the "Set URL…" control (listeners that are not part of the project).
     let onSetURL: ((String?) -> Void)?
     let onToggleHidden: () -> Void
@@ -212,7 +224,7 @@ struct DevServerRow: View {
                 ProjectVerbatimTag(text: (log as NSString).lastPathComponent, systemImage: "doc.text", help: log)
             }
             Spacer(minLength: 8)
-            ProjectURLButtons(urls: server.urls, onSetURL: onSetURL, currentOverride: overrideURL)
+            ProjectURLButtons(urls: server.urls, onSetURL: onSetURL, currentOverride: overrideURL, isRemote: isRemote)
             ProjectIconButton(
                 systemImage: server.isHidden ? "eye" : "eye.slash",
                 label: server.isHidden ? "Unhide" : "Hide", action: onToggleHidden)
@@ -226,8 +238,10 @@ struct DevServerRow: View {
 struct ContainerRowView: View {
     let container: ContainerRow
     /// Attach and Dismiss for a suggested container; nil for rows that are already part of the project.
+    var isRemote = false
     var onAttach: (() -> Void)?
     var onDismiss: (() -> Void)?
+    var onDetach: (() -> Void)?
 
     private var stateColor: Color {
         if container.health == "unhealthy" { return Theme.danger }
@@ -266,9 +280,10 @@ struct ContainerRowView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
-            ProjectURLButtons(urls: container.urls)
+            ProjectURLButtons(urls: container.urls, isRemote: isRemote)
             if let onAttach { Button("Attach", action: onAttach).controlSize(.small) }
             if let onDismiss { Button("Dismiss", action: onDismiss).controlSize(.small) }
+            if let onDetach { Button("Detach", action: onDetach).controlSize(.small) }
         }
         .frame(minHeight: ProjectRowMetrics.rowHeight)
         .help(container.image)
@@ -385,5 +400,41 @@ struct VMRowView: View {
             if let onDetach { Button("Detach", action: onDetach).controlSize(.small) }
         }
         .frame(minHeight: ProjectRowMetrics.rowHeight)
+    }
+}
+
+/// A host linked to the project, with the way back.
+struct LinkedHostRow: View {
+    let device: Device
+    let root: String
+    let onUnlink: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            DeviceChip(device: device)
+            Text(verbatim: root)
+                .font(.system(size: 11.5, design: .monospaced))
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            ProjectTag("linked", tint: Theme.accent)
+            Spacer(minLength: 8)
+            Button("Unlink", action: onUnlink).controlSize(.small)
+        }
+        .frame(minHeight: ProjectRowMetrics.rowHeight)
+    }
+}
+
+/// "Project · name" for the titlebar; observes the inspector so it follows snapshot changes.
+struct ProjectTitleText: View {
+    @ObservedObject var projects: ProjectInspectorModel
+    let space: SpaceRef?
+
+    var body: some View {
+        if let name = space.flatMap({ projects.identity(for: $0)?.name }) {
+            Text("Project · \(name)")
+        } else {
+            Text("Project")
+        }
     }
 }

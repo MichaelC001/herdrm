@@ -40,6 +40,7 @@ struct ProjectView: View {
         if let space = model.selectedSpace {
             if let context = model.projectContext(for: space) {
                 ProjectPanel(model: model, projects: model.projects, space: space, context: context)
+                    .id(space)
             } else {
                 ContentUnavailableView(
                     "Space not available", systemImage: "shippingbox",
@@ -64,6 +65,8 @@ private struct ProjectPanel: View {
     @State private var refreshing = false
     @State private var changingRoot = false
     @State private var rootText = ""
+    @State private var rootError: String?
+    @State private var confirmingReset = false
 
     private var entry: ProjectInspectorModel.Entry? { projects.entry(for: space) }
     private var snapshot: ProjectSnapshot? { entry?.snapshot }
@@ -82,6 +85,14 @@ private struct ProjectPanel: View {
             } else {
                 empty
             }
+        }
+        .confirmationDialog(
+            "Reset overrides for \(snapshot?.identity.name ?? context.workspaceLabel)?",
+            isPresented: $confirmingReset
+        ) {
+            Button("Reset overrides", role: .destructive) { projects.resetOverrides(space: space) }
+        } message: {
+            Text("This clears URLs, hidden listeners, attachments and linked hosts for this project.")
         }
         .alert("Change project root", isPresented: $changingRoot) {
             TextField("Absolute path on \(context.device.name)", text: $rootText)
@@ -121,6 +132,7 @@ private struct ProjectPanel: View {
 
     private func loaded(_ snapshot: ProjectSnapshot) -> some View {
         VStack(spacing: 0) {
+            if let rootError { errorBanner(rootError, showsStale: false) }
             if case .failed(let message) = entry?.state { errorBanner(message) }
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -139,11 +151,11 @@ private struct ProjectPanel: View {
         }
     }
 
-    private func errorBanner(_ message: String) -> some View {
+    private func errorBanner(_ message: String, showsStale: Bool = true) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.warning)
             Text(verbatim: message).foregroundStyle(Theme.text).lineLimit(2)
-            Text("Showing the last result.").foregroundStyle(Theme.textSecondary)
+            if showsStale { Text("Showing the last result.").foregroundStyle(Theme.textSecondary) }
             Spacer()
         }
         .font(.system(size: 11.5))
@@ -234,8 +246,8 @@ private struct ProjectPanel: View {
         Menu {
             Button("Change root…", action: beginChangingRoot)
             Menu("Link host…") {
-                let hosts = model.devices.filter { $0.sshTarget != nil && $0.id != context.device.id }
-                if hosts.isEmpty || snapshot == nil {
+                let hosts = linkableHosts
+                if hosts.isEmpty {
                     Text("No other SSH hosts")
                 } else {
                     ForEach(hosts) { host in
@@ -244,11 +256,12 @@ private struct ProjectPanel: View {
                                 projects.linkDevice(space: space, device: host, root: root)
                             }
                         }
+                        .disabled(snapshot == nil)
                     }
                 }
             }
             Divider()
-            Button("Reset overrides", role: .destructive) { projects.resetOverrides(space: space) }
+            Button("Reset overrides", role: .destructive) { confirmingReset = true }
                 .disabled(snapshot == nil)
         } label: {
             Image(systemName: "gearshape")
@@ -258,6 +271,12 @@ private struct ProjectPanel: View {
         .fixedSize()
         .help("Project options")
         .accessibilityLabel("Project options")
+    }
+
+    /// Other SSH devices that are not linked to this project yet.
+    private var linkableHosts: [Device] {
+        let linked = Set(projects.linkedDevices(for: space).map(\.deviceID))
+        return model.devices.filter { $0.sshTarget != nil && $0.id != context.device.id && !linked.contains($0.id) }
     }
 
     // MARK: - Actions
@@ -272,13 +291,18 @@ private struct ProjectPanel: View {
 
     private func beginChangingRoot() {
         rootText = snapshot?.identity.root ?? ""
+        rootError = nil
         changingRoot = true
     }
 
     private func applyRoot(_ text: String) {
         var path = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if path.hasPrefix("~"), context.device.isLocal { path = (path as NSString).expandingTildeInPath }
-        guard path.hasPrefix("/") else { return }
+        guard path.hasPrefix("/") else {
+            rootError = String(localized: "Enter an absolute path, such as /home/dev/app")
+            return
+        }
+        rootError = nil
         while path.count > 1, path.hasSuffix("/") { path.removeLast() }
         projects.setRoot(space: space, context: context, root: path)
     }
@@ -320,6 +344,7 @@ private struct ProjectPanel: View {
         DevServerRow(
             server: server,
             overrideURL: server.urls.first { $0.source == .override }?.url,
+            isRemote: !context.device.isLocal,
             onSetURL: canSetURL
                 ? { projects.setURLOverride(space: space, signature: server.signature, url: $0) } : nil,
             onToggleHidden: {
@@ -337,11 +362,13 @@ private struct ProjectPanel: View {
         }
     }
 
-    private func containerRow(_ container: ContainerRow, suggested: Bool = false) -> some View {
+    private func containerRow(_ container: ContainerRow, suggested: Bool = false, attached: Bool = false) -> some View {
         ContainerRowView(
             container: container,
+            isRemote: !context.device.isLocal,
             onAttach: suggested ? { projects.attachContainer(space: space, name: container.name) } : nil,
-            onDismiss: suggested ? { projects.dismissSuggestion(space: space, name: container.name) } : nil)
+            onDismiss: suggested ? { projects.dismissSuggestion(space: space, name: container.name) } : nil,
+            onDetach: attached ? { projects.detachContainer(space: space, name: container.name) } : nil)
     }
 
     private func composeRow(_ group: ComposeGroup, attached: Bool) -> some View {
@@ -369,7 +396,7 @@ private struct ProjectPanel: View {
                 note("No Docker containers belong to this project.")
             }
             ForEach(snapshot.compose) { composeRow($0, attached: true) }
-            ForEach(snapshot.attachedContainers) { containerRow($0) }
+            ForEach(snapshot.attachedContainers) { containerRow($0, attached: true) }
             if !snapshot.suggestedContainers.isEmpty {
                 note("Suggested containers").padding(.top, 6)
                 ForEach(snapshot.suggestedContainers) { containerRow($0, suggested: true) }
@@ -394,6 +421,13 @@ private struct ProjectPanel: View {
                     onAttach: vm.match == .suggested ? { projects.attachVM(space: space, vm: vm) } : nil,
                     onDetach: vm.match == .attached ? { projects.detachVM(space: space, id: vm.id) } : nil)
             }
+            ForEach(projects.linkedDevices(for: space), id: \.deviceID) { link in
+                if let device = model.device(link.deviceID) {
+                    LinkedHostRow(device: device, root: link.root) {
+                        projects.unlinkDevice(space: space, deviceID: link.deviceID)
+                    }
+                }
+            }
             if !snapshot.otherVMs.isEmpty {
                 Menu("Attach VM…") {
                     ForEach(snapshot.otherVMs) { vm in
@@ -417,7 +451,7 @@ private struct ProjectPanel: View {
                 section("links", "Links", count: urls.count) {
                     ForEach(urls, id: \.url) { url in
                         HStack(spacing: 8) {
-                            ProjectURLButtons(urls: [url])
+                            ProjectURLButtons(urls: [url], isRemote: !context.device.isLocal)
                             Spacer()
                         }
                         .frame(minHeight: ProjectRowMetrics.rowHeight)
