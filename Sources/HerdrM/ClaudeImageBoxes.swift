@@ -22,14 +22,25 @@ struct ClaudeImageBox: Equatable {
 /// picture cells hold kitty placeholders that read as blanks or half blocks, so only the frame
 /// and the label identify a box. Detection starts from each bottom border and walks up. Columns
 /// are counted in characters, which matches cells for the single-width glyphs a box is made of.
+///
+/// A box counts only when Claude's prompt line sits just below it, naming the same attachment
+/// (`❯ [Image #1] [Image #2]`), so a box diagram quoted in the transcript is not mistaken for one.
 enum ClaudeImageBoxes {
+    /// How many rows below a box's bottom border the prompt line may sit. Claude draws a blank row
+    /// and its separator in between, so the prompt is three rows down.
+    static let promptSearchRows = 6
+
     /// Boxes in `viewportText`, left to right, top to bottom.
     static func boxes(in viewportText: String) -> [ClaudeImageBox] {
-        let rows = viewportText.split(separator: "\n", omittingEmptySubsequences: false).map(Array.init)
+        let lines = viewportText.split(separator: "\n", omittingEmptySubsequences: false)
+        let rows = lines.map(Array.init)
         var found: [ClaudeImageBox] = []
         for (r, row) in rows.enumerated() where r >= 1 {
             for c in row.indices where row[c] == "╰" {
-                if let box = box(bottomRow: r, left: c, in: rows) { found.append(box) }
+                guard let box = box(bottomRow: r, left: c, in: rows) else { continue }
+                let token = "[Image #\(box.number)]"
+                let below = lines.dropFirst(r + 1).prefix(promptSearchRows)
+                if below.contains(where: { $0.contains(token) }) { found.append(box) }
             }
         }
         return found.sorted {

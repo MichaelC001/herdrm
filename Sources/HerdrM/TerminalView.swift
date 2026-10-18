@@ -678,7 +678,9 @@ final class LineBreakTerminalView: AppTerminalView {
         if viewport.cellWidthPixels > 0, viewport.cellHeightPixels > 0 {
             return (CGFloat(viewport.cellWidthPixels), CGFloat(viewport.cellHeightPixels))
         }
-        guard viewport.widthPixels > 0, viewport.heightPixels > 0 else { return nil }
+        guard viewport.widthPixels > 0, viewport.heightPixels > 0,
+              viewport.columns > 0, viewport.rows > 0
+        else { return nil }
         let scale = window?.backingScaleFactor ?? 2
         let padding = Self.gridPadding * 2 * scale
         let width = (CGFloat(viewport.widthPixels) - padding) / CGFloat(viewport.columns)
@@ -1010,6 +1012,9 @@ final class LineBreakTerminalView: AppTerminalView {
     private var placedThumbnails: [PlacedThumbnail] = []
     private var thumbnailPollTimer: Timer?
     private var thumbnailBurstScheduled = false
+    /// Output arrived while a burst was armed: the burst's 250 ms scan may
+    /// have read before the session parsed it, so it arms one more scan.
+    private var thumbnailBurstDirty = false
     private var thumbnailSurfaceVisible = true
     /// Deliveries are numbered as they begin and recorded strictly in that
     /// order, whichever decode finishes first: binding pairs ascending box
@@ -1062,11 +1067,18 @@ final class LineBreakTerminalView: AppTerminalView {
     }
 
     /// Right before a delivery: a baseline scan marks the boxes already on
-    /// screen as seen, so this paste cannot bind to them. Returns the token for
-    /// `endThumbnailDelivery`, or nil when thumbnails are off.
+    /// screen as seen, so this paste cannot bind to them, and forgets bindings
+    /// whose box is gone. Returns the token for `endThumbnailDelivery`, or nil
+    /// when thumbnails are off or the delivery must record nothing.
+    ///
+    /// Call it before the delivery snaps herdr's history scroll back: scrolled
+    /// up, the viewport shows history, the baseline has just forgotten bindings
+    /// whose box is only scrolled away, and a paste Claude then drops would let
+    /// this image bind to such a box. So that delivery records nothing.
     private func beginThumbnailDelivery() -> ThumbnailDeliveryToken? {
         guard thumbnailsEnabled else { return nil }
         scanForThumbnails(baseline: true)
+        guard historyTarget == 0, historySent == 0 else { return nil }
         let token = ThumbnailDeliveryToken(generation: thumbnailGeneration, sequence: thumbnailNextDelivery)
         thumbnailNextDelivery += 1
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.thumbnailDecodeTimeout) { [weak self] in
@@ -1145,17 +1157,28 @@ final class LineBreakTerminalView: AppTerminalView {
 
     /// Rescans 50 ms and 250 ms from now (the session parses output after the
     /// pump hands it over, so an immediate read can miss the box), and polls
-    /// every 500 ms until nothing is pending, bound or drawn.
+    /// every 500 ms until nothing is pending, bound or drawn. Output during an
+    /// armed burst adds one scan 50 ms after the 250 ms one, so a scrolling
+    /// prompt does not leave an overlay a row off until the next poll.
     private func scheduleThumbnailScans() {
         guard thumbnailsEnabled, thumbnailSurfaceVisible, thumbnailsNeedScanning(now: Date()) else { return }
-        if !thumbnailBurstScheduled {
+        if thumbnailBurstScheduled {
+            thumbnailBurstDirty = true
+        } else {
             thumbnailBurstScheduled = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
                 self?.scanForThumbnails()
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-                self?.thumbnailBurstScheduled = false
-                self?.scanForThumbnails()
+                guard let self else { return }
+                self.thumbnailBurstScheduled = false
+                self.scanForThumbnails()
+                if self.thumbnailBurstDirty {
+                    self.thumbnailBurstDirty = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                        self?.scanForThumbnails()
+                    }
+                }
             }
         }
         guard thumbnailPollTimer == nil else { return }
@@ -1178,15 +1201,22 @@ final class LineBreakTerminalView: AppTerminalView {
     }
 
     /// Reads the viewport, binds new boxes, and places or removes overlays.
-    /// A `baseline` scan runs right before a delivery, visible or not. Any scan
-    /// waits while a delivery is in flight: that delivery's own box may already
-    /// be on screen, and the in-flight delivery's baseline covered the rest.
+    /// A `baseline` scan runs right before a delivery, visible or not, and
+    /// first forgets bindings whose box is gone (Claude's counter may have
+    /// reset since). While a delivery is in flight nothing binds or is marked
+    /// seen, since that delivery's own box may already be on screen and the
+    /// in-flight delivery's baseline covered the rest; overlays still follow
+    /// their boxes and go when their box does.
     private func scanForThumbnails(baseline: Bool = false) {
-        guard thumbnailsEnabled, attachedSurface != nil, !thumbnailDeliveryInFlight else { return }
+        guard thumbnailsEnabled, attachedSurface != nil else { return }
         guard baseline || thumbnailSurfaceVisible else { return }
         guard let text = processHost?.session.readViewportText() else { return }
         let now = Date()
-        let placed = thumbnailStore.scan(ClaudeImageBoxes.boxes(in: text), now: now)
+        let boxes = ClaudeImageBoxes.boxes(in: text)
+        if baseline { thumbnailStore.forgetAbsentBindings(present: boxes) }
+        let placed = thumbnailDeliveryInFlight
+            ? thumbnailStore.placements(for: boxes, now: now)
+            : thumbnailStore.scan(boxes, now: now)
         placedThumbnails = placed
         let numbers = Set(placed.map(\.box.number))
         for number in thumbnailOverlays.keys where !numbers.contains(number) {
@@ -1682,7 +1712,7 @@ final class LineBreakTerminalView: AppTerminalView {
         case .unsupported:
             pastePasteboardText()
         case .nativeClipboard:
-            forwardNativeClipboardPaste()
+            forwardNativeClipboardPaste(thumbnailOf: pasteboard)
         case .devicePaths(let pathSyntax):
             do {
                 guard let files = try Self.clipboardFiles(in: pasteboard) else {
@@ -1710,7 +1740,7 @@ final class LineBreakTerminalView: AppTerminalView {
         case .unsupported:
             pastePasteboardText()
         case .nativeClipboard:
-            forwardNativeClipboardPaste()
+            forwardNativeClipboardPaste(thumbnailsOf: fileURLs)
         case .devicePaths(let pathSyntax):
             if case .local = attachmentDeviceKind {
                 deliverTypedPaths(of: fileURLs) {
@@ -1745,19 +1775,39 @@ final class LineBreakTerminalView: AppTerminalView {
         processHost?.session.readViewportText()
     }
 
+    /// ^V for raw image data on the clipboard. The bytes are read here, on
+    /// main; only the decode runs off it.
+    private func forwardNativeClipboardPaste(thumbnailOf pasteboard: NSPasteboard) {
+        var decode: (@Sendable () -> [(NSImage, String)])?
+        if thumbnailsEnabled, let data = ImageThumbnailer.imageData(from: pasteboard) {
+            decode = { ImageThumbnailer.thumbnail(fromImageData: data).map { [($0, "clipboard")] } ?? [] }
+        }
+        forwardNativeClipboardPaste(decodingThumbnails: decode)
+    }
+
+    /// ^V for image files copied in Finder. The pasteboard's image for them is
+    /// the file's document icon, so the thumbnails come from the files.
+    private func forwardNativeClipboardPaste(thumbnailsOf fileURLs: [URL]) {
+        let imageURLs = thumbnailsEnabled ? fileURLs.filter(Self.isImageFile) : []
+        var decode: (@Sendable () -> [(NSImage, String)])?
+        if !imageURLs.isEmpty {
+            decode = { Self.decodeThumbnails(imageURLs) }
+        }
+        forwardNativeClipboardPaste(decodingThumbnails: decode)
+    }
+
     /// Ask the remote program to paste from its own clipboard with a literal
-    /// ^V byte — the "native clipboard" delivery path.
-    private func forwardNativeClipboardPaste() {
+    /// ^V byte — the "native clipboard" delivery path — recording what
+    /// `decode` returns as this delivery's thumbnails.
+    private func forwardNativeClipboardPaste(
+        decodingThumbnails decode: (@Sendable () -> [(NSImage, String)])?
+    ) {
+        let thumbnailToken = decode == nil ? nil : beginThumbnailDelivery()
         forgetHistoryScroll()
-        let thumbnailToken = beginThumbnailDelivery()
         processHost?.session.sendInput(Data([0x16]))
         // No completion signal from Claude here, hence the short expiry.
-        if let thumbnailToken {
-            // The pasteboard is read here, on main; only the downscale runs off it.
-            let image = (NSPasteboard.general.readObjects(forClasses: [NSImage.self]) as? [NSImage])?.first
-            endThumbnailDelivery(thumbnailToken, expiry: 10) {
-                image.flatMap(ImageThumbnailer.thumbnail(of:)).map { [($0, "clipboard")] } ?? []
-            }
+        if let thumbnailToken, let decode {
+            endThumbnailDelivery(thumbnailToken, expiry: 10, decoding: decode)
         }
     }
 

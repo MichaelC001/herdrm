@@ -34,17 +34,54 @@ final class ImageThumbnailerTests: XCTestCase {
         XCTAssertNil(ImageThumbnailer.thumbnail(contentsOf: url))
     }
 
-    func testPasteboardImageIsRead() throws {
+    private func bitmap(width: Int, height: Int) -> NSBitmapImageRep {
+        NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8,
+                         samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                         bytesPerRow: 0, bitsPerPixel: 0)!
+    }
+
+    func testImageDataIsDownscaledToTheBudget() throws {
+        let png = try XCTUnwrap(bitmap(width: 1000, height: 2000).representation(using: .png, properties: [:]))
+        let rep = try XCTUnwrap(ImageThumbnailer.thumbnail(fromImageData: png)?.representations.first)
+        XCTAssertEqual(rep.pixelsHigh, 512); XCTAssertEqual(rep.pixelsWide, 256)
+    }
+
+    func testSmallImageDataIsNotUpscaled() throws {
+        let tiff = try XCTUnwrap(bitmap(width: 24, height: 12).tiffRepresentation)
+        let rep = try XCTUnwrap(ImageThumbnailer.thumbnail(fromImageData: tiff)?.representations.first)
+        XCTAssertEqual(rep.pixelsWide, 24); XCTAssertEqual(rep.pixelsHigh, 12)
+    }
+
+    func testNonImageDataYieldsNil() {
+        XCTAssertNil(ImageThumbnailer.thumbnail(fromImageData: Data("not an image".utf8)))
+        XCTAssertNil(ImageThumbnailer.thumbnail(fromImageData: Data()))
+    }
+
+    func testPasteboardImageDataIsReadAndDecodes() throws {
         let pasteboard = NSPasteboard.withUniqueName()
         pasteboard.clearContents()
         // A bitmap-backed image: a rep-less NSImage declares TIFF on the pasteboard but encodes no data.
-        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 8, pixelsHigh: 8, bitsPerSample: 8,
-                                   samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
-                                   bytesPerRow: 0, bitsPerPixel: 0)!
         let source = NSImage(size: NSSize(width: 8, height: 8))
-        source.addRepresentation(rep)
+        source.addRepresentation(bitmap(width: 8, height: 8))
         pasteboard.writeObjects([source])
-        XCTAssertNotNil(ImageThumbnailer.thumbnail(from: pasteboard))
-        XCTAssertNil(ImageThumbnailer.thumbnail(from: { let p = NSPasteboard.withUniqueName(); p.clearContents(); p.setString("x", forType: .string); return p }()))
+        let data = try XCTUnwrap(ImageThumbnailer.imageData(from: pasteboard))
+        let rep = try XCTUnwrap(ImageThumbnailer.thumbnail(fromImageData: data)?.representations.first)
+        XCTAssertEqual(rep.pixelsWide, 8); XCTAssertEqual(rep.pixelsHigh, 8)
+
+        let text = NSPasteboard.withUniqueName()
+        text.clearContents()
+        text.setString("x", forType: .string)
+        XCTAssertNil(ImageThumbnailer.imageData(from: text))
+    }
+
+    func testPasteboardPNGIsPreferredOverTIFF() throws {
+        let pasteboard = NSPasteboard.withUniqueName()
+        pasteboard.clearContents()
+        let png = try XCTUnwrap(bitmap(width: 3, height: 3).representation(using: .png, properties: [:]))
+        let tiff = try XCTUnwrap(bitmap(width: 5, height: 5).tiffRepresentation)
+        pasteboard.declareTypes([.tiff, .png], owner: nil)
+        pasteboard.setData(tiff, forType: .tiff)
+        pasteboard.setData(png, forType: .png)
+        XCTAssertEqual(ImageThumbnailer.imageData(from: pasteboard), png)
     }
 }

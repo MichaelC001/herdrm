@@ -69,6 +69,29 @@ struct PaneThumbnailStore {
         }
     }
 
+    /// Right before a delivery: drops every binding and every seen-unbound
+    /// number whose box is not on screen now. Claude's counter can reset
+    /// (`/clear`, a relaunch) inside the grace, and its next `#1` must count as
+    /// new, or the old `#1` image would be painted into the new paste's box.
+    /// Ordinary scans keep the grace, so scrolling still keeps an image.
+    mutating func forgetAbsentBindings(present boxes: [ClaudeImageBox]) {
+        let present = Set(boxes.map(\.number))
+        bound = bound.filter { present.contains($0.key) }
+        seen = seen.filter { present.contains($0.key) }
+    }
+
+    /// What `scan` would draw for `boxes` from the current bindings, without
+    /// binding, marking anything seen, or refreshing a binding: for the scans
+    /// held while a delivery is in flight, which may only move or remove overlays.
+    func placements(for boxes: [ClaudeImageBox], now: Date) -> [PlacedThumbnail] {
+        boxes.sorted { $0.number < $1.number }.compactMap { box in
+            guard let binding = bound[box.number],
+                  now.timeIntervalSince(binding.lastSeen) <= Self.graceAfterDisappearing
+            else { return nil }
+            return PlacedThumbnail(box: box, image: binding.image)
+        }
+    }
+
     /// True while a scan could still change something: a live pending entry
     /// exists or a binding is bound.
     func needsScanning(now: Date) -> Bool {

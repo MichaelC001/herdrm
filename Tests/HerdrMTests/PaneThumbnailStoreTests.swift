@@ -114,4 +114,57 @@ final class PaneThumbnailStoreTests: XCTestCase {
         store.record(pending(9, at: t0 + 40))
         XCTAssertEqual(store.scan([box(1)], now: t0 + 41).map(\.image.size.width), [9])
     }
+
+    func testCounterResetInsideGraceBindsTheNewPasteNotTheOldImage() {
+        // A binds to #1, the prompt is sent, `/clear` resets Claude's counter, and B is pasted
+        // within the grace: Claude's new #1 is B's box and must never show A.
+        var store = PaneThumbnailStore()
+        store.record(pending(1, at: t0))
+        XCTAssertEqual(store.scan([box(1)], now: t0 + 1).map(\.image.size.width), [1])
+        XCTAssertEqual(store.scan([], now: t0 + 2), [])                       // prompt sent, box gone
+        store.forgetAbsentBindings(present: [])                               // baseline before B's delivery
+        store.record(pending(2, at: t0 + 5))
+        XCTAssertEqual(store.scan([box(1)], now: t0 + 6).map(\.image.size.width), [2])
+    }
+
+    func testBaselineKeepsTheBindingOfABoxStillOnScreen() {
+        var store = PaneThumbnailStore()
+        store.record(pending(1, at: t0))
+        _ = store.scan([box(1)], now: t0 + 1)
+        store.forgetAbsentBindings(present: [box(1)])                         // second paste, #1 still there
+        store.record(pending(2, at: t0 + 2))
+        let placed = store.scan([box(1), box(2, column: 23)], now: t0 + 3)
+        XCTAssertEqual(placed.map(\.box.number), [1, 2])
+        XCTAssertEqual(placed.map(\.image.size.width), [1, 2])
+    }
+
+    func testBaselineForgetsASeenUnboundNumberThatIsGone() {
+        var store = PaneThumbnailStore()
+        _ = store.scan([box(1)], now: t0)                                     // #1 seen, unbound
+        _ = store.scan([], now: t0 + 1)
+        store.forgetAbsentBindings(present: [])
+        store.record(pending(4, at: t0 + 2))
+        XCTAssertEqual(store.scan([box(1)], now: t0 + 3).map(\.image.size.width), [4])
+    }
+
+    func testPlacementsAreReadOnly() {
+        var store = PaneThumbnailStore()
+        store.record(pending(1, at: t0))
+        _ = store.scan([box(1)], now: t0 + 1)
+        store.record(pending(2, at: t0 + 2))
+        // Moved #1 is re-placed; the unbound #2 neither binds nor is marked seen.
+        let moved = ClaudeImageBox(number: 1, interior: CellRect(row: 5, column: 1, rows: 6, columns: 20))
+        XCTAssertEqual(store.placements(for: [moved, box(2, column: 23)], now: t0 + 3),
+                       [PlacedThumbnail(box: moved, image: image(1))])
+        XCTAssertEqual(store.placements(for: [], now: t0 + 3), [])
+        // The later full scan still binds #2 to the pending image.
+        XCTAssertEqual(store.scan([box(1), box(2, column: 23)], now: t0 + 4).map(\.image.size.width), [1, 2])
+    }
+
+    func testPlacementsSkipABindingPastItsGrace() {
+        var store = PaneThumbnailStore()
+        store.record(pending(1, at: t0))
+        _ = store.scan([box(1)], now: t0 + 1)
+        XCTAssertEqual(store.placements(for: [box(1)], now: t0 + 1 + 31), [])
+    }
 }

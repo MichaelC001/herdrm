@@ -15,18 +15,17 @@ enum ImageThumbnailer {
         return thumbnail(from: source)
     }
 
-    /// The first image on `pasteboard`, downscaled; nil when it holds none.
-    static func thumbnail(from pasteboard: NSPasteboard) -> NSImage? {
-        guard let image = (pasteboard.readObjects(forClasses: [NSImage.self]) as? [NSImage])?.first else { return nil }
-        return thumbnail(of: image)
+    /// The raw image bytes a clipboard image carries, PNG first, else TIFF; nil
+    /// when it holds neither. Read on the main thread; decode the bytes with
+    /// `thumbnail(fromImageData:)` off it. Never the pasteboard's `NSImage`: for
+    /// a copied file that is the file's document icon, not its picture.
+    static func imageData(from pasteboard: NSPasteboard) -> Data? {
+        pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff)
     }
 
-    /// `image`, downscaled. For an image read from the pasteboard on the main
-    /// thread and handed to a background queue for this step.
-    static func thumbnail(of image: NSImage) -> NSImage? {
-        guard let tiff = image.tiffRepresentation,
-              let source = CGImageSourceCreateWithData(tiff as CFData, nil)
-        else { return nil }
+    /// Decodes encoded image bytes (PNG, TIFF, JPEG, …); nil when they are not a decodable image.
+    static func thumbnail(fromImageData data: Data) -> NSImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         return thumbnail(from: source)
     }
 
