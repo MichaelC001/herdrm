@@ -12,7 +12,8 @@ import Foundation
 /// ```
 /// @@pp-begin 1
 /// @@tools / @@host / @@roots / @@listeners ss|lsof / @@pids | @@ps + @@psc + @@lsofp
-/// @@compose / @@containers / @@units / @@files <root> / @@env <file>
+/// @@units / @@files <root> / @@env <file>   (env lines are `<lineno>:<KEY>`, never values)
+/// @@host (again: the docker lines) / @@compose / @@containers   (slowest tools last)
 /// @@vms parallels|vmpal|lima   (each followed by JSON or `@@absent <tool>`)
 /// @@error <section>            (anywhere, then up to 3 lines of stderr)
 /// @@pp-end
@@ -40,11 +41,13 @@ has() { case "$sections" in *",$1,"*) return 0;; esac; return 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 # macOS has no timeout(1); without it a tool simply runs unbounded.
 if have timeout; then tm() { timeout 8 "$@"; }; else tm() { "$@"; }; fi
+# errdetail: the first stderr lines, with nothing that could pass for a frame header.
+errdetail() { head -3 "$errf" | cut -c1-300 | grep -v '^@@'; return 0; }
 # run <section> <cmd...>: a failure becomes `@@error <section>` plus the first stderr lines.
 run() {
   rn=$1; shift
   if "$@" 2>"$errf"; then :; else
-    echo "@@error $rn"; head -3 "$errf" | cut -c1-300
+    echo "@@error $rn"; errdetail
   fi
 }
 # runq: like run, but lsof exits 1 when it found nothing to list; that is an error only if it said so on stderr.
@@ -52,13 +55,13 @@ runq() {
   rn=$1; shift
   "$@" 2>"$errf"; rq=$?
   if [ $rq -ne 0 ] && { [ $rq -ne 1 ] || [ -s "$errf" ]; }; then
-    echo "@@error $rn"; head -3 "$errf" | cut -c1-300
+    echo "@@error $rn"; errdetail
   fi
 }
 # find_files <root>: find's stdout is filtered here (no `@@` lines, no control characters) and
 # find's own exit status is returned, so `run` can still report its stderr.
 find_files() {
-  ff=$(tm find "$1" -maxdepth 4 \( -name node_modules -o -name .git -o -name .venv -o -name dist -o -name build -o -name .next \) -prune -o -type f \( -name package.json -o -name 'docker-compose*.y*ml' -o -name 'compose*.y*ml' -o -name Makefile -o -name Procfile -o -name pyproject.toml -o -name Caddyfile -o -name justfile -o -name '.dev-lane.env' -o -name '.env*' \) -print); frc=$?
+  ff=$(tm find "$1" -xdev -maxdepth 4 \( -name node_modules -o -name .git -o -name .venv -o -name dist -o -name build -o -name .next \) -prune -o -type f \( -name package.json -o -name 'docker-compose*.y*ml' -o -name 'compose*.y*ml' -o -name Makefile -o -name Procfile -o -name pyproject.toml -o -name Caddyfile -o -name justfile -o -name '.dev-lane.env' -o -name '.env*' \) -print); frc=$?
   [ -n "$ff" ] && printf '%s\n' "$ff" | head -200 | grep -v -E '^@@|[[:cntrl:]]'
   return $frc
 }
@@ -110,15 +113,6 @@ while :; do
       echo "now $(date +%s)"
       echo "boottime $(sysctl -n kern.boottime 2>/dev/null | sed -n 's/^{ *sec = \([0-9]*\).*/\1/p')"
     fi
-    if have docker; then
-      dv=$(tm docker version --format '{{.Server.Version}}' 2>"$errf"); drc=$?
-      if [ $drc -eq 0 ]; then
-        echo "docker $(printf '%s\n' "$dv" | grep -v '^$' | head -1 | cut -c1-300)"
-      else
-        de=$(grep -v '^$' "$errf" 2>/dev/null | head -1 | cut -c1-300)
-        echo "docker_error ${de:-exit $drc}"
-      fi
-    fi
     if [ "$os" = Linux ] && have systemctl; then
       ss_state=$(tm systemctl --user is-system-running 2>/dev/null | head -1)
       [ -n "$ss_state" ] && echo "systemd $ss_state"
@@ -166,7 +160,7 @@ while :; do
           seen="$seen$q "
           emit_pid "$q"
         done
-      done
+      done | grep -v '^@@'
     elif [ -n "$lp" ]; then
       plist=$(echo $lp | tr ' ' ',')
       parents=$(tm ps -o ppid= -p "$plist" 2>/dev/null | tr -d ' ' | grep -v -E '^(0|1)$' | sort -u | tr '\n' ',')
@@ -176,18 +170,6 @@ while :; do
       echo "@@psc"; runq psc tm ps -o pid=,comm= -p "$all"
       echo "@@lsofp"; runq lsofp tm lsof -a -d cwd,1 -p "$all" -Fpfn
     fi
-  fi
-
-  if has compose; then
-    echo "@@compose"
-    if have docker; then run compose tm docker compose ls -a --format json; else echo "@@absent docker"; fi
-  fi
-
-  if has containers; then
-    echo "@@containers"
-    if have docker; then
-      run containers tm docker ps -a --no-trunc --format '{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.State}}\t{{.Status}}\t{{.Ports}}\t{{.Label "com.docker.compose.project"}}\t{{.Label "com.docker.compose.service"}}\t{{.Label "com.docker.compose.project.working_dir"}}\t{{.Label "com.docker.compose.project.config_files"}}'
-    else echo "@@absent docker"; fi
   fi
 
   if has units; then
@@ -203,27 +185,64 @@ while :; do
       r=$(root_of "$cwd")
       case "$seen" in *" $r "*) continue;; esac
       seen="$seen$r "
+      # A pane in $HOME or / must not make the whole tree "the project".
+      case "$r" in /|"${HOME:-/}"|"${HOME:-/}"/) continue;; esac
       printf '@@files %s\n' "$r"
       run files find_files "$r"
     done
   fi
 
-  # Only port/URL-ish keys, never secret-looking ones, from at most six root-level env files.
+  # Only the names of port/URL-ish keys, never secret-looking ones and never values, from at
+  # most six root-level env files.
   if has env; then
     seen=" "; ecount=0
     for cwd in "$@"; do
       r=$(root_of "$cwd")
       case "$seen" in *" $r "*) continue;; esac
       seen="$seen$r "
+      case "$r" in /|"${HOME:-/}"|"${HOME:-/}"/) continue;; esac
       for f in .dev-lane.env .env .env.local .env.development .env.dev .env.hot; do
         [ "$ecount" -ge 6 ] && break
         [ -f "$r/$f" ] || continue
         ecount=$((ecount + 1))
         printf '@@env %s/%s\n' "$r" "$f"
         grep -n -E '^(export +)?[A-Za-z0-9_]*(PORT|URL|HOST|ORIGIN)[A-Za-z0-9_]*=' "$r/$f" 2>/dev/null \
-          | grep -v -i -E '^[0-9]+:(export +)?[^=]*(SECRET|TOKEN|KEY|PASS|CREDENTIAL)' | head -40 | cut -c1-300
+          | sed -E 's/^([0-9]+):(export +)?([A-Za-z0-9_]*)=.*/\1:\3/' \
+          | grep -v -i -E '^[0-9]+:.*(SECRET|TOKEN|KEY|PASS|CREDENTIAL)' | head -40
       done
     done
+  fi
+
+  # Docker last of the data sections: a wedged daemon costs its timeout once, and everything
+  # above has already been printed by then.
+  if has host || has compose || has containers; then
+    dcr=1
+    if have docker; then
+      dv=$(tm docker version --format '{{.Server.Version}}' 2>"$errf"); dcr=$?
+      if [ $dcr -eq 0 ]; then
+        has host && { echo "@@host"; echo "docker $(printf '%s\n' "$dv" | grep -v '^$' | head -1 | cut -c1-300)"; }
+      else
+        de=$(grep -v -e '^$' -e '^@@' "$errf" 2>/dev/null | head -1 | cut -c1-300)
+        has host && { echo "@@host"; echo "docker_error ${de:-exit $dcr}"; }
+        echo "@@error docker"; errdetail
+      fi
+    fi
+    if has compose; then
+      echo "@@compose"
+      if ! have docker; then echo "@@absent docker"
+      elif [ $dcr -eq 0 ]; then run compose tm docker compose ls -a --format json; fi
+    fi
+    if has containers; then
+      echo "@@containers"
+      if ! have docker; then echo "@@absent docker"
+      elif [ $dcr -eq 0 ]; then
+        if cout=$(tm docker ps -a --no-trunc --format '{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.State}}\t{{.Status}}\t{{.Ports}}\t{{.Label "com.docker.compose.project"}}\t{{.Label "com.docker.compose.service"}}\t{{.Label "com.docker.compose.project.working_dir"}}\t{{.Label "com.docker.compose.project.config_files"}}' 2>"$errf"); then
+          [ -n "$cout" ] && printf '%s\n' "$cout" | grep -v '^@@'
+        else
+          echo "@@error containers"; errdetail
+        fi
+      fi
+    fi
   fi
 
   if has vms; then

@@ -178,22 +178,30 @@ final class ProjectProbeParserTests: XCTestCase {
         XCTAssertNotNil(mac?.uptimeSeconds)
     }
 
-    func testEnvEntriesDropSecretKeysAndStripUserinfo() {
+    func testEnvEntriesAreKeysOnlyAndDropSecretKeys() {
         let text = """
         @@pp-begin 1
         @@env /home/dev/acme-app/.env
-        3:API_PORT=8100
-        4:DB_PASSWORD=x
-        5:PUBLIC_URL=https://u:p@host/
+        3:API_PORT
+        4:DB_PASSWORD
+        5:PUBLIC_URL
         6:DB_URL=https://u:p@ss@db/
+        7:API_TOKEN=x
         @@pp-end
         """
         let probe = ProjectProbeParser.parse(text)
+        // An older script's `=value` tail is discarded rather than kept.
         XCTAssertEqual(probe.envEntries, [
-            ProbeEnvEntry(file: "/home/dev/acme-app/.env", line: 3, key: "API_PORT", value: "8100"),
-            ProbeEnvEntry(file: "/home/dev/acme-app/.env", line: 5, key: "PUBLIC_URL", value: "https://host/"),
-            ProbeEnvEntry(file: "/home/dev/acme-app/.env", line: 6, key: "DB_URL", value: "https://db/"),
+            ProbeEnvEntry(file: "/home/dev/acme-app/.env", line: 3, key: "API_PORT", value: ""),
+            ProbeEnvEntry(file: "/home/dev/acme-app/.env", line: 5, key: "PUBLIC_URL", value: ""),
+            ProbeEnvEntry(file: "/home/dev/acme-app/.env", line: 6, key: "DB_URL", value: ""),
         ])
+    }
+
+    func testStripUserinfoRemovesCredentials() {
+        XCTAssertEqual(ProjectProbeParser.stripUserinfo("https://u:p@host/"), "https://host/")
+        XCTAssertEqual(ProjectProbeParser.stripUserinfo("https://u:p@ss@db/"), "https://db/")
+        XCTAssertEqual(ProjectProbeParser.stripUserinfo("http://localhost:3000/a@b"), "http://localhost:3000/a@b")
     }
 
     func testListenerWithoutProcessParses() {

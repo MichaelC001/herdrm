@@ -252,6 +252,40 @@ public actor DeviceFileService {
         }
     }
 
+    /// What `runCollecting` saw. `exitStatus` is nil when the run was killed by the timeout.
+    public struct CollectedOutput: Sendable, Equatable {
+        public var stdout: Data
+        public var stderr: Data
+        public var exitStatus: Int32?
+        public var timedOut: Bool
+    }
+
+    /// Like `run`, but a timeout or a non-zero exit returns the stdout read so far instead of
+    /// throwing, so a caller that can read a partial result still gets it. Failing to start the
+    /// process and cancellation still throw.
+    public func runCollecting(_ command: String, timeout: TimeInterval = 30) async throws -> CollectedOutput {
+        switch device.kind {
+        case .tailcat:
+            throw HerdrError.fileOperationFailed("commands are not supported over a tailcat tunnel")
+        case .local:
+            return try await SSHFileProcess.captureCollecting(
+                executableURL: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", command],
+                environment: ProcessInfo.processInfo.environment,
+                timeout: timeout
+            )
+        case .ssh:
+            let (arguments, authentication) = try sshExecArguments(command: command)
+            defer { authentication.discardAuthorization() }
+            return try await SSHFileProcess.captureCollecting(
+                executableURL: sshExecutableURL,
+                arguments: arguments,
+                environment: authentication.environment,
+                timeout: timeout
+            )
+        }
+    }
+
     private func absolutePath(_ requestedPath: String) async throws -> String {
         let trimmed = requestedPath.trimmingCharacters(in: .whitespacesAndNewlines)
         let path = trimmed.isEmpty ? "~" : trimmed
@@ -335,12 +369,11 @@ public actor DeviceFileService {
         }
     }
 
-    private func runSSHData(command: String, timeout: TimeInterval) async throws -> Data {
+    private func sshExecArguments(command: String) throws -> ([String], SSHAuthenticationConfiguration) {
         guard case .ssh(let target) = device.kind else {
             throw HerdrError.fileOperationFailed("SSH is unavailable for a local device")
         }
         let authentication = SSHTunnel.authenticationConfiguration(for: device.id)
-        defer { authentication.discardAuthorization() }
         let arguments = authentication.arguments + [
             "-o", "StrictHostKeyChecking=accept-new",
             "-o", "ConnectTimeout=10",
@@ -349,6 +382,12 @@ public actor DeviceFileService {
             SSHTunnel.sshDestination(target),
             command,
         ]
+        return (arguments, authentication)
+    }
+
+    private func runSSHData(command: String, timeout: TimeInterval) async throws -> Data {
+        let (arguments, authentication) = try sshExecArguments(command: command)
+        defer { authentication.discardAuthorization() }
         return try await SSHFileProcess.capture(
             executableURL: sshExecutableURL,
             arguments: arguments,
@@ -669,6 +708,76 @@ private enum SSHFileProcess {
         }
     }
 
+    /// Like `capture`, but keeps whatever stdout arrived when the run times out or exits non-zero.
+    /// The reader is given two seconds after the process ends: a child that outlived it and still
+    /// holds the pipe must not hold the caller up.
+    static func captureCollecting(
+        executableURL: URL,
+        arguments: [String],
+        environment: [String: String],
+        timeout: TimeInterval
+    ) async throws -> DeviceFileService.CollectedOutput {
+        let processBox = CancellableProcess()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<DeviceFileService.CollectedOutput, Error>) in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let process = configuredProcess(
+                        executableURL: executableURL,
+                        arguments: arguments,
+                        environment: environment
+                    )
+                    let output = Pipe()
+                    let errorOutput = Pipe()
+                    process.standardOutput = output
+                    process.standardError = errorOutput
+                    do {
+                        try process.run()
+                        processBox.install(process)
+                    } catch {
+                        continuation.resume(
+                            throwing: HerdrError.fileOperationFailed(
+                                "could not start SSH: \(error.localizedDescription)"
+                            )
+                        )
+                        return
+                    }
+                    scheduleTimeout(processBox, after: timeout)
+                    let stdout = LockedData()
+                    let stderr = LockedData()
+                    let group = DispatchGroup()
+                    for (pipe, buffer) in [(output, stdout), (errorOutput, stderr)] {
+                        group.enter()
+                        DispatchQueue.global(qos: .utility).async {
+                            let handle = pipe.fileHandleForReading
+                            while true {
+                                let chunk = handle.availableData
+                                if chunk.isEmpty { break }
+                                buffer.append(chunk)
+                            }
+                            group.leave()
+                        }
+                    }
+                    process.waitUntilExit()
+                    _ = group.wait(timeout: .now() + 2)
+                    if processBox.wasCancelled && !processBox.didTimeOut {
+                        continuation.resume(throwing: CancellationError())
+                        return
+                    }
+                    let timedOut = processBox.didTimeOut
+                    continuation.resume(returning: DeviceFileService.CollectedOutput(
+                        stdout: stdout.value,
+                        stderr: Data(stderr.value.suffix(2_000)),
+                        exitStatus: timedOut ? nil : process.terminationStatus,
+                        timedOut: timedOut
+                    ))
+                }
+            }
+        } onCancel: {
+            processBox.cancel()
+        }
+    }
+
     static func upload(
         executableURL: URL,
         arguments: [String],
@@ -960,6 +1069,10 @@ private final class LockedData: @unchecked Sendable {
 
     func set(_ data: Data) {
         lock.withLock { self.data = data }
+    }
+
+    func append(_ chunk: Data) {
+        lock.withLock { data.append(chunk) }
     }
 }
 #endif  // os(macOS)

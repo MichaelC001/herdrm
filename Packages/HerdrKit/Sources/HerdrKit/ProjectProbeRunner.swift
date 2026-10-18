@@ -9,20 +9,35 @@ public protocol ProjectProbeRunning: Sendable {
 /// The real runner: the same `exec /bin/sh -c '<script>' …` command line works under the local
 /// `sh -c` and over plain `ssh`, so every device takes one path.
 public struct DeviceProjectProbeRunner: ProjectProbeRunning {
-    public init() {}
+    public var timeout: TimeInterval
 
-    /// Drops directories whose quoting a remote login shell could misread: a fish shell treats a
-    /// backslash as an escape even inside single quotes. Such paths are not probed.
-    public static func safeCwds(_ cwds: [String]) -> [String] {
-        cwds.filter { cwd in
-            !cwd.unicodeScalars.contains { $0 == "\\" || $0 == "'" || $0.value < 0x20 || $0.value == 0x7f }
+    public init(timeout: TimeInterval = 20) {
+        self.timeout = timeout
+    }
+
+    /// Drops directories a remote login shell could misread: a fish shell treats a backslash as
+    /// an escape even inside single quotes, and control characters never belong in a path.
+    /// Local runs go through `sh -c` directly, so nothing is dropped there.
+    public static func safeCwds(_ cwds: [String], for device: Device) -> [String] {
+        guard !device.isLocal else { return cwds }
+        return cwds.filter { cwd in
+            !cwd.unicodeScalars.contains { $0 == "\\" || $0.value < 0x20 || $0.value == 0x7f }
         }
     }
 
+    /// A timeout or a non-zero exit still returns the frame read so far, which the parser flags
+    /// as partial; only a run that produced no frame at all is an error.
     public func run(device: Device, sections: [String], cwds: [String]) async throws -> String {
-        let command = ProjectProbeScript.remoteCommand(sections: sections, cwds: Self.safeCwds(cwds))
-        let data = try await DeviceFileService(device: device).run(command, timeout: 20)
-        return String(decoding: data, as: UTF8.self)
+        let command = ProjectProbeScript.remoteCommand(sections: sections, cwds: Self.safeCwds(cwds, for: device))
+        let result = try await DeviceFileService(device: device).runCollecting(command, timeout: timeout)
+        let text = String(decoding: result.stdout, as: UTF8.self)
+        if text.contains("@@pp-begin") { return text }
+        if result.timedOut { throw HerdrError.fileOperationFailed("SSH timed out") }
+        if let status = result.exitStatus, status != 0 {
+            let detail = String(decoding: result.stderr, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            throw HerdrError.fileOperationFailed(detail.isEmpty ? "SSH exited \(status)" : detail)
+        }
+        return text
     }
 }
 #endif

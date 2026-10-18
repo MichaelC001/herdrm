@@ -40,10 +40,12 @@ final class ProjectProbeScriptTests: XCTestCase {
         let text = String(decoding: data, as: UTF8.self)
 
         XCTAssertEqual(process.terminationStatus, 0)
-        for needle in ["@@pp-begin 1", "@@tools", "@@host", "os Darwin", "@@roots", "\t\(tmp)", "@@listeners lsof", "@@files ", "@@env ", "API_PORT=8100"] {
+        for needle in ["@@pp-begin 1", "@@tools", "@@host", "os Darwin", "@@roots", "\t\(tmp)", "@@listeners lsof", "@@files ", "@@env ", ":API_PORT\n"] {
             XCTAssertTrue(text.contains(needle), "missing \(needle) in:\n\(text)")
         }
         XCTAssertFalse(text.contains("DB_PASSWORD"))
+        // Env lines carry key names only, never values.
+        XCTAssertFalse(text.contains("8100"))
         // Darwin boottime is the epoch second, not the microseconds after it.
         let boot = text.split(separator: "\n").first { $0.hasPrefix("boottime ") }.flatMap { Double($0.dropFirst(9)) }
         XCTAssertGreaterThan(boot ?? 0, 1_000_000_000)
@@ -118,6 +120,77 @@ final class ProjectProbeScriptTests: XCTestCase {
         XCTAssertFalse(ProjectProbeScript.isSupported(Device(name: "t", kind: .tailcat)))
         XCTAssertFalse(ProjectProbeScript.isSupported(Device(name: "w", kind: .ssh(target: "u@w"), osID: "windows")))
         XCTAssertTrue(ProjectProbeScript.isSupported(Device(name: "l", kind: .ssh(target: "u@l"), osID: "ubuntu")))
+    }
+
+    /// Runs the script with `HOME` pointed at a temp directory and returns its output.
+    private func runScript(sections: [String], cwds: [String], home: String) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ProjectProbeScript.shellArguments(sections: sections, cwds: cwds)
+        var environment = ProcessInfo.processInfo.environment
+        environment["HOME"] = home
+        process.environment = environment
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+        return text
+    }
+
+    private func physicalTemp() throws -> String {
+        let raw = FileManager.default.temporaryDirectory.appendingPathComponent("pp-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: raw, withIntermediateDirectories: true)
+        var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
+        return realpath(raw.path, &buffer) != nil ? String(cString: buffer) : raw.path
+    }
+
+    func testPaneInHomeDirectoryScansNeitherFilesNorEnv() throws {
+        let home = try physicalTemp()
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        try Self.sh("echo '{}' > package.json && echo 'HOME_PORT=1' > .env && mkdir proj && echo '{}' > proj/package.json", in: home)
+
+        let text = try runScript(sections: ["files", "env"], cwds: [home, home + "/proj"], home: home)
+        XCTAssertFalse(text.contains("@@files \(home)\n"), text)
+        XCTAssertFalse(text.contains("@@env \(home)/.env"), text)
+        XCTAssertTrue(text.contains("@@files \(home)/proj\n"), text)
+        let probe = ProjectProbeParser.parse(text)
+        XCTAssertFalse(probe.partial)
+        XCTAssertNil(probe.files[home])
+        XCTAssertEqual(probe.files[home + "/proj"]?.count, 1)
+        XCTAssertEqual(probe.envEntries, [])
+    }
+
+    func testDownDockerIsReportedOnceAndSkipsComposeAndContainers() throws {
+        let home = try physicalTemp()
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        // $HOME/.local/bin is first on the script's PATH, so this stands in for a dead daemon.
+        try Self.sh("mkdir -p .local/bin && printf '#!/bin/sh\\necho \"@@pp-end\" >&2\\necho \"Cannot connect to the Docker daemon\" >&2\\nexit 1\\n' > .local/bin/docker && chmod +x .local/bin/docker", in: home)
+
+        let text = try runScript(sections: ["host", "compose", "containers"], cwds: [], home: home)
+        XCTAssertEqual(text.components(separatedBy: "@@error docker").count - 1, 1, text)
+        XCTAssertFalse(text.contains("@@error compose"), text)
+        XCTAssertFalse(text.contains("@@error containers"), text)
+        XCTAssertTrue(text.contains("docker_error Cannot connect"), text)
+        XCTAssertTrue(text.hasSuffix("@@pp-end\n"))
+        // A stderr line that looks like a frame header is dropped, not echoed into the frame.
+        XCTAssertEqual(text.components(separatedBy: "@@pp-end").count - 1, 1, text)
+        let probe = ProjectProbeParser.parse(text)
+        XCTAssertFalse(probe.partial)
+        XCTAssertEqual(probe.host?.dockerError, "Cannot connect to the Docker daemon")
+        XCTAssertTrue(probe.errors["docker"]?.contains("Cannot connect") == true)
+        XCTAssertEqual(probe.containers, [])
+    }
+
+    func testDockerSectionsComeAfterTheOtherDataSections() {
+        let source = ProjectProbeScript.source
+        let docker = source.range(of: "docker version")!.lowerBound
+        for earlier in ["echo \"@@units\"", "printf '@@files", "printf '@@env"] {
+            XCTAssertLessThan(source.range(of: earlier)!.lowerBound, docker, earlier)
+        }
+        XCTAssertLessThan(docker, source.range(of: "echo \"@@vms parallels\"")!.lowerBound)
     }
 
     private static func sh(_ command: String, in dir: String) throws {

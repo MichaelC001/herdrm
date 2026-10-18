@@ -15,12 +15,23 @@ public enum ProjectClassifier {
         let containers = classifyContainers(
             probe: probe, matchedProjects: Set(composeResult.matched.map(\.name)),
             identity: identity, device: device, overrides: overrides)
+        // The script scans per pane cwd; only roots inside this project count as its files.
+        let scopedFiles = probe.files.filter { key, _ in
+            ProjectPaths.longestRoot(containing: key, in: roots) != nil
+        }
+        let scopedEnv = probe.envEntries.filter {
+            ProjectPaths.longestRoot(containing: $0.file, in: roots) != nil
+        }
         let vms = classifyVMs(
-            localVMs: localVMs, files: probe.files, identity: identity, overrides: overrides)
+            localVMs: localVMs, files: scopedFiles, identity: identity, overrides: overrides)
 
-        // A `#<port>` suffix only disambiguates; an override on the plain signature still counts as live.
-        let live = Set((listeners.devServers + listeners.other).flatMap { row in
-            [row.signature, row.signature.hasSuffix("#\(row.port)") ? String(row.signature.dropLast("#\(row.port)".count)) : row.signature]
+        // A `#<port>` suffix only disambiguates; an override on either spelling counts as live.
+        let live = Set((listeners.devServers + listeners.other).flatMap { row -> [String] in
+            let suffix = "#\(row.port)"
+            if row.signature.hasSuffix(suffix) {
+                return [row.signature, String(row.signature.dropLast(suffix.count))]
+            }
+            return [row.signature, row.signature + suffix]
         })
         let stale = overrides.services
             .filter { signature, value in
@@ -41,8 +52,8 @@ public enum ProjectClassifier {
             suggestedContainers: containers.suggested,
             vms: vms.listed,
             otherVMs: vms.other,
-            files: Array(Set(probe.files.values.flatMap { $0 })).sorted(),
-            envEntries: probe.envEntries,
+            files: Array(Set(scopedFiles.values.flatMap { $0 })).sorted(),
+            envEntries: scopedEnv,
             warnings: warnings(from: probe.errors),
             staleOverrides: stale)
     }
@@ -268,7 +279,9 @@ public enum ProjectClassifier {
         for candidate in candidates {
             let signature = counts[candidate.baseSignature, default: 0] > 1
                 ? "\(candidate.baseSignature)#\(candidate.port)" : candidate.baseSignature
-            let override = overrides.services[signature] ?? overrides.services[candidate.baseSignature]
+            let override = overrides.services[signature]
+                ?? overrides.services[candidate.baseSignature]
+                ?? overrides.services["\(candidate.baseSignature)#\(candidate.port)"]
             let role = override?.role.flatMap(ServiceRole.init(rawValue:)) ?? candidate.role
             let row = DevServer(
                 signature: signature, role: role, framework: candidate.framework, bind: candidate.bind,
@@ -367,7 +380,7 @@ public enum ProjectClassifier {
 
         var matched: [ComposeGroup] = []
         var other: [ComposeGroup] = []
-        for name in names.sorted() where !overrides.detachedCompose.contains(name) {
+        for name in names.sorted() {
             let listed = probe.composeProjects.first { $0.name == name }
             let members = probe.containers.filter { $0.composeProject == name }
             let workingDir = members.compactMap(\.workingDir).first
@@ -376,7 +389,8 @@ public enum ProjectClassifier {
             let counts = laneCounts(members: members, status: listed?.status)
             let rows = members.map { containerRow($0, device: device) }
 
-            let match = composeMatch(
+            // A detached group stays visible with no match, so Attach brings it back.
+            let match = overrides.detachedCompose.contains(name) ? nil : composeMatch(
                 name: name, workingDir: workingDir, configFiles: configFiles, roots: roots,
                 identity: identity, overrides: overrides)
             let group = ComposeGroup(

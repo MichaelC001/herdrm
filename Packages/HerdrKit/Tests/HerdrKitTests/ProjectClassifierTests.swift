@@ -293,12 +293,64 @@ final class ProjectClassifierTests: XCTestCase {
         XCTAssertEqual(attached.otherCompose, [])
     }
 
-    func testDetachedComposeIsExcluded() {
+    func testDetachedComposeMovesToOtherSoAttachBringsItBack() {
         var overrides = ProjectOverrides()
         overrides.detachedCompose = ["acme-lake"]
         let snapshot = classify(devboxProbe(), overrides: overrides)
-        XCTAssertFalse((snapshot.compose + snapshot.otherCompose).contains { $0.name == "acme-lake" })
+        XCTAssertFalse(snapshot.compose.contains { $0.name == "acme-lake" })
+        XCTAssertEqual(snapshot.otherCompose.first { $0.name == "acme-lake" }?.match, nil)
         XCTAssertTrue(snapshot.compose.contains { $0.name == "acme" })
+
+        // A group matched by name can be detached and is offered back, never lost.
+        overrides.detachedCompose = ["acme"]
+        let byName = classify(devboxProbe(), overrides: overrides)
+        XCTAssertNotNil(byName.otherCompose.first { $0.name == "acme" })
+        XCTAssertFalse(byName.compose.contains { $0.name == "acme" })
+
+        // Attaching clears the detach (the model does this) and the group is matched again.
+        overrides.detachedCompose = []
+        overrides.attachedCompose = ["acme-lake"]
+        XCTAssertEqual(classify(devboxProbe(), overrides: overrides).compose.first { $0.name == "acme-lake" }?.match, .path)
+    }
+
+    func testDetachingAnAttachedGroupOnlyDropsTheAttachment() {
+        var probe = ProjectProbe()
+        probe.composeProjects = [ProbeComposeProject(name: "billing", status: "running(1)", configFiles: ["/srv/billing/compose.yml"])]
+        var overrides = ProjectOverrides()
+        overrides.attachedCompose = ["billing"]
+        XCTAssertEqual(classify(probe, overrides: overrides).compose.map(\.match), [.attached])
+        overrides.attachedCompose = []
+        let detached = classify(probe, overrides: overrides)
+        XCTAssertEqual(detached.compose, [])
+        XCTAssertEqual(detached.otherCompose.map(\.name), ["billing"])
+    }
+
+    func testFilesAndEnvFromUnrelatedRootsAreDropped() {
+        var probe = devboxProbe()
+        probe.files = [
+            "/home/dev": ["/home/dev/Desktop/package.json", "/home/dev/lima.yaml"],
+            root: [root + "/package.json"],
+            worktree: [worktree + "/Makefile"],
+            root + "-old": [root + "-old/package.json"],
+        ]
+        probe.envEntries = [
+            ProbeEnvEntry(file: "/home/dev/.env", line: 1, key: "HOME_PORT", value: ""),
+            ProbeEnvEntry(file: root + "/.env", line: 2, key: "API_PORT", value: ""),
+            ProbeEnvEntry(file: root + "-old/.env", line: 3, key: "OLD_PORT", value: ""),
+        ]
+        let snapshot = classify(probe)
+        XCTAssertEqual(snapshot.files, [root + "/package.json", worktree + "/Makefile"].sorted())
+        XCTAssertEqual(snapshot.envEntries.map(\.key), ["API_PORT"])
+    }
+
+    func testLimaConfigOutsideTheProjectDoesNotDeclareVMs() {
+        var local = ProjectProbe()
+        local.vms = [ProbeVM(provider: .lima, id: "default", name: "default", state: "Running", ip: nil)]
+        var probe = devboxProbe()
+        probe.files = ["/home/dev": ["/home/dev/other/lima.yaml"]]
+        XCTAssertEqual(classify(probe, localVMs: local).vms, [])
+        probe.files = [root: [root + "/lima.yaml"]]
+        XCTAssertEqual(classify(probe, localVMs: local).vms.map(\.match), [.declared])
     }
 
     func testUnlabeledContainerIsSuggestedByProjectToken() {
@@ -400,8 +452,8 @@ final class ProjectClassifierTests: XCTestCase {
         probe.envEntries = ProjectProbeParser.parse("""
         @@pp-begin 1
         @@env /home/dev/acme-app/.env
-        3:API_PORT=8100
-        4:DB_PASSWORD=x
+        3:API_PORT
+        4:DB_PASSWORD
         @@pp-end
         """).envEntries
         let snapshot = classify(probe)
@@ -468,6 +520,21 @@ final class ProjectClassifierTests: XCTestCase {
         let snapshot = classify(probe, overrides: overrides)
         XCTAssertEqual(snapshot.devServers.map(\.signature), ["next@frontend#3100", "next@frontend#3101"])
         XCTAssertEqual(snapshot.devServers.map { $0.urls.first?.url }, ["https://hot.devbox.example", "https://hot.devbox.example"])
+        XCTAssertEqual(snapshot.staleOverrides, [])
+    }
+
+    func testPortSuffixedOverrideSurvivesWhenSiblingStops() {
+        var probe = ProjectProbe()
+        probe.listeners = [ProbeListener(bind: "0.0.0.0", port: 3101, pids: [61])]
+        probe.processes = [
+            61: ProbeProcess(pid: 61, ppid: 1, comm: "next-server (v1", cwd: root + "/frontend", args: "next-server"),
+        ]
+        var overrides = ProjectOverrides()
+        overrides.services["next@frontend#3101"] = .init(url: "https://hot.devbox.example", hidden: true)
+        let snapshot = classify(probe, overrides: overrides)
+        XCTAssertEqual(snapshot.devServers.map(\.signature), ["next@frontend"])
+        XCTAssertEqual(snapshot.devServers.first?.urls.first?.url, "https://hot.devbox.example")
+        XCTAssertEqual(snapshot.devServers.first?.isHidden, true)
         XCTAssertEqual(snapshot.staleOverrides, [])
     }
 

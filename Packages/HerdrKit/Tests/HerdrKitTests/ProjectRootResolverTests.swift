@@ -133,4 +133,20 @@ final class ProjectRootResolverTests: XCTestCase {
         XCTAssertEqual(tokens("/home/dev/foo-v2"), ["foo"])
         XCTAssertEqual(tokens("/home/dev/bar_2024"), ["bar"])
     }
+
+    func testNonGitCwdEqualToHomeIsNotAProject() {
+        XCTAssertNil(ProjectRootResolver.resolve(
+            roots: [ProbeRoot(cwd: "/home/dev")], focusedCwd: "/home/dev", home: home, override: nil))
+        XCTAssertNil(ProjectRootResolver.resolve(
+            roots: [ProbeRoot(cwd: "/home/dev/"), ProbeRoot(cwd: "/")], focusedCwd: "/", home: home, override: nil))
+        // A real directory next to a home pane wins, whichever pane is focused.
+        let resolved = ProjectRootResolver.resolve(
+            roots: [ProbeRoot(cwd: "/home/dev"), ProbeRoot(cwd: "/home/dev/scratch")],
+            focusedCwd: "/home/dev", home: home, override: nil)
+        XCTAssertEqual(resolved?.root, "/home/dev/scratch")
+        // An explicit override still wins.
+        XCTAssertEqual(
+            ProjectRootResolver.resolve(roots: [ProbeRoot(cwd: "/home/dev")], focusedCwd: nil, home: home, override: "/home/dev")?.root,
+            "/home/dev")
+    }
 }

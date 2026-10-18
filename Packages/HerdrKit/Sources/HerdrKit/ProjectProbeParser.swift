@@ -358,22 +358,23 @@ public enum ProjectProbeParser {
 
     private static let secretMarkers = ["SECRET", "TOKEN", "KEY", "PASS", "CREDENTIAL"]
 
-    /// `<lineno>:<KEY>=<value>`. Sensitive keys are dropped and URL credentials stripped.
+    /// `<lineno>:<KEY>`. The script sends key names only; a `=value` tail (an older script) is
+    /// discarded, so `value` stays empty. Sensitive keys are dropped.
     private static func parseEnvLine(_ line: String, file: String) -> ProbeEnvEntry? {
         guard let colon = line.firstIndex(of: ":"), let number = Int(line[..<colon]) else { return nil }
-        var assignment = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
-        if assignment.hasPrefix("export ") { assignment = String(assignment.dropFirst(7)).trimmingCharacters(in: .whitespaces) }
-        guard let equals = assignment.firstIndex(of: "=") else { return nil }
-        let key = String(assignment[..<equals]).trimmingCharacters(in: .whitespaces)
+        var key = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+        if key.hasPrefix("export ") { key = String(key.dropFirst(7)).trimmingCharacters(in: .whitespaces) }
+        if let equals = key.firstIndex(of: "=") { key = String(key[..<equals]).trimmingCharacters(in: .whitespaces) }
         guard !key.isEmpty else { return nil }
         let upper = key.uppercased()
         if secretMarkers.contains(where: { upper.contains($0) }) { return nil }
-        var value = String(assignment[assignment.index(after: equals)...]).trimmingCharacters(in: .whitespaces)
-        if value.count >= 2, let first = value.first, first == "\"" || first == "'", value.last == first {
-            value = String(value.dropFirst().dropLast())
-        }
-        value = value.replacingOccurrences(of: #"://[^/\s]*@"#, with: "://", options: .regularExpression)
-        return ProbeEnvEntry(file: file, line: number, key: key, value: value)
+        return ProbeEnvEntry(file: file, line: number, key: key, value: "")
+    }
+
+    /// Removes `user:password@` from a URL. No longer reached by the probe (env values are not
+    /// sent), kept for when env-suggested URLs return.
+    static func stripUserinfo(_ value: String) -> String {
+        value.replacingOccurrences(of: #"://[^/\s]*@"#, with: "://", options: .regularExpression)
     }
 
     // MARK: - Helpers

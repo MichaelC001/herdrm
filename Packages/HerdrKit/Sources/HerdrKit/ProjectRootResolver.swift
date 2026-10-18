@@ -28,7 +28,8 @@ public struct ProjectIdentity: Equatable, Sendable, Codable {
 
 /// Turns the git facts probed for each pane's directory into one project root.
 public enum ProjectRootResolver {
-    /// Returns nil only when there are no roots and no override.
+    /// Returns nil when there are no roots and no override, or when the only non-git directories
+    /// are the home directory and "/".
     public static func resolve(
         roots: [ProbeRoot], focusedCwd: String?, home: String, override: String?
     ) -> (root: String, worktreeRoots: [String])? {
@@ -59,7 +60,14 @@ public enum ProjectRootResolver {
         let ancestorComponents = components(ancestor)
         // An ancestor that is "/" or contains home is too broad to be a project.
         if ancestorComponents.isEmpty || components(home).starts(with: ancestorComponents) {
-            let fallback = normalized(focusedCwd ?? cwds[0])
+            // The focused pane's directory, else the first one that is a real directory. Home
+            // itself (or "/") is never a project: scanning it would walk the whole tree.
+            let homeComponents = components(home)
+            let usable = ([focusedCwd].compactMap { $0 } + cwds).map(normalized).first {
+                let parts = components($0)
+                return !parts.isEmpty && parts != homeComponents
+            }
+            guard let fallback = usable else { return nil }
             return (fallback, [fallback])
         }
         return (ancestor, [ancestor])
