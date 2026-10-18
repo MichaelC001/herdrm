@@ -264,6 +264,9 @@ final class TerminalProcessHost {
 
     /// Called on the main queue with the child's real exit status.
     var onExit: ((Int32?) -> Void)?
+    /// Called on the process's IO queue after each chunk of output reached the
+    /// session. Set before `start`; the session may not have parsed it yet.
+    var onOutput: (() -> Void)?
 
     init() {
         let process = self.process
@@ -323,6 +326,7 @@ final class TerminalProcessHost {
         } else {
             session.receive(data)
         }
+        onOutput?()
     }
 }
 
@@ -334,6 +338,30 @@ private final class ViewportBox: @unchecked Sendable {
     var value: InMemoryTerminalViewport? {
         get { lock.lock(); defer { lock.unlock() }; return stored }
         set { lock.lock(); stored = newValue; lock.unlock() }
+    }
+}
+
+/// Coalesces a pane's output (IO queue) into at most one queued main-queue
+/// hop, and none while the pane does not paint thumbnails.
+private final class ThumbnailOutputSignal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var enabled = false
+    private var queued = false
+
+    func setEnabled(_ value: Bool) {
+        lock.lock(); enabled = value; lock.unlock()
+    }
+
+    /// True when the caller should hop to main; the hop then calls `release()`.
+    func claim() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard enabled, !queued else { return false }
+        queued = true
+        return true
+    }
+
+    func release() {
+        lock.lock(); queued = false; lock.unlock()
     }
 }
 
@@ -385,7 +413,9 @@ final class LineBreakTerminalView: AppTerminalView {
     /// When false, mouse button events always stay local even if the TUI
     /// requested mouse reporting (Shift bypasses it either way).
     var mouseReportingEnabled = true
-    var appliedDarkAppearance: Bool?
+    var appliedDarkAppearance: Bool? {
+        didSet { if appliedDarkAppearance != oldValue { placeThumbnailOverlays() } }
+    }
     /// The live surface, captured by the coordinator's lifecycle delegate —
     /// `AppTerminalView.surface` is internal, so selection queries come in here.
     weak var attachedSurface: TerminalSurface?
@@ -393,7 +423,9 @@ final class LineBreakTerminalView: AppTerminalView {
     /// Ghostty's grid as its resize delegate last reported it. The session's
     /// `viewport` (from the PTY resize callback) carries columns, rows and the
     /// surface size but no cell size, so this is where cell pixels come from.
-    var gridMetrics: TerminalGridMetrics?
+    var gridMetrics: TerminalGridMetrics? {
+        didSet { placeThumbnailOverlays() }
+    }
     /// Where printed file paths resolve: the pane's working directory, and
     /// whether the pane's files are on this Mac at all. Nil disables path
     /// links (an app shell has no herdr cwd to anchor relative paths, but its
@@ -877,6 +909,7 @@ final class LineBreakTerminalView: AppTerminalView {
             // status-line plugins skip updates while herdr's viewport is up.
             if historyTarget > 0 { jumpHistoryToBottom() }
         }
+        setThumbnailsVisible(visible)
         guard visible != acceptsDrops else { return }
         acceptsDrops = visible
         updateDragRegistration()
@@ -886,6 +919,7 @@ final class LineBreakTerminalView: AppTerminalView {
         if newSize != frame.size { hideLinkPopup() }
         super.setFrameSize(newSize)
         placeJumpPill()
+        placeThumbnailOverlays()
     }
 
     private func updateLinkPopup() {
@@ -929,6 +963,231 @@ final class LineBreakTerminalView: AppTerminalView {
         pasteboard.clearContents()
         pasteboard.setString(link.text, forType: .string)
         linkPopup?.showCopied { [weak self] in self?.hideLinkPopup() }
+    }
+
+    // MARK: Image thumbnails
+
+    /// Paints the images the user pasted into the `#N` boxes Claude Code draws
+    /// above its prompt (it fills them with a `▀` mosaic, or nothing). Only
+    /// Claude panes set this; every other pane never scans.
+    var thumbnailsEnabled = false {
+        didSet {
+            guard thumbnailsEnabled != oldValue else { return }
+            thumbnailOutputSignal.setEnabled(thumbnailsEnabled)
+            if !thumbnailsEnabled { resetThumbnails() }
+        }
+    }
+    private let thumbnailOutputSignal = ThumbnailOutputSignal()
+    private var thumbnailStore = PaneThumbnailStore()
+    /// Keyed by box number.
+    private var thumbnailOverlays: [Int: ThumbnailOverlayView] = [:]
+    /// The last scan's result, so geometry changes re-place without a rescan.
+    private var placedThumbnails: [PlacedThumbnail] = []
+    private var thumbnailPollTimer: Timer?
+    private var thumbnailBurstScheduled = false
+    private var thumbnailSurfaceVisible = true
+    /// Deliveries whose images are still decoding. Output scans wait for them:
+    /// a scan between the delivery and the record would see the new box with
+    /// nothing pending, mark it seen, and the image could never bind.
+    private var thumbnailDeliveriesInFlight = 0
+    /// Bumped by `resetThumbnails`, so a decode finishing afterwards is dropped.
+    private var thumbnailGeneration = 0
+
+    /// PTY output arrived (IO queue). At most one hop to main is queued at a
+    /// time, and none while thumbnails are off.
+    nonisolated func thumbnailOutputArrived() {
+        guard thumbnailOutputSignal.claim() else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.thumbnailOutputSignal.release()
+            self.scheduleThumbnailScans()
+        }
+    }
+
+    /// Drops every pending and bound thumbnail and its overlay, and stops
+    /// polling: the process exited, the view went away, or the pane is no
+    /// longer Claude.
+    func resetThumbnails() {
+        thumbnailStore.removeAll()
+        placedThumbnails = []
+        thumbnailOverlays.values.forEach { $0.removeFromSuperview() }
+        thumbnailOverlays = [:]
+        stopThumbnailPolling()
+        thumbnailDeliveriesInFlight = 0
+        thumbnailGeneration += 1
+    }
+
+    /// Right before a delivery: a baseline scan marks the boxes already on
+    /// screen as seen, so this paste cannot bind to them. Returns the token for
+    /// `endThumbnailDelivery`, or nil when thumbnails are off.
+    private func beginThumbnailDelivery() -> Int? {
+        guard thumbnailsEnabled else { return nil }
+        scanForThumbnails(baseline: true)
+        thumbnailDeliveriesInFlight += 1
+        return thumbnailGeneration
+    }
+
+    /// After the delivery, with its decoded images (main thread).
+    private func endThumbnailDelivery(_ token: Int, images: [(NSImage, String)], expiry: TimeInterval) {
+        guard token == thumbnailGeneration else { return }
+        thumbnailDeliveriesInFlight -= 1
+        recordPendingThumbnails(images, expiry: expiry)
+    }
+
+    /// After the delivery: decodes on a utility queue, then records on main.
+    private func endThumbnailDelivery(
+        _ token: Int,
+        expiry: TimeInterval,
+        decoding decode: @escaping @Sendable () -> [(NSImage, String)]
+    ) {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let images = decode()
+            DispatchQueue.main.async { [weak self] in
+                self?.endThumbnailDelivery(token, images: images, expiry: expiry)
+            }
+        }
+    }
+
+    /// Image files decode in delivery order; one that fails is left out, so
+    /// the counts differ and nothing binds.
+    private nonisolated static func decodeThumbnails(_ urls: [URL]) -> [(NSImage, String)] {
+        urls.compactMap { url in
+            ImageThumbnailer.thumbnail(contentsOf: url).map { ($0, url.lastPathComponent) }
+        }
+    }
+
+    private func recordPendingThumbnails(_ images: [(NSImage, String)], expiry: TimeInterval) {
+        guard thumbnailsEnabled else { return }
+        let now = Date()
+        for (image, name) in images {
+            thumbnailStore.record(PendingThumbnail(image: image, name: name, recordedAt: now, expiry: expiry))
+        }
+        scheduleThumbnailScans()
+    }
+
+    /// Rescans 50 ms and 250 ms from now (the session parses output after the
+    /// pump hands it over, so an immediate read can miss the box), and polls
+    /// every 500 ms until nothing is pending or bound.
+    private func scheduleThumbnailScans() {
+        guard thumbnailsEnabled, thumbnailSurfaceVisible, thumbnailStore.needsScanning(now: Date()) else { return }
+        if !thumbnailBurstScheduled {
+            thumbnailBurstScheduled = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.scanForThumbnails()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                self?.thumbnailBurstScheduled = false
+                self?.scanForThumbnails()
+            }
+        }
+        guard thumbnailPollTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scanForThumbnails() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        thumbnailPollTimer = timer
+    }
+
+    private func stopThumbnailPolling() {
+        thumbnailPollTimer?.invalidate()
+        thumbnailPollTimer = nil
+    }
+
+    /// Reads the viewport, binds new boxes, and places or removes overlays.
+    /// A `baseline` scan runs right before a delivery, visible or not. Any scan
+    /// waits while a delivery is in flight: that delivery's own box may already
+    /// be on screen, and the in-flight delivery's baseline covered the rest.
+    private func scanForThumbnails(baseline: Bool = false) {
+        guard thumbnailsEnabled, attachedSurface != nil, thumbnailDeliveriesInFlight == 0 else { return }
+        guard baseline || thumbnailSurfaceVisible else { return }
+        guard let text = processHost?.session.readViewportText() else { return }
+        let now = Date()
+        let placed = thumbnailStore.scan(ClaudeImageBoxes.boxes(in: text), now: now)
+        placedThumbnails = placed
+        let numbers = Set(placed.map(\.box.number))
+        for number in thumbnailOverlays.keys where !numbers.contains(number) {
+            thumbnailOverlays.removeValue(forKey: number)?.removeFromSuperview()
+        }
+        for item in placed {
+            if let overlay = thumbnailOverlays[item.box.number] {
+                if overlay.image !== item.image { overlay.image = item.image }
+            } else {
+                let overlay = ThumbnailOverlayView(image: item.image, background: thumbnailBackground)
+                // Below the find bar, the jump pill and the link popup.
+                addSubview(overlay, positioned: .below, relativeTo: nil)
+                thumbnailOverlays[item.box.number] = overlay
+            }
+        }
+        placeThumbnailOverlays()
+        if !thumbnailStore.needsScanning(now: now) { stopThumbnailPolling() }
+    }
+
+    /// Frames every overlay from the current cell geometry and theme; hidden
+    /// while the surface is hidden or the grid is unknown.
+    private func placeThumbnailOverlays() {
+        guard !thumbnailOverlays.isEmpty else { return }
+        let cellSize = thumbnailCellSize()
+        let background = thumbnailBackground
+        for item in placedThumbnails {
+            guard let overlay = thumbnailOverlays[item.box.number] else { continue }
+            if overlay.background != background { overlay.background = background }
+            guard thumbnailSurfaceVisible, let cellSize else {
+                overlay.isHidden = true
+                continue
+            }
+            let rect = ThumbnailOverlayGeometry.rect(
+                for: item.box.interior, cellSize: cellSize, padding: Self.gridPadding
+            )
+            // The geometry is top-down; this view is not flipped.
+            overlay.frame = isFlipped
+                ? rect
+                : NSRect(x: rect.minX, y: bounds.height - rect.maxY, width: rect.width, height: rect.height)
+            overlay.isHidden = false
+        }
+    }
+
+    private func setThumbnailsVisible(_ visible: Bool) {
+        guard visible != thumbnailSurfaceVisible else { return }
+        thumbnailSurfaceVisible = visible
+        placeThumbnailOverlays()
+        if visible {
+            scheduleThumbnailScans()
+        } else {
+            stopThumbnailPolling()
+        }
+    }
+
+    /// Cell size in points, built exactly as `cursorCell()` builds it.
+    private func thumbnailCellSize() -> CGSize? {
+        guard let window, let viewport = processHost?.viewport else { return nil }
+        return TerminalCaretGrid.cellSize(
+            columns: Int(viewport.columns),
+            rows: Int(viewport.rows),
+            widthPixels: CGFloat(viewport.widthPixels),
+            heightPixels: CGFloat(viewport.heightPixels),
+            cellWidthPixels: CGFloat(viewport.cellWidthPixels),
+            cellHeightPixels: CGFloat(viewport.cellHeightPixels),
+            scale: window.backingScaleFactor,
+            padding: Self.gridPadding
+        )
+    }
+
+    /// The pane's own background, so the overlay covers the mosaic completely.
+    private var thumbnailBackground: NSColor {
+        Self.color(hex: appliedDarkAppearance == true
+            ? TerminalDefaults.darkBackgroundHex
+            : TerminalDefaults.lightBackgroundHex)
+    }
+
+    /// "#RRGGBB" to an sRGB colour.
+    private static func color(hex: String) -> NSColor {
+        let value = UInt32(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0
+        return NSColor(
+            srgbRed: CGFloat((value >> 16) & 0xFF) / 255,
+            green: CGFloat((value >> 8) & 0xFF) / 255,
+            blue: CGFloat(value & 0xFF) / 255,
+            alpha: 1
+        )
     }
 
     // MARK: Accessibility
@@ -1248,9 +1507,11 @@ final class LineBreakTerminalView: AppTerminalView {
             pathSyntax = .shellQuoted
         }
         if case .local = attachmentDeviceKind {
-            sendPastedText(
-                fileURLs.map { pathSyntax.format($0.path) }.joined(separator: " ") + Self.dropSuffix
-            )
+            deliverTypedPaths(of: fileURLs) {
+                sendPastedText(
+                    fileURLs.map { pathSyntax.format($0.path) }.joined(separator: " ") + Self.dropSuffix
+                )
+            }
             return
         }
         do {
@@ -1278,6 +1539,8 @@ final class LineBreakTerminalView: AppTerminalView {
 
     deinit {
         uploadTask?.cancel()
+        // The store and the overlays go with the view; only the timer outlives it.
+        thumbnailPollTimer?.invalidate()
     }
 
     // ⌘C/⌘V are intercepted here because the app has no Edit menu. Copy stays
@@ -1388,7 +1651,9 @@ final class LineBreakTerminalView: AppTerminalView {
             forwardNativeClipboardPaste()
         case .devicePaths(let pathSyntax):
             if case .local = attachmentDeviceKind {
-                sendPastedText(fileURLs.map { pathSyntax.format($0.path) }.joined(separator: " "))
+                deliverTypedPaths(of: fileURLs) {
+                    sendPastedText(fileURLs.map { pathSyntax.format($0.path) }.joined(separator: " "))
+                }
                 return
             }
             do {
@@ -1422,7 +1687,22 @@ final class LineBreakTerminalView: AppTerminalView {
     /// ^V byte — the "native clipboard" delivery path.
     private func forwardNativeClipboardPaste() {
         forgetHistoryScroll()
+        let thumbnailToken = beginThumbnailDelivery()
         processHost?.session.sendInput(Data([0x16]))
+        // No completion signal from Claude here, hence the short expiry.
+        if let thumbnailToken {
+            endThumbnailDelivery(thumbnailToken, expiry: 10) {
+                ImageThumbnailer.thumbnail(from: NSPasteboard.general).map { [($0, "clipboard")] } ?? []
+            }
+        }
+    }
+
+    /// Types local paths, painting the image files among them into Claude's boxes.
+    private func deliverTypedPaths(of fileURLs: [URL], _ deliver: () -> Void) {
+        let imageURLs = thumbnailsEnabled ? fileURLs.filter(Self.isImageFile) : []
+        guard !imageURLs.isEmpty, let thumbnailToken = beginThumbnailDelivery() else { return deliver() }
+        deliver()
+        endThumbnailDelivery(thumbnailToken, expiry: 60) { Self.decodeThumbnails(imageURLs) }
     }
 
     private func enqueuePathPaste(
@@ -1452,6 +1732,11 @@ final class LineBreakTerminalView: AppTerminalView {
             let paste = pendingUploads.removeFirst()
             let files = paste.files
             defer { discardTemporaries(in: files) }
+            // Decoded alongside the upload and awaited before the temporaries go.
+            let imageURLs = thumbnailsEnabled ? files.map(\.localURL).filter(Self.isImageFile) : []
+            let thumbnails = imageURLs.isEmpty
+                ? nil
+                : Task.detached(priority: .utility) { Self.decodeThumbnails(imageURLs) }
             do {
                 var devicePaths: [String] = []
                 for file in files {
@@ -1459,9 +1744,13 @@ final class LineBreakTerminalView: AppTerminalView {
                     devicePaths.append(try await service.stageAttachment(from: file.localURL))
                 }
                 try Task.checkCancellation()
+                let thumbnailToken = thumbnails == nil ? nil : beginThumbnailDelivery()
                 sendPastedText(
                     devicePaths.map(paste.pathSyntax.format).joined(separator: " ") + paste.suffix
                 )
+                if let thumbnailToken, let thumbnails {
+                    endThumbnailDelivery(thumbnailToken, images: await thumbnails.value, expiry: 60)
+                }
             } catch is CancellationError {
                 break
             } catch {
@@ -1652,6 +1941,9 @@ struct AttachTerminalView: NSViewRepresentable {
     var serverVersion: String?
     /// nil when the server or active manifest does not advertise attachment support.
     let attachmentCapabilities: AgentAttachmentCapabilities?
+    /// herdr's agent kind for the pane (`"claude"`, …); nil for a bare shell.
+    /// Only Claude panes paint pasted images into their thumbnail boxes.
+    var agentKind: String? = nil
     var fontName: String = ""
     var fontSize: Double = TerminalDefaults.defaultFontSize
     /// No longer maps to anything: Ghostty's renderer has no font-smoothing
@@ -1690,6 +1982,7 @@ struct AttachTerminalView: NSViewRepresentable {
         let host = TerminalProcessHost()
         let view = LineBreakTerminalView(frame: .zero)
         view.processHost = host
+        host.onOutput = { [weak view] in view?.thumbnailOutputArrived() }
         configurePasteHandling(view)
         context.coordinator.view = view
         context.coordinator.host = host
@@ -1744,6 +2037,7 @@ struct AttachTerminalView: NSViewRepresentable {
         view.attachmentDeviceKind = device.kind
         view.onAttachmentError = onAttachmentError
         view.onAttachmentUploadingChanged = onAttachmentUploadingChanged
+        view.thumbnailsEnabled = agentKind == "claude"
     }
 
     static func dismantleNSView(_ nsView: LineBreakTerminalView, coordinator: Coordinator) {
@@ -1818,6 +2112,7 @@ struct AttachTerminalView: NSViewRepresentable {
         }
 
         func processDidExit(_ code: Int32?) {
+            view?.resetThumbnails()
             discardAuthorization()
             let callback = onExit
             onExit = nil  // report once
