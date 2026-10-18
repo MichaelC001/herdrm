@@ -17,8 +17,14 @@ enum ImageThumbnailer {
 
     /// The first image on `pasteboard`, downscaled; nil when it holds none.
     static func thumbnail(from pasteboard: NSPasteboard) -> NSImage? {
-        guard let image = (pasteboard.readObjects(forClasses: [NSImage.self]) as? [NSImage])?.first,
-              let tiff = image.tiffRepresentation,
+        guard let image = (pasteboard.readObjects(forClasses: [NSImage.self]) as? [NSImage])?.first else { return nil }
+        return thumbnail(of: image)
+    }
+
+    /// `image`, downscaled. For an image read from the pasteboard on the main
+    /// thread and handed to a background queue for this step.
+    static func thumbnail(of image: NSImage) -> NSImage? {
+        guard let tiff = image.tiffRepresentation,
               let source = CGImageSourceCreateWithData(tiff as CFData, nil)
         else { return nil }
         return thumbnail(from: source)

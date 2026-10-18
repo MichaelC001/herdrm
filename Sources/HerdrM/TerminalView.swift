@@ -365,6 +365,19 @@ private final class ThumbnailOutputSignal: @unchecked Sendable {
     }
 }
 
+/// A one-shot latch: the first `claim()` wins.
+private final class ThumbnailOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var claimed = false
+
+    func claim() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !claimed else { return false }
+        claimed = true
+        return true
+    }
+}
+
 private struct ClipboardFile: Sendable {
     let localURL: URL
     let removeAfterUpload: Bool
@@ -672,6 +685,18 @@ final class LineBreakTerminalView: AppTerminalView {
         let height = (CGFloat(viewport.heightPixels) - padding) / CGFloat(viewport.rows)
         guard width > 0, height > 0 else { return nil }
         return (width, height)
+    }
+
+    /// The cell size in points, from Ghostty's reported cell (`cellSizePixels`
+    /// reads `gridMetrics` first): the caret and the thumbnail overlays both
+    /// use this, so they cannot disagree.
+    private func cellSizePoints() -> CGSize? {
+        guard let window, let viewport = processHost?.viewport,
+              let cell = cellSizePixels(viewport)
+        else { return nil }
+        let scale = window.backingScaleFactor
+        guard scale > 0 else { return nil }
+        return CGSize(width: cell.width / scale, height: cell.height / scale)
     }
 
     static func url(in lines: [String], row: Int, column: Int, columns: Int) -> String? {
@@ -986,12 +1011,30 @@ final class LineBreakTerminalView: AppTerminalView {
     private var thumbnailPollTimer: Timer?
     private var thumbnailBurstScheduled = false
     private var thumbnailSurfaceVisible = true
-    /// Deliveries whose images are still decoding. Output scans wait for them:
-    /// a scan between the delivery and the record would see the new box with
-    /// nothing pending, mark it seen, and the image could never bind.
-    private var thumbnailDeliveriesInFlight = 0
+    /// Deliveries are numbered as they begin and recorded strictly in that
+    /// order, whichever decode finishes first: binding pairs ascending box
+    /// numbers with pending entries in record order.
+    private var thumbnailNextDelivery = 0
+    private var thumbnailNextRecord = 0
+    /// Finished deliveries waiting for an earlier one to record.
+    private var thumbnailFinishedDeliveries: [Int: (images: [(NSImage, String)], expiry: TimeInterval)] = [:]
     /// Bumped by `resetThumbnails`, so a decode finishing afterwards is dropped.
     private var thumbnailGeneration = 0
+    /// A delivery that has not recorded within this many seconds counts as
+    /// finished with no images, so a hung decode cannot stop scans for good.
+    private static let thumbnailDecodeTimeout: TimeInterval = 5
+    /// Decodes run one at a time, off the main thread.
+    private static let thumbnailDecodeQueue = DispatchQueue(label: "herdrm.thumbnail-decode", qos: .utility)
+
+    private struct ThumbnailDeliveryToken {
+        let generation: Int
+        let sequence: Int
+    }
+
+    /// Deliveries begun but not yet recorded. Scans wait for them: a scan
+    /// between the delivery and the record would see the new box with nothing
+    /// pending, mark it seen, and the image could never bind.
+    private var thumbnailDeliveryInFlight: Bool { thumbnailNextRecord < thumbnailNextDelivery }
 
     /// PTY output arrived (IO queue). At most one hop to main is queued at a
     /// time, and none while thumbnails are off.
@@ -1013,37 +1056,72 @@ final class LineBreakTerminalView: AppTerminalView {
         thumbnailOverlays.values.forEach { $0.removeFromSuperview() }
         thumbnailOverlays = [:]
         stopThumbnailPolling()
-        thumbnailDeliveriesInFlight = 0
+        thumbnailFinishedDeliveries = [:]
+        thumbnailNextRecord = thumbnailNextDelivery
         thumbnailGeneration += 1
     }
 
     /// Right before a delivery: a baseline scan marks the boxes already on
     /// screen as seen, so this paste cannot bind to them. Returns the token for
     /// `endThumbnailDelivery`, or nil when thumbnails are off.
-    private func beginThumbnailDelivery() -> Int? {
+    private func beginThumbnailDelivery() -> ThumbnailDeliveryToken? {
         guard thumbnailsEnabled else { return nil }
         scanForThumbnails(baseline: true)
-        thumbnailDeliveriesInFlight += 1
-        return thumbnailGeneration
+        let token = ThumbnailDeliveryToken(generation: thumbnailGeneration, sequence: thumbnailNextDelivery)
+        thumbnailNextDelivery += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.thumbnailDecodeTimeout) { [weak self] in
+            self?.endThumbnailDelivery(token, images: [], expiry: 0)
+        }
+        return token
     }
 
-    /// After the delivery, with its decoded images (main thread).
-    private func endThumbnailDelivery(_ token: Int, images: [(NSImage, String)], expiry: TimeInterval) {
-        guard token == thumbnailGeneration else { return }
-        thumbnailDeliveriesInFlight -= 1
-        recordPendingThumbnails(images, expiry: expiry)
-    }
-
-    /// After the delivery: decodes on a utility queue, then records on main.
+    /// After the delivery, with its decoded images (main thread). Records it
+    /// and every later delivery already waiting, in delivery order. A second
+    /// finish of the same delivery (the timeout, or a late decode) is ignored.
     private func endThumbnailDelivery(
-        _ token: Int,
+        _ token: ThumbnailDeliveryToken,
+        images: [(NSImage, String)],
+        expiry: TimeInterval
+    ) {
+        guard token.generation == thumbnailGeneration,
+              token.sequence >= thumbnailNextRecord,
+              thumbnailFinishedDeliveries[token.sequence] == nil
+        else { return }
+        thumbnailFinishedDeliveries[token.sequence] = (images, expiry)
+        while let next = thumbnailFinishedDeliveries.removeValue(forKey: thumbnailNextRecord) {
+            thumbnailNextRecord += 1
+            recordPendingThumbnails(next.images, expiry: next.expiry)
+        }
+    }
+
+    /// After the delivery: decodes on the decode queue, then records on main.
+    private func endThumbnailDelivery(
+        _ token: ThumbnailDeliveryToken,
         expiry: TimeInterval,
         decoding decode: @escaping @Sendable () -> [(NSImage, String)]
     ) {
-        DispatchQueue.global(qos: .utility).async { [weak self] in
+        Self.thumbnailDecodeQueue.async { [weak self] in
             let images = decode()
             DispatchQueue.main.async { [weak self] in
                 self?.endThumbnailDelivery(token, images: images, expiry: expiry)
+            }
+        }
+    }
+
+    /// `task`'s images, or none once `seconds` pass: a hung decode must not
+    /// stall the paste queue that awaits it.
+    private nonisolated static func thumbnails(
+        of task: Task<[(NSImage, String)], Never>,
+        within seconds: TimeInterval
+    ) async -> [(NSImage, String)] {
+        await withCheckedContinuation { continuation in
+            let once = ThumbnailOnce()
+            Task {
+                let images = await task.value
+                if once.claim() { continuation.resume(returning: images) }
+            }
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + seconds) {
+                if once.claim() { continuation.resume(returning: []) }
             }
         }
     }
@@ -1067,9 +1145,9 @@ final class LineBreakTerminalView: AppTerminalView {
 
     /// Rescans 50 ms and 250 ms from now (the session parses output after the
     /// pump hands it over, so an immediate read can miss the box), and polls
-    /// every 500 ms until nothing is pending or bound.
+    /// every 500 ms until nothing is pending, bound or drawn.
     private func scheduleThumbnailScans() {
-        guard thumbnailsEnabled, thumbnailSurfaceVisible, thumbnailStore.needsScanning(now: Date()) else { return }
+        guard thumbnailsEnabled, thumbnailSurfaceVisible, thumbnailsNeedScanning(now: Date()) else { return }
         if !thumbnailBurstScheduled {
             thumbnailBurstScheduled = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
@@ -1088,6 +1166,12 @@ final class LineBreakTerminalView: AppTerminalView {
         thumbnailPollTimer = timer
     }
 
+    /// An overlay still on screen needs a scan too, even once its binding's
+    /// grace has lapsed: only a scan removes an overlay whose box is gone.
+    private func thumbnailsNeedScanning(now: Date) -> Bool {
+        thumbnailStore.needsScanning(now: now) || !thumbnailOverlays.isEmpty
+    }
+
     private func stopThumbnailPolling() {
         thumbnailPollTimer?.invalidate()
         thumbnailPollTimer = nil
@@ -1098,7 +1182,7 @@ final class LineBreakTerminalView: AppTerminalView {
     /// waits while a delivery is in flight: that delivery's own box may already
     /// be on screen, and the in-flight delivery's baseline covered the rest.
     private func scanForThumbnails(baseline: Bool = false) {
-        guard thumbnailsEnabled, attachedSurface != nil, thumbnailDeliveriesInFlight == 0 else { return }
+        guard thumbnailsEnabled, attachedSurface != nil, !thumbnailDeliveryInFlight else { return }
         guard baseline || thumbnailSurfaceVisible else { return }
         guard let text = processHost?.session.readViewportText() else { return }
         let now = Date()
@@ -1119,14 +1203,14 @@ final class LineBreakTerminalView: AppTerminalView {
             }
         }
         placeThumbnailOverlays()
-        if !thumbnailStore.needsScanning(now: now) { stopThumbnailPolling() }
+        if !thumbnailsNeedScanning(now: now) { stopThumbnailPolling() }
     }
 
     /// Frames every overlay from the current cell geometry and theme; hidden
     /// while the surface is hidden or the grid is unknown.
     private func placeThumbnailOverlays() {
         guard !thumbnailOverlays.isEmpty else { return }
-        let cellSize = thumbnailCellSize()
+        let cellSize = cellSizePoints()
         let background = thumbnailBackground
         for item in placedThumbnails {
             guard let overlay = thumbnailOverlays[item.box.number] else { continue }
@@ -1149,27 +1233,16 @@ final class LineBreakTerminalView: AppTerminalView {
     private func setThumbnailsVisible(_ visible: Bool) {
         guard visible != thumbnailSurfaceVisible else { return }
         thumbnailSurfaceVisible = visible
-        placeThumbnailOverlays()
         if visible {
+            // Rescan before showing the cached overlays: their boxes may have
+            // gone, or moved, while the pane was hidden.
+            scanForThumbnails()
+            placeThumbnailOverlays()
             scheduleThumbnailScans()
         } else {
+            placeThumbnailOverlays()
             stopThumbnailPolling()
         }
-    }
-
-    /// Cell size in points, built exactly as `cursorCell()` builds it.
-    private func thumbnailCellSize() -> CGSize? {
-        guard let window, let viewport = processHost?.viewport else { return nil }
-        return TerminalCaretGrid.cellSize(
-            columns: Int(viewport.columns),
-            rows: Int(viewport.rows),
-            widthPixels: CGFloat(viewport.widthPixels),
-            heightPixels: CGFloat(viewport.heightPixels),
-            cellWidthPixels: CGFloat(viewport.cellWidthPixels),
-            cellHeightPixels: CGFloat(viewport.cellHeightPixels),
-            scale: window.backingScaleFactor,
-            padding: Self.gridPadding
-        )
     }
 
     /// The pane's own background, so the overlay covers the mosaic completely.
@@ -1263,18 +1336,7 @@ final class LineBreakTerminalView: AppTerminalView {
     /// from ghostty's IME point (via `firstRect`), which is zero-width while
     /// nothing is selected; the cell size from the viewport.
     private func cursorCell() -> (cell: TerminalCaretGrid.Cell, rect: NSRect)? {
-        guard attachedSurface != nil, let window, let viewport = processHost?.viewport,
-              let size = TerminalCaretGrid.cellSize(
-                  columns: Int(viewport.columns),
-                  rows: Int(viewport.rows),
-                  widthPixels: CGFloat(viewport.widthPixels),
-                  heightPixels: CGFloat(viewport.heightPixels),
-                  cellWidthPixels: CGFloat(viewport.cellWidthPixels),
-                  cellHeightPixels: CGFloat(viewport.cellHeightPixels),
-                  scale: window.backingScaleFactor,
-                  padding: Self.gridPadding
-              )
-        else { return nil }
+        guard attachedSurface != nil, let window, let size = cellSizePoints() else { return nil }
         let cellWidth = size.width
         let cellHeight = size.height
         let screenRect = firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil)
@@ -1691,8 +1753,10 @@ final class LineBreakTerminalView: AppTerminalView {
         processHost?.session.sendInput(Data([0x16]))
         // No completion signal from Claude here, hence the short expiry.
         if let thumbnailToken {
+            // The pasteboard is read here, on main; only the downscale runs off it.
+            let image = (NSPasteboard.general.readObjects(forClasses: [NSImage.self]) as? [NSImage])?.first
             endThumbnailDelivery(thumbnailToken, expiry: 10) {
-                ImageThumbnailer.thumbnail(from: NSPasteboard.general).map { [($0, "clipboard")] } ?? []
+                image.flatMap(ImageThumbnailer.thumbnail(of:)).map { [($0, "clipboard")] } ?? []
             }
         }
     }
@@ -1732,11 +1796,12 @@ final class LineBreakTerminalView: AppTerminalView {
             let paste = pendingUploads.removeFirst()
             let files = paste.files
             defer { discardTemporaries(in: files) }
-            // Decoded alongside the upload and awaited before the temporaries go.
+            // Decoded alongside the upload.
             let imageURLs = thumbnailsEnabled ? files.map(\.localURL).filter(Self.isImageFile) : []
             let thumbnails = imageURLs.isEmpty
                 ? nil
                 : Task.detached(priority: .utility) { Self.decodeThumbnails(imageURLs) }
+            // Awaited (at most the timeout) before the temporaries go.
             do {
                 var devicePaths: [String] = []
                 for file in files {
@@ -1749,7 +1814,8 @@ final class LineBreakTerminalView: AppTerminalView {
                     devicePaths.map(paste.pathSyntax.format).joined(separator: " ") + paste.suffix
                 )
                 if let thumbnailToken, let thumbnails {
-                    endThumbnailDelivery(thumbnailToken, images: await thumbnails.value, expiry: 60)
+                    let images = await Self.thumbnails(of: thumbnails, within: Self.thumbnailDecodeTimeout)
+                    endThumbnailDelivery(thumbnailToken, images: images, expiry: 60)
                 }
             } catch is CancellationError {
                 break
