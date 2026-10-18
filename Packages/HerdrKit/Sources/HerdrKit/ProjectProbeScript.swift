@@ -30,9 +30,11 @@ LC_ALL=C; export LC_ALL
 sections=",${1:-},"; iv=${2:-15}; frames=${3:-1}
 [ $# -ge 3 ] && shift 3
 os=$(uname -s)
-errf=$(mktemp 2>/dev/null) || errf="${TMPDIR:-/tmp}/herdrm-pp.$$.$(date +%s)"
-trap 'rm -f "$errf"' EXIT
-trap 'rm -f "$errf"; exit 0' HUP INT TERM
+# Without mktemp, stderr detail is dropped rather than written to a guessable path.
+errf=$(mktemp 2>/dev/null) || errf=/dev/null
+cleanup() { [ "$errf" = /dev/null ] || rm -f "$errf"; }
+trap cleanup EXIT
+trap 'cleanup; exit 0' HUP INT TERM PIPE
 
 has() { case "$sections" in *",$1,"*) return 0;; esac; return 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -48,9 +50,17 @@ run() {
 # runq: like run, but lsof exits 1 when it found nothing to list; that is an error only if it said so on stderr.
 runq() {
   rn=$1; shift
-  if "$@" 2>"$errf"; then :; elif [ -s "$errf" ]; then
+  "$@" 2>"$errf"; rq=$?
+  if [ $rq -ne 0 ] && { [ $rq -ne 1 ] || [ -s "$errf" ]; }; then
     echo "@@error $rn"; head -3 "$errf" | cut -c1-300
   fi
+}
+# find_files <root>: find's stdout is filtered here (no `@@` lines, no control characters) and
+# find's own exit status is returned, so `run` can still report its stderr.
+find_files() {
+  ff=$(tm find "$1" -maxdepth 4 \( -name node_modules -o -name .git -o -name .venv -o -name dist -o -name build -o -name .next \) -prune -o -type f \( -name package.json -o -name 'docker-compose*.y*ml' -o -name 'compose*.y*ml' -o -name Makefile -o -name Procfile -o -name pyproject.toml -o -name Caddyfile -o -name justfile -o -name '.dev-lane.env' -o -name '.env*' \) -print); frc=$?
+  [ -n "$ff" ] && printf '%s\n' "$ff" | head -200 | grep -v -E '^@@|[[:cntrl:]]'
+  return $frc
 }
 # Project roots: the git toplevel of each cwd, or the cwd itself.
 root_of() {
@@ -100,9 +110,13 @@ while :; do
       echo "boottime $(sysctl -n kern.boottime 2>/dev/null | sed -n 's/^{ *sec = \([0-9]*\).*/\1/p')"
     fi
     if have docker; then
-      dv=$(tm docker version --format '{{.Server.Version}}' 2>&1); drc=$?
-      dv=$(printf '%s\n' "$dv" | grep -v '^$' | head -1 | cut -c1-300)
-      if [ $drc -eq 0 ]; then echo "docker $dv"; else echo "docker_error $dv"; fi
+      dv=$(tm docker version --format '{{.Server.Version}}' 2>"$errf"); drc=$?
+      if [ $drc -eq 0 ]; then
+        echo "docker $(printf '%s\n' "$dv" | grep -v '^$' | head -1 | cut -c1-300)"
+      else
+        de=$(grep -v '^$' "$errf" 2>/dev/null | head -1 | cut -c1-300)
+        echo "docker_error ${de:-exit $drc}"
+      fi
     fi
     if [ "$os" = Linux ] && have systemctl; then
       ss_state=$(tm systemctl --user is-system-running 2>/dev/null | head -1)
@@ -189,7 +203,7 @@ while :; do
       case "$seen" in *" $r "*) continue;; esac
       seen="$seen$r "
       printf '@@files %s\n' "$r"
-      run files tm find "$r" -maxdepth 4 \( -name node_modules -o -name .git -o -name .venv -o -name dist -o -name build -o -name .next \) -prune -o -type f \( -name package.json -o -name 'docker-compose*.y*ml' -o -name 'compose*.y*ml' -o -name Makefile -o -name Procfile -o -name pyproject.toml -o -name Caddyfile -o -name justfile -o -name '.dev-lane.env' -o -name '.env*' \) -print | head -200 | grep -v -E '^@@|[[:cntrl:]]'
+      run files find_files "$r"
     done
   fi
 

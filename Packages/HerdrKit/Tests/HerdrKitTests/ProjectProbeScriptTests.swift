@@ -58,6 +58,33 @@ final class ProjectProbeScriptTests: XCTestCase {
         XCTAssertEqual(probe.envEntries.map(\.key), ["API_PORT"])
     }
 
+    func testFindErrorsStayOutOfTheFileListAndAreReported() throws {
+        let raw = FileManager.default.temporaryDirectory.appendingPathComponent("pp-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: raw.appendingPathComponent("locked"), withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: raw.appendingPathComponent("locked").path)
+            try? FileManager.default.removeItem(at: raw)
+        }
+        var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
+        let root = realpath(raw.path, &buffer) != nil ? String(cString: buffer) : raw.path
+        try Self.sh("echo '{}' > package.json && touch '@@pp-end' && chmod 000 locked", in: root)
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ProjectProbeScript.shellArguments(sections: ["files"], cwds: [root])
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+
+        let probe = ProjectProbeParser.parse(text)
+        XCTAssertFalse(probe.partial)
+        XCTAssertEqual(probe.files[root]?.map { ($0 as NSString).lastPathComponent }, ["package.json"])
+        XCTAssertTrue(probe.errors["files"]?.contains("Permission denied") == true, "errors: \(probe.errors)\n\(text)")
+    }
+
     func testLocalRunPidsAndDockerSectionsParseWithoutADaemon() throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
