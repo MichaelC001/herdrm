@@ -31,6 +31,9 @@ struct PaneThumbnailStore {
 
     private var pending: [PendingThumbnail] = []
     private var bound: [Int: Binding] = [:]
+    /// Visible numbers that never got an image. They are not "new" on later
+    /// scans, so a later paste cannot bind to a box that was already there.
+    private var seen: [Int: Date] = [:]
 
     /// Queues an image to be matched to the next new box(es), in delivery order.
     mutating func record(_ pending: PendingThumbnail) {
@@ -42,7 +45,9 @@ struct PaneThumbnailStore {
         pending.removeAll { now.timeIntervalSince($0.recordedAt) > $0.expiry }
         bound = bound.filter { now.timeIntervalSince($0.value.lastSeen) <= Self.graceAfterDisappearing }
 
-        let newNumbers = Set(boxes.map(\.number).filter { bound[$0] == nil }).sorted()
+        seen = seen.filter { now.timeIntervalSince($0.value) <= Self.graceAfterDisappearing }
+
+        let newNumbers = Set(boxes.map(\.number).filter { bound[$0] == nil && seen[$0] == nil }).sorted()
         if !newNumbers.isEmpty {
             if newNumbers.count == pending.count {
                 for (number, entry) in zip(newNumbers, pending) {
@@ -52,8 +57,12 @@ struct PaneThumbnailStore {
             pending.removeAll()
         }
 
-        for box in boxes where bound[box.number] != nil {
-            bound[box.number]?.lastSeen = now
+        for box in boxes {
+            if bound[box.number] != nil {
+                bound[box.number]?.lastSeen = now
+            } else {
+                seen[box.number] = now
+            }
         }
         return boxes.sorted { $0.number < $1.number }.compactMap { box in
             bound[box.number].map { PlacedThumbnail(box: box, image: $0.image) }
@@ -70,5 +79,6 @@ struct PaneThumbnailStore {
     mutating func removeAll() {
         pending.removeAll()
         bound.removeAll()
+        seen.removeAll()
     }
 }

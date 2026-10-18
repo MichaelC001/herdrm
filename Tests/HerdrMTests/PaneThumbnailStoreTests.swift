@@ -37,9 +37,9 @@ final class PaneThumbnailStoreTests: XCTestCase {
         var store = PaneThumbnailStore()
         store.record(pending(1, at: t0))
         XCTAssertEqual(store.scan([box(1), box(2, column: 23)], now: t0 + 1), [])
-        store.record(pending(2, at: t0 + 2))   // only this one is live now
-        XCTAssertEqual(store.scan([box(1), box(2, column: 23)], now: t0 + 3), [])   // 2 new vs 1 pending
         XCTAssertEqual(store.scan([box(3)], now: t0 + 4), [])                        // pending was cleared
+        store.record(pending(2, at: t0 + 5))
+        XCTAssertEqual(store.scan([box(4), box(5, column: 23)], now: t0 + 6), [])   // 2 new vs 1 pending
     }
 
     func testFewerNewBoxesThanPendingBindsNothing() {
@@ -75,7 +75,7 @@ final class PaneThumbnailStoreTests: XCTestCase {
         store.record(pending(1, at: t0))
         _ = store.scan([box(1)], now: t0 + 1)
         _ = store.scan([], now: t0 + 2)
-        XCTAssertEqual(store.scan([box(1)], now: t0 + 2 + 31), [])      // old #1 gone, nothing pending
+        XCTAssertEqual(store.scan([], now: t0 + 2 + 31), [])            // old #1 binding gone
         store.record(pending(5, at: t0 + 40))
         XCTAssertEqual(store.scan([box(1)], now: t0 + 41).map(\.image.size.width), [5])  // counter reset: fresh bind
         XCTAssertFalse(store.needsScanning(now: t0 + 41 + 31 + 1))
@@ -97,5 +97,21 @@ final class PaneThumbnailStoreTests: XCTestCase {
         store.removeAll()
         XCTAssertEqual(store.scan([box(1)], now: t0 + 2), [])
         XCTAssertFalse(store.needsScanning(now: t0 + 2))
+    }
+
+    func testVisibleUnboundNumberIsNotNewOnLaterScans() {
+        var store = PaneThumbnailStore()
+        XCTAssertEqual(store.scan([box(1)], now: t0), [])              // #1 seen, unbound, nothing pending
+        store.record(pending(2, at: t0 + 1))
+        XCTAssertEqual(store.scan([box(1)], now: t0 + 2), [])          // #1 is not new; pending stays
+        XCTAssertTrue(store.needsScanning(now: t0 + 2))
+        XCTAssertEqual(store.scan([box(1), box(2, column: 23)], now: t0 + 3).map(\.image.size.width), [2])
+    }
+
+    func testSeenUnboundNumberIsForgottenAfterGrace() {
+        var store = PaneThumbnailStore()
+        _ = store.scan([box(1)], now: t0)
+        store.record(pending(9, at: t0 + 40))
+        XCTAssertEqual(store.scan([box(1)], now: t0 + 41).map(\.image.size.width), [9])
     }
 }
