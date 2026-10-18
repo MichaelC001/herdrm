@@ -284,4 +284,15 @@ final class ProjectViewUIUXTests: XCTestCase {
         XCTAssertFalse(chips.isEmpty, "public URL must be a clickable chip")
         XCTAssertTrue(all.filter { $0.role == "AXButton" && $0.name == "http://localhost:3100" }.isEmpty, "remote loopback URL must not be a button anywhere")
     }
+
+    func testEnvKeysAreUniquePerFileInFirstSeenOrder() {
+        var snap = snapshot()
+        snap.envEntries = [
+            ProbeEnvEntry(file: ".env", line: 1, key: "DB_URL", value: "a"),
+            ProbeEnvEntry(file: ".env", line: 2, key: "API_KEY", value: "b"),
+            ProbeEnvEntry(file: ".env", line: 3, key: "DB_URL", value: "c"),
+            ProbeEnvEntry(file: ".env.local", line: 1, key: "DB_URL", value: "d"),
+        ]
+        XCTAssertEqual(projectEnvKeys(snap), [".env": ["DB_URL", "API_KEY"], ".env.local": ["DB_URL"]])
+    }
 }

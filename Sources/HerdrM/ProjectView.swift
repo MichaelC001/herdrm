@@ -384,7 +384,7 @@ private struct ProjectPanel: View {
     private func filesSection(_ snapshot: ProjectSnapshot) -> some View {
         ProjectFilesCard(
             files: snapshot.files,
-            envByFile: Dictionary(grouping: snapshot.envEntries, by: \.file).mapValues { $0.map(\.key) })
+            envByFile: projectEnvKeys(snapshot))
     }
 
     private func otherListenersSection(_ snapshot: ProjectSnapshot) -> some View {
@@ -409,4 +409,12 @@ func projectURLs(_ snapshot: ProjectSnapshot) -> [ProjectURL] {
         + (snapshot.compose.flatMap(\.containers) + snapshot.attachedContainers).flatMap(\.urls)
     var seen = Set<String>()
     return all.filter { seen.insert($0.url).inserted }
+}
+
+/// Env variable names by file, each name once in first-seen order. Values never leave the snapshot.
+func projectEnvKeys(_ snapshot: ProjectSnapshot) -> [String: [String]] {
+    Dictionary(grouping: snapshot.envEntries, by: \.file).mapValues { entries in
+        var seen = Set<String>()
+        return entries.map(\.key).filter { seen.insert($0).inserted }
+    }
 }
