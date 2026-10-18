@@ -12,7 +12,7 @@ final class ProjectViewUIUXTests: XCTestCase {
 
     private func server(
         _ signature: String, framework: String, port: Int, role: ServiceRole = .frontend, hot: Bool = true,
-        publicBind: Bool = false
+        publicBind: Bool = false, hidden: Bool = false
     ) -> DevServer {
         DevServer(
             signature: signature, role: role, framework: framework, bind: publicBind ? "0.0.0.0" : "127.0.0.1",
@@ -20,31 +20,45 @@ final class ProjectViewUIUXTests: XCTestCase {
             unit: hot ? "acme-dev-fe.service" : nil, logPath: hot ? "/tmp/acme-frontend-3100.log" : nil,
             hotReload: hot,
             urls: [ProjectURL(label: "http://localhost:\(port)", url: "http://localhost:\(port)", source: .detected, loopbackOnHost: !publicBind)],
-            isHidden: false)
+            isHidden: hidden)
     }
 
-    private func snapshot() -> ProjectSnapshot {
-        let web = ContainerRow(
-            id: "c1", name: "acme-web-1", image: "nginx:1.27", service: "web", state: "running",
-            statusText: "Up 2 hours", health: "healthy",
-            ports: [PublishedPort(hostIP: "0.0.0.0", hostPort: 8080, containerPort: 80, proto: "tcp")], urls: [])
+    private func container(
+        _ id: String, name: String, service: String?, state: String = "running", health: String? = "healthy",
+        image: String = "nginx:1.27",
+        ports: [PublishedPort] = [PublishedPort(hostIP: "0.0.0.0", hostPort: 8080, containerPort: 80, proto: "tcp")],
+        statusText: String = "Up 2 hours"
+    ) -> ContainerRow {
+        ContainerRow(
+            id: id, name: name, image: image, service: service, state: state, statusText: statusText,
+            health: health, ports: ports, urls: [])
+    }
+
+    private func snapshot(
+        extraServers: [DevServer] = [], compose: [ComposeGroup]? = nil, attached: [ContainerRow] = [],
+        suggested: [ContainerRow] = []
+    ) -> ProjectSnapshot {
+        let web = container("c1", name: "acme-web-1", service: "web")
+        let groups = compose ?? [
+            ComposeGroup(name: "acme", workingDir: root, configFiles: ["\(root)/compose.yaml"], match: .name, running: 1, total: 1, containers: [web])
+        ]
         return ProjectSnapshot(
             identity: ProjectIdentity(deviceID: devbox.id, root: root, worktreeRoots: [root]),
             probedAt: Date(), partial: false,
             host: HostHealth(
                 hostname: "devbox", cpuCount: 8, load1: 0.7, memUsedFraction: 0.42,
                 dockerServerVersion: "27.3.1", hotLanes: LaneCount(up: 1, total: 1), dockerLanes: LaneCount(up: 1, total: 1)),
-            devServers: [server("next-server@frontend", framework: "Next.js", port: 3100)],
+            devServers: [server("next-server@frontend", framework: "Next.js", port: 3100)] + extraServers,
             otherListeners: [server("python3@scratch", framework: "python3", port: 9000, role: .other, hot: false)],
-            compose: [ComposeGroup(name: "acme", workingDir: root, configFiles: ["\(root)/compose.yaml"], match: .name, running: 1, total: 1, containers: [web])],
-            otherCompose: [], attachedContainers: [], suggestedContainers: [],
+            compose: groups,
+            otherCompose: [], attachedContainers: attached, suggestedContainers: suggested,
             vms: [VMRow(provider: .lima, vmID: "acme-vm", name: "acme-vm", state: "running", ip: "192.168.5.15", match: .declared)],
             otherVMs: [], files: ["compose.yaml"], envEntries: [], warnings: [], staleOverrides: [])
     }
 
-    private func host(_ model: AppModel) -> (NSWindow, NSHostingView<AnyView>) {
-        let view = NSHostingView(rootView: AnyView(ProjectView(model: model, polling: false).frame(width: 760, height: 900)))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 900), styleMask: [.titled], backing: .buffered, defer: false)
+    private func host(_ model: AppModel, width: CGFloat = 760) -> (NSWindow, NSHostingView<AnyView>) {
+        let view = NSHostingView(rootView: AnyView(ProjectView(model: model, polling: false).frame(width: width, height: 900)))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 900), styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.title = "ProjectViewHarness \(UUID().uuidString)"
         window.contentView = view
@@ -60,19 +74,32 @@ final class ProjectViewUIUXTests: XCTestCase {
         }
     }
 
-    private func model(entry: ProjectInspectorModel.Entry?) throws -> (AppModel, SpaceRef) {
+    private func elements(in window: NSWindow) -> [AccessibilityProbe.Element] {
+        AccessibilityProbe.elements(in: window)
+    }
+
+    private func texts(_ elements: [AccessibilityProbe.Element]) -> Set<String> {
+        Set(elements.flatMap { [$0.value, $0.name].compactMap { $0 } })
+    }
+
+    private func element(_ elements: [AccessibilityProbe.Element], id: String) -> AccessibilityProbe.Element? {
+        elements.first { $0.identifier == id }
+    }
+
+    private func model(entry: ProjectInspectorModel.Entry?, device: Device? = nil) throws -> (AppModel, SpaceRef) {
+        let device = device ?? devbox
         let model = AppModel()
-        model.devices = [devbox]
+        model.devices = [device]
         var state = DeviceSessionState()
         state.workspaces = [try JSONDecoder().decode(
             WorkspaceInfo.self,
             from: JSONSerialization.data(withJSONObject: ["workspace_id": "w1", "number": 1, "label": "acme"]))]
-        model.sessions[devbox.id] = state
-        let space = SpaceRef(deviceID: devbox.id, workspaceID: "w1")
+        model.sessions[device.id] = state
+        let space = SpaceRef(deviceID: device.id, workspaceID: "w1")
         model.selectedSpace = space
         model.detailMode = .project
         if let entry {
-            model.projects._setEntryForTesting(space: space, key: "\(devbox.id.uuidString):\(root)", entry: entry)
+            model.projects._setEntryForTesting(space: space, key: "\(device.id.uuidString):\(root)", entry: entry)
         }
         return (model, space)
     }
@@ -99,7 +126,7 @@ final class ProjectViewUIUXTests: XCTestCase {
         let (window, _) = host(model)
         defer { window.close() }
         settle()
-        let texts = Set(AccessibilityProbe.elements(in: window).flatMap { [$0.value, $0.name].compactMap { $0 } })
+        let texts = texts(elements(in: window))
         XCTAssertTrue(texts.contains("No Space selected"), "\(texts.sorted())")
         XCTAssertFalse(texts.contains("Hot reload"))
     }
@@ -110,7 +137,7 @@ final class ProjectViewUIUXTests: XCTestCase {
         let (window, _) = host(model)
         defer { window.close() }
         settle()
-        let texts = Set(AccessibilityProbe.elements(in: window).flatMap { [$0.value, $0.name].compactMap { $0 } })
+        let texts = texts(elements(in: window))
         XCTAssertTrue(texts.contains("ssh timed out"), "\(texts.sorted())")
         XCTAssertTrue(texts.contains("Hot reload"), "stale snapshot must stay visible")
     }
@@ -129,11 +156,27 @@ final class ProjectViewUIUXTests: XCTestCase {
         defer { window.close() }
         settle()
 
-        let texts = Set(AccessibilityProbe.elements(in: window).flatMap { [$0.value, $0.name].compactMap { $0 } })
+        let texts = texts(elements(in: window))
         XCTAssertTrue(texts.contains("Hidden (2)"), "no Hidden disclosure in \(texts.sorted())")
         XCTAssertFalse(texts.contains("vite-hidden-fw"), "hidden dev server is still listed")
         XCTAssertFalse(texts.contains("redis-hidden-fw"), "hidden listener is still listed")
         XCTAssertTrue(texts.contains("Next.js"), "visible server must stay")
         XCTAssertTrue(texts.contains("Other listeners"), "the visible listener keeps its section")
+    }
+
+    func testSummaryStripCounts() throws {
+        let hidden = server("vite@web", framework: "vite-hidden-fw", port: 5173, hidden: true)
+        let entry = ProjectInspectorModel.Entry(snapshot: snapshot(extraServers: [hidden]), state: .live, lastProbe: Date(), rawProbe: nil, localVMs: nil)
+        let (model, _) = try model(entry: entry)
+        let (window, _) = host(model)
+        defer { window.close() }
+        settle()
+        let all = elements(in: window)
+        let strip = try XCTUnwrap(element(all, id: "project.summary"), "no summary strip")
+        let label = try XCTUnwrap(strip.name)
+        for part in ["Dev servers 1", "Containers 1/1", "VMs 1", "Hosts 1"] {
+            XCTAssertTrue(label.contains(part), "\(part) missing in \(label)")
+        }
+        XCTAssertFalse(label.contains("2"), "hidden server leaked into the count: \(label)")
     }
 }

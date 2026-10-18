@@ -64,7 +64,8 @@ private struct ProjectPanel: View {
     let space: SpaceRef
     let context: ProjectContext
 
-    @State private var expanded: Set<String> = ["hot", "docker", "hosts", "links", "files"]
+    /// Disclosure cards ("other", "otherCompose", "hidden"); all collapsed by default.
+    @State private var expanded: Set<String> = []
     @State private var refreshing = false
     @State private var changingRoot = false
     @State private var rootText = ""
@@ -140,20 +141,23 @@ private struct ProjectPanel: View {
     private func loaded(_ snapshot: ProjectSnapshot) -> some View {
         VStack(spacing: 0) {
             if case .failed(let message) = entry?.state { errorBanner(message) }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    hotReloadSection(snapshot)
-                    dockerSection(snapshot)
-                    hostsSection(snapshot)
-                    linksSection(snapshot)
-                    filesSection(snapshot)
-                    otherListenersSection(snapshot)
-                    hiddenSection(snapshot)
-                    warnings(snapshot)
+            ScrollViewReader { _ in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: ProjectMetrics.cardSpacing) {
+                        hotReloadSection(snapshot)
+                        dockerSection(snapshot)
+                        hostsSection(snapshot)
+                        linksSection(snapshot)
+                        filesSection(snapshot)
+                        otherListenersSection(snapshot)
+                        hiddenSection(snapshot)
+                        warnings(snapshot)
+                    }
+                    .padding(.horizontal, ProjectMetrics.pagePadding)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: ProjectMetrics.contentMaxWidth, alignment: .leading)
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -174,9 +178,21 @@ private struct ProjectPanel: View {
     // MARK: - Header
 
     private var header: some View {
+        VStack(spacing: 0) {
+            titleRow
+            if let snapshot {
+                ProjectSummaryStrip(snapshot: snapshot, linkedHostCount: projects.linkedDevices(for: space).count)
+                    .padding(.horizontal, 14)
+                    .frame(height: 22)
+            }
+        }
+    }
+
+    private var titleRow: some View {
         HStack(spacing: 8) {
+            ProjectKindTile(symbol: "shippingbox", tint: Theme.accent)
             Text(verbatim: snapshot?.identity.name ?? context.workspaceLabel)
-                .font(.system(size: ProjectRowMetrics.textSize, weight: .medium))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.text)
                 .lineLimit(1)
             DeviceChip(device: context.device)
@@ -322,31 +338,6 @@ private struct ProjectPanel: View {
             set: { if $0 { expanded.insert(id) } else { expanded.remove(id) } })
     }
 
-    private func section<Content: View>(
-        _ id: String, _ title: LocalizedStringKey, count: Int? = nil, @ViewBuilder content: () -> Content
-    ) -> some View {
-        let body = content()
-        return DisclosureGroup(isExpanded: binding(id)) {
-            VStack(alignment: .leading, spacing: 0) { body }
-                .padding(.top, 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
-            HStack(spacing: 6) {
-                SheetSectionLabel(title)
-                if let count, count > 0 {
-                    Text(verbatim: "\(count)").font(.system(size: 10.5)).foregroundStyle(Theme.textGhost)
-                }
-            }
-        }
-    }
-
-    private func note(_ text: LocalizedStringKey, tint: Color = Theme.textTertiary) -> some View {
-        Text(text)
-            .font(.system(size: 11.5))
-            .foregroundStyle(tint)
-            .frame(minHeight: ProjectRowMetrics.rowHeight, alignment: .leading)
-    }
-
     private func devServerRow(_ server: DevServer, canSetURL: Bool) -> some View {
         DevServerRow(
             server: server,
@@ -361,11 +352,11 @@ private struct ProjectPanel: View {
 
     private func hotReloadSection(_ snapshot: ProjectSnapshot) -> some View {
         let visible = snapshot.devServers.filter { !$0.isHidden }
-        return section("hot", "Hot reload", count: visible.count) {
-            if visible.isEmpty { note("No dev servers are running for this project.") }
-            ForEach(visible) { devServerRow($0, canSetURL: true) }
+        return ProjectCard("Hot reload", count: visible.count, id: .hot) {
+            if visible.isEmpty { ProjectCardNote("No dev servers are running for this project.") }
+            ProjectCardList(visible) { devServerRow($0, canSetURL: true) }
             if !snapshot.staleOverrides.isEmpty {
-                note("URL overrides without a running server: \(snapshot.staleOverrides.joined(separator: ", "))")
+                ProjectCardNote("URL overrides without a running server: \(snapshot.staleOverrides.joined(separator: ", "))")
             }
         }
     }
@@ -397,33 +388,31 @@ private struct ProjectPanel: View {
     private func dockerSection(_ snapshot: ProjectSnapshot) -> some View {
         let isEmpty = snapshot.compose.isEmpty && snapshot.attachedContainers.isEmpty
             && snapshot.suggestedContainers.isEmpty
-        return section("docker", "Docker", count: snapshot.compose.count + snapshot.attachedContainers.count) {
+        return ProjectCard("Docker", count: snapshot.compose.count + snapshot.attachedContainers.count, id: .docker) {
             if let error = snapshot.host.dockerError {
-                note("Docker is not reachable: \(error)", tint: Theme.warning)
+                ProjectCardNote("Docker is not reachable: \(error)", tint: Theme.warning)
             } else if isEmpty {
-                note("No Docker containers belong to this project.")
+                ProjectCardNote("No Docker containers belong to this project.")
             }
             ForEach(snapshot.compose) { composeRow($0, attached: true) }
             ForEach(snapshot.attachedContainers) { containerRow($0, attached: true) }
             if !snapshot.suggestedContainers.isEmpty {
-                note("Suggested containers").padding(.top, 6)
+                ProjectCardNote("Suggested containers").padding(.top, 6)
                 ForEach(snapshot.suggestedContainers) { containerRow($0, suggested: true) }
             }
             if !snapshot.otherCompose.isEmpty {
-                DisclosureGroup(isExpanded: binding("otherCompose")) {
+                ProjectDisclosureCard("Other Compose projects", isExpanded: binding("otherCompose")) {
                     ForEach(snapshot.otherCompose) { composeRow($0, attached: false) }
-                } label: {
-                    SheetSectionLabel("Other Compose projects")
                 }
-                .padding(.top, 6)
+                .padding(.vertical, 6)
             }
         }
     }
 
     private func hostsSection(_ snapshot: ProjectSnapshot) -> some View {
-        section("hosts", "Hosts & VMs", count: snapshot.vms.count) {
+        ProjectCard("Hosts & VMs", count: snapshot.vms.count, id: .hosts) {
             HostHealthRow(host: snapshot.host)
-            ForEach(snapshot.vms) { vm in
+            ProjectCardList(snapshot.vms) { vm in
                 VMRowView(
                     vm: vm,
                     onAttach: vm.match == .suggested ? { projects.attachVM(space: space, vm: vm) } : nil,
@@ -444,7 +433,7 @@ private struct ProjectPanel: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .frame(minHeight: ProjectRowMetrics.rowHeight)
+                .frame(minHeight: ProjectMetrics.rowHeight)
             }
         }
     }
@@ -456,13 +445,13 @@ private struct ProjectPanel: View {
         let urls = all.filter { seen.insert($0.url).inserted }
         return Group {
             if !urls.isEmpty {
-                section("links", "Links", count: urls.count) {
-                    ForEach(urls, id: \.url) { url in
+                ProjectCard("Links", count: urls.count, id: .links) {
+                    ProjectCardList(urls.map { Keyed(id: $0.url, value: $0) }) { item in
                         HStack(spacing: 8) {
-                            ProjectURLButtons(urls: [url], isRemote: !context.device.isLocal)
+                            ProjectURLButtons(urls: [item.value], isRemote: !context.device.isLocal)
                             Spacer()
                         }
-                        .frame(minHeight: ProjectRowMetrics.rowHeight)
+                        .frame(minHeight: ProjectMetrics.rowHeight)
                     }
                 }
             }
@@ -474,12 +463,12 @@ private struct ProjectPanel: View {
         let byFile = Dictionary(grouping: snapshot.envEntries, by: \.file)
         return Group {
             if !snapshot.files.isEmpty || !byFile.isEmpty {
-                section("files", "Project files", count: snapshot.files.count) {
-                    ForEach(snapshot.files, id: \.self) { file in
-                        Text(verbatim: file)
+                ProjectCard("Project files", count: snapshot.files.count, id: .files) {
+                    ProjectCardList(snapshot.files.map { Keyed(id: $0, value: $0) }) { item in
+                        Text(verbatim: item.value)
                             .font(.system(size: 11.5, design: .monospaced))
                             .foregroundStyle(Theme.textSecondary)
-                            .frame(minHeight: ProjectRowMetrics.rowHeight, alignment: .leading)
+                            .frame(minHeight: ProjectMetrics.rowHeight, alignment: .leading)
                     }
                     ForEach(byFile.keys.sorted(), id: \.self) { file in
                         VStack(alignment: .leading, spacing: 2) {
@@ -502,8 +491,8 @@ private struct ProjectPanel: View {
         let visible = snapshot.otherListeners.filter { !$0.isHidden }
         return Group {
             if !visible.isEmpty {
-                section("other", "Other listeners", count: visible.count) {
-                    ForEach(visible) { devServerRow($0, canSetURL: false) }
+                ProjectDisclosureCard("Other listeners", count: visible.count, id: .other, isExpanded: binding("other")) {
+                    ProjectCardList(visible) { devServerRow($0, canSetURL: false) }
                 }
             }
         }
@@ -516,15 +505,11 @@ private struct ProjectPanel: View {
         let count = devHidden.count + otherHidden.count
         return Group {
             if count > 0 {
-                DisclosureGroup(isExpanded: binding("hidden")) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(devHidden) { devServerRow($0, canSetURL: true) }
-                        ForEach(otherHidden) { devServerRow($0, canSetURL: false) }
-                    }
-                    .padding(.top, 4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                } label: {
-                    SheetSectionLabel("Hidden (\(count))")
+                ProjectDisclosureCard("Hidden (\(count))", id: .hidden, isExpanded: binding("hidden")) {
+                    ProjectCardList(
+                        devHidden.map { Keyed(id: "dev-\($0.id)", value: ($0, true)) }
+                            + otherHidden.map { Keyed(id: "other-\($0.id)", value: ($0, false)) }
+                    ) { devServerRow($0.value.0, canSetURL: $0.value.1) }
                 }
             }
         }
@@ -540,4 +525,10 @@ private struct ProjectPanel: View {
             }
         }
     }
+}
+
+/// Pairs a value with a stable id so plain arrays can feed `ProjectCardList`.
+private struct Keyed<Value>: Identifiable {
+    let id: String
+    let value: Value
 }

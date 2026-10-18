@@ -5,11 +5,6 @@ import SwiftUI
 // Row views of the Project pane. They are plain value views: every action is a closure the
 // pane wires to `ProjectInspectorModel`, so the rows stay small.
 
-enum ProjectRowMetrics {
-    static let rowHeight: CGFloat = 28
-    static let textSize: CGFloat = 12.5
-}
-
 /// Small rounded tag next to a row title ("loopback only", "matched by name", ...).
 struct ProjectTag: View {
     let text: LocalizedStringKey
@@ -200,7 +195,7 @@ struct DevServerRow: View {
         HStack(spacing: 8) {
             StatusDot(color: server.hotReload ? Theme.success : Theme.textTertiary)
             Text(verbatim: server.framework)
-                .font(.system(size: ProjectRowMetrics.textSize, weight: .medium))
+                .font(.system(size: ProjectMetrics.textSize, weight: .medium))
                 .foregroundStyle(server.isHidden ? Theme.textTertiary : Theme.text)
             Text(roleName)
                 .font(.system(size: 11.5))
@@ -225,7 +220,7 @@ struct DevServerRow: View {
                 systemImage: server.isHidden ? "eye" : "eye.slash",
                 label: server.isHidden ? "Unhide" : "Hide", action: onToggleHidden)
         }
-        .frame(minHeight: ProjectRowMetrics.rowHeight)
+        .frame(minHeight: ProjectMetrics.rowHeight)
     }
 }
 
@@ -261,7 +256,7 @@ struct ContainerRowView: View {
         HStack(spacing: 8) {
             StatusDot(color: stateColor)
             Text(verbatim: container.service ?? container.name)
-                .font(.system(size: ProjectRowMetrics.textSize))
+                .font(.system(size: ProjectMetrics.textSize))
                 .foregroundStyle(Theme.text)
                 .lineLimit(1)
             Text(verbatim: container.statusText)
@@ -281,7 +276,7 @@ struct ContainerRowView: View {
             if let onDismiss { Button("Dismiss", action: onDismiss).controlSize(.small) }
             if let onDetach { Button("Detach", action: onDetach).controlSize(.small) }
         }
-        .frame(minHeight: ProjectRowMetrics.rowHeight)
+        .frame(minHeight: ProjectMetrics.rowHeight)
         .help(container.image)
     }
 }
@@ -309,7 +304,7 @@ struct ComposeGroupRow<Containers: View>: View {
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textTertiary)
                 Text(verbatim: group.name)
-                    .font(.system(size: ProjectRowMetrics.textSize, weight: .medium))
+                    .font(.system(size: ProjectMetrics.textSize, weight: .medium))
                     .foregroundStyle(Theme.text)
                 Text(verbatim: "\(group.running)/\(group.total)")
                     .font(.system(size: 11.5).monospacedDigit())
@@ -318,7 +313,7 @@ struct ComposeGroupRow<Containers: View>: View {
                 Spacer(minLength: 8)
                 Button(isAttached ? "Detach" : "Attach", action: onToggle).controlSize(.small)
             }
-            .frame(minHeight: ProjectRowMetrics.rowHeight)
+            .frame(minHeight: ProjectMetrics.rowHeight)
             containers().padding(.leading, 16)
         }
     }
@@ -341,7 +336,7 @@ struct HostHealthRow: View {
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.textTertiary)
             Text(verbatim: host.hostname ?? "—")
-                .font(.system(size: ProjectRowMetrics.textSize, weight: .medium))
+                .font(.system(size: ProjectMetrics.textSize, weight: .medium))
                 .foregroundStyle(Theme.text)
             if let loadText { metric("Load", loadText) }
             if let mem = host.memUsedFraction { metric("Memory", mem.formatted(.percent.precision(.fractionLength(0)))) }
@@ -350,7 +345,7 @@ struct HostHealthRow: View {
             if host.dockerLanes.total > 0 { metric("Docker lanes", "\(host.dockerLanes.up)/\(host.dockerLanes.total)") }
             Spacer(minLength: 0)
         }
-        .frame(minHeight: ProjectRowMetrics.rowHeight)
+        .frame(minHeight: ProjectMetrics.rowHeight)
     }
 
     private func metric(_ title: LocalizedStringKey, _ value: String) -> some View {
@@ -379,7 +374,7 @@ struct VMRowView: View {
         HStack(spacing: 8) {
             StatusDot(color: vm.state.lowercased() == "running" ? Theme.success : Theme.textTertiary)
             Text(verbatim: vm.name)
-                .font(.system(size: ProjectRowMetrics.textSize))
+                .font(.system(size: ProjectMetrics.textSize))
                 .foregroundStyle(Theme.text)
             Text(verbatim: vm.provider.rawValue)
                 .font(.system(size: 11.5))
@@ -395,7 +390,7 @@ struct VMRowView: View {
             if let onAttach { Button("Attach", action: onAttach).controlSize(.small) }
             if let onDetach { Button("Detach", action: onDetach).controlSize(.small) }
         }
-        .frame(minHeight: ProjectRowMetrics.rowHeight)
+        .frame(minHeight: ProjectMetrics.rowHeight)
     }
 }
 
@@ -417,7 +412,7 @@ struct LinkedHostRow: View {
             Spacer(minLength: 8)
             Button("Unlink", action: onUnlink).controlSize(.small)
         }
-        .frame(minHeight: ProjectRowMetrics.rowHeight)
+        .frame(minHeight: ProjectMetrics.rowHeight)
     }
 }
 
