@@ -4,11 +4,13 @@ import XCTest
 final class ProjectProbeScriptTests: XCTestCase {
     func testScriptIsValidPOSIXShell() throws {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        // dash is the strictest POSIX sh a Linux host will run; use it where this Mac has it.
+        let shell = FileManager.default.isExecutableFile(atPath: "/bin/dash") ? "/bin/dash" : "/bin/sh"
+        process.executableURL = URL(fileURLWithPath: shell)
         process.arguments = ["-n"]
         let input = Pipe()
         process.standardInput = input
-        process.standardError = Pipe()
+        process.standardError = FileHandle.nullDevice
         try process.run()
         input.fileHandleForWriting.write(Data(ProjectProbeScript.source.utf8))
         try input.fileHandleForWriting.close()
@@ -31,7 +33,7 @@ final class ProjectProbeScriptTests: XCTestCase {
         process.arguments = ProjectProbeScript.shellArguments(sections: sections, cwds: [tmp])
         let out = Pipe()
         process.standardOutput = out
-        process.standardError = Pipe()
+        process.standardError = FileHandle.nullDevice
         try process.run()
         let data = out.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
@@ -42,6 +44,9 @@ final class ProjectProbeScriptTests: XCTestCase {
             XCTAssertTrue(text.contains(needle), "missing \(needle) in:\n\(text)")
         }
         XCTAssertFalse(text.contains("DB_PASSWORD"))
+        // Darwin boottime is the epoch second, not the microseconds after it.
+        let boot = text.split(separator: "\n").first { $0.hasPrefix("boottime ") }.flatMap { Double($0.dropFirst(9)) }
+        XCTAssertGreaterThan(boot ?? 0, 1_000_000_000)
         XCTAssertTrue(text.contains("@@vms parallels") || text.contains("@@absent prlctl"))
         XCTAssertTrue(text.hasSuffix("@@pp-end\n"), "tail: \(text.suffix(80))")
 
@@ -59,7 +64,7 @@ final class ProjectProbeScriptTests: XCTestCase {
         process.arguments = ProjectProbeScript.shellArguments(sections: ["listeners", "pids", "compose", "containers", "units"], cwds: [])
         let out = Pipe()
         process.standardOutput = out
-        process.standardError = Pipe()
+        process.standardError = FileHandle.nullDevice
         try process.run()
         let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         process.waitUntilExit()
@@ -71,6 +76,8 @@ final class ProjectProbeScriptTests: XCTestCase {
             XCTAssertNotNil(probe.processes[pid], "no process for listener pid \(pid)")
         }
         XCTAssertFalse(probe.processes.values.contains { $0.comm.isEmpty })
+        XCTAssertNil(probe.errors["lsofp"])
+        XCTAssertNil(probe.errors["listeners"])
     }
 
     func testRemoteCommandQuotesEverything() {
@@ -92,7 +99,7 @@ final class ProjectProbeScriptTests: XCTestCase {
         process.arguments = ["-c", command]
         process.currentDirectoryURL = URL(fileURLWithPath: dir)
         process.standardOutput = Pipe()
-        process.standardError = Pipe()
+        process.standardError = FileHandle.nullDevice
         try process.run()
         process.waitUntilExit()
         XCTAssertEqual(process.terminationStatus, 0, command)

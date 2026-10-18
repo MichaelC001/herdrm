@@ -183,12 +183,14 @@ final class ProjectProbeParserTests: XCTestCase {
         3:API_PORT=8100
         4:DB_PASSWORD=x
         5:PUBLIC_URL=https://u:p@host/
+        6:DB_URL=https://u:p@ss@db/
         @@pp-end
         """
         let probe = ProjectProbeParser.parse(text)
         XCTAssertEqual(probe.envEntries, [
             ProbeEnvEntry(file: "/home/dev/acme-app/.env", line: 3, key: "API_PORT", value: "8100"),
             ProbeEnvEntry(file: "/home/dev/acme-app/.env", line: 5, key: "PUBLIC_URL", value: "https://host/"),
+            ProbeEnvEntry(file: "/home/dev/acme-app/.env", line: 6, key: "DB_URL", value: "https://db/"),
         ])
     }
 
@@ -244,5 +246,54 @@ final class ProjectProbeParserTests: XCTestCase {
         XCTAssertEqual(probe.files["/home/dev/acme-app"]?.count, 2)
         XCTAssertEqual(probe.absent, ["prlctl"])
         XCTAssertEqual(probe.vms, [])
+    }
+
+    func testUnknownAtAtLineIsDataNotAHeader() {
+        let probe = ProjectProbeParser.parse("""
+        @@pp-begin 1
+        @@files /home/dev/acme-app
+        /home/dev/acme-app/package.json
+        @@pp-end-fake
+        @@pp-end
+        @@files /x
+        @@pp-end
+        """)
+        // `@@pp-end` is a real header, so the frame ends at the first one; `@@pp-end-fake` is a file line.
+        XCTAssertFalse(probe.partial)
+        XCTAssertEqual(probe.files["/home/dev/acme-app"], ["/home/dev/acme-app/package.json", "@@pp-end-fake"])
+    }
+
+    func testTruncatedFrameWithBogusFileLineStaysPartial() {
+        let probe = ProjectProbeParser.parse("@@pp-begin 1\n@@files /r\n@@bogus\n/r/a\n")
+        XCTAssertTrue(probe.partial)
+        XCTAssertEqual(probe.files["/r"], ["@@bogus", "/r/a"])
+    }
+
+    func testGarbageJSONSectionsParseToNothing() {
+        let probe = ProjectProbeParser.parse("""
+        @@pp-begin 1
+        @@compose
+        not json at all
+        @@vms parallels
+        <html>
+        @@vms vmpal
+        {"vms": 3}
+        @@vms lima
+        nope
+        @@pp-end
+        """)
+        XCTAssertEqual(probe.composeProjects, [])
+        XCTAssertEqual(probe.vms, [])
+    }
+
+    func testDarwinBoottimeRawLineGivesUptime() {
+        let probe = ProjectProbeParser.parse("@@pp-begin 1\n@@host\nos Darwin\nnow 1792110000\nboottime 1792102918\n@@pp-end\n")
+        XCTAssertEqual(probe.host?.uptimeSeconds, 7082)
+    }
+
+    func testPSWithoutCommEntryKeepsArgv0() {
+        let procs = ProjectProbeParser.parsePS(["  9 1 /usr/bin/foo --x", " 10 1 /bin/bar"], lsofLines: [], commLines: ["10 /bin/bar"])
+        XCTAssertEqual(procs[9]?.comm, "foo")
+        XCTAssertEqual(procs[9]?.args, "/usr/bin/foo --x")
     }
 }

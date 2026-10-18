@@ -25,13 +25,14 @@ public enum ProjectProbeScript {
 # PATH mirrors SSHTunnel.remotePathExport (sshd exec is not a login shell), plus sbin for ss/lsof.
 PATH=/usr/bin:/bin:/usr/sbin:/sbin:$PATH; export PATH
 for d in "$HOME"/.nvm/versions/node/*/bin; do [ -d "$d" ] && PATH="$d:$PATH"; done
-PATH="$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; export PATH
+PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.grok/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; export PATH
 LC_ALL=C; export LC_ALL
 sections=",${1:-},"; iv=${2:-15}; frames=${3:-1}
 [ $# -ge 3 ] && shift 3
 os=$(uname -s)
-errf=$(mktemp 2>/dev/null || echo "/tmp/herdrm-pp.$$")
+errf=$(mktemp 2>/dev/null) || errf="${TMPDIR:-/tmp}/herdrm-pp.$$.$(date +%s)"
 trap 'rm -f "$errf"' EXIT
+trap 'rm -f "$errf"; exit 0' HUP INT TERM
 
 has() { case "$sections" in *",$1,"*) return 0;; esac; return 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -41,6 +42,13 @@ if have timeout; then tm() { timeout 8 "$@"; }; else tm() { "$@"; }; fi
 run() {
   rn=$1; shift
   if "$@" 2>"$errf"; then :; else
+    echo "@@error $rn"; head -3 "$errf" | cut -c1-300
+  fi
+}
+# runq: like run, but lsof exits 1 when it found nothing to list; that is an error only if it said so on stderr.
+runq() {
+  rn=$1; shift
+  if "$@" 2>"$errf"; then :; elif [ -s "$errf" ]; then
     echo "@@error $rn"; head -3 "$errf" | cut -c1-300
   fi
 }
@@ -76,7 +84,7 @@ while :; do
 
   if has host; then
     echo "@@host"
-    echo "os $os"; echo "hostname $(hostname 2>/dev/null)"
+    echo "os $os"; echo "hostname $(hostname 2>/dev/null || uname -n)"
     if [ "$os" = Linux ]; then
       echo "ncpu $(getconf _NPROCESSORS_ONLN 2>/dev/null)"
       read -r l1 l5 l15 _ < /proc/loadavg; echo "load $l1 $l5 $l15"
@@ -89,11 +97,12 @@ while :; do
       echo "load $(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}')"
       echo "memtotal_kb $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1024 ))"
       echo "now $(date +%s)"
-      echo "boottime $(sysctl -n kern.boottime 2>/dev/null | sed -n 's/.*sec = \([0-9]*\).*/\1/p')"
+      echo "boottime $(sysctl -n kern.boottime 2>/dev/null | sed -n 's/^{ *sec = \([0-9]*\).*/\1/p')"
     fi
     if have docker; then
-      dv=$(tm docker version --format '{{.Server.Version}}' 2>&1)
-      if [ $? -eq 0 ]; then echo "docker $dv"; else echo "docker_error $(echo "$dv" | head -1 | cut -c1-300)"; fi
+      dv=$(tm docker version --format '{{.Server.Version}}' 2>&1); drc=$?
+      dv=$(printf '%s\n' "$dv" | grep -v '^$' | head -1 | cut -c1-300)
+      if [ $drc -eq 0 ]; then echo "docker $dv"; else echo "docker_error $dv"; fi
     fi
     if [ "$os" = Linux ] && have systemctl; then
       ss_state=$(tm systemctl --user is-system-running 2>/dev/null | head -1)
@@ -117,11 +126,11 @@ while :; do
     if [ "$os" = Linux ] && have ss; then
       lkind=ss; lout=$(run listeners tm ss -ltnpH)
     elif have lsof; then
-      lkind=lsof; lout=$(run listeners tm lsof -nP -iTCP -sTCP:LISTEN -Fpcn)
+      lkind=lsof; lout=$(runq listeners tm lsof -nP -iTCP -sTCP:LISTEN -Fpcn)
     fi
     if has listeners; then
       if [ "$lkind" = none ]; then echo "@@listeners"; echo "@@absent ss"
-      else echo "@@listeners $lkind"; [ -n "$lout" ] && echo "$lout"; fi
+      else echo "@@listeners $lkind"; [ -n "$lout" ] && printf '%s\n' "$lout"; fi
     fi
   fi
 
@@ -145,12 +154,12 @@ while :; do
       done
     elif [ -n "$lp" ]; then
       plist=$(echo $lp | tr ' ' ',')
-      parents=$(tm ps -o ppid= -p "$plist" 2>/dev/null | tr -d ' ' | sort -u | tr '\n' ',')
-      all="$plist,${parents%,}"
+      parents=$(tm ps -o ppid= -p "$plist" 2>/dev/null | tr -d ' ' | grep -v -E '^(0|1)$' | sort -u | tr '\n' ',')
+      all="$plist${parents:+,${parents%,}}"
       # BSD ps cuts a non-final comm column to 16 chars, so comm gets its own listing.
-      echo "@@ps"; run ps tm ps -ww -o pid=,ppid=,args= -p "$all" | cut -c1-400
-      echo "@@psc"; run psc tm ps -o pid=,comm= -p "$all"
-      echo "@@lsofp"; run lsofp tm lsof -a -d cwd,1 -p "$all" -Fpfn
+      echo "@@ps"; runq ps tm ps -ww -o pid=,ppid=,args= -p "$all" | cut -c1-400
+      echo "@@psc"; runq psc tm ps -o pid=,comm= -p "$all"
+      echo "@@lsofp"; runq lsofp tm lsof -a -d cwd,1 -p "$all" -Fpfn
     fi
   fi
 
@@ -179,8 +188,8 @@ while :; do
       r=$(root_of "$cwd")
       case "$seen" in *" $r "*) continue;; esac
       seen="$seen$r "
-      echo "@@files $r"
-      run files tm find "$r" -maxdepth 4 \( -name node_modules -o -name .git -o -name .venv -o -name dist -o -name build -o -name .next \) -prune -o -type f \( -name package.json -o -name 'docker-compose*.y*ml' -o -name 'compose*.y*ml' -o -name Makefile -o -name Procfile -o -name pyproject.toml -o -name Caddyfile -o -name justfile -o -name '.dev-lane.env' -o -name '.env*' \) -print | head -200
+      printf '@@files %s\n' "$r"
+      run files tm find "$r" -maxdepth 4 \( -name node_modules -o -name .git -o -name .venv -o -name dist -o -name build -o -name .next \) -prune -o -type f \( -name package.json -o -name 'docker-compose*.y*ml' -o -name 'compose*.y*ml' -o -name Makefile -o -name Procfile -o -name pyproject.toml -o -name Caddyfile -o -name justfile -o -name '.dev-lane.env' -o -name '.env*' \) -print | head -200 | grep -v -E '^@@|[[:cntrl:]]'
     done
   fi
 
@@ -195,7 +204,7 @@ while :; do
         [ "$ecount" -ge 6 ] && break
         [ -f "$r/$f" ] || continue
         ecount=$((ecount + 1))
-        echo "@@env $r/$f"
+        printf '@@env %s/%s\n' "$r" "$f"
         grep -n -E '^(export +)?[A-Za-z0-9_]*(PORT|URL|HOST|ORIGIN)[A-Za-z0-9_]*=' "$r/$f" 2>/dev/null \
           | grep -v -i -E '^[0-9]+:(export +)?[^=]*(SECRET|TOKEN|KEY|PASS|CREDENTIAL)' | head -40 | cut -c1-300
       done

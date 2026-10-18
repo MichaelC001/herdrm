@@ -6,6 +6,13 @@ import Foundation
 /// Secrets are dropped here, not downstream: env keys that look sensitive never
 /// leave the parser, and credentials embedded in URL values are stripped.
 public enum ProjectProbeParser {
+    /// Only these `@@` lines open or close a section. Anything else starting with `@@`
+    /// (say, a file literally named `@@pp-end`) is data of the current section.
+    private static let knownHeaders: Set<String> = [
+        "pp-begin", "pp-end", "tools", "host", "roots", "listeners", "pids", "ps", "psc", "lsofp",
+        "compose", "containers", "units", "files", "env", "vms", "absent", "error",
+    ]
+
     public static func parse(_ text: String) -> ProjectProbe {
         var probe = ProjectProbe(partial: true)
         var section = ""
@@ -25,7 +32,7 @@ public enum ProjectProbeParser {
 
         for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
             let line = rawLine.hasSuffix("\r") ? String(rawLine.dropLast()) : String(rawLine)
-            if line.hasPrefix("@@") {
+            if line.hasPrefix("@@"), knownHeaders.contains(String(line.dropFirst(2).prefix { $0 != " " })) {
                 let body = line.dropFirst(2)
                 let name = String(body.prefix { $0 != " " })
                 let rest = String(body.dropFirst(name.count).drop { $0 == " " })
@@ -195,6 +202,10 @@ public enum ProjectProbeParser {
             if let known = comms[pid] {
                 comm = known
                 args = String(rest).trimmingCharacters(in: .whitespaces)
+            } else if !commLines.isEmpty {
+                // No comm listing for this pid: name it after argv[0] and keep the args whole.
+                args = String(rest).trimmingCharacters(in: .whitespaces)
+                comm = args.split(separator: " ").first.map(String.init) ?? ""
             } else {
                 (comm, args) = splitCommAndArgs(String(rest))
             }
@@ -360,7 +371,7 @@ public enum ProjectProbeParser {
         if value.count >= 2, let first = value.first, first == "\"" || first == "'", value.last == first {
             value = String(value.dropFirst().dropLast())
         }
-        value = value.replacingOccurrences(of: #"://[^/@\s]*@"#, with: "://", options: .regularExpression)
+        value = value.replacingOccurrences(of: #"://[^/\s]*@"#, with: "://", options: .regularExpression)
         return ProbeEnvEntry(file: file, line: number, key: key, value: value)
     }
 
