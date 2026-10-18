@@ -351,52 +351,15 @@ private struct ProjectPanel: View {
         projects.setHidden(space: space, signature: signature, hidden: !(server?.isHidden ?? false))
     }
 
-    private func containerRow(_ container: ContainerRow, suggested: Bool = false, attached: Bool = false) -> some View {
-        ContainerRowView(
-            container: container,
-            isRemote: !context.device.isLocal,
-            onAttach: suggested ? { projects.attachContainer(space: space, name: container.name) } : nil,
-            onDismiss: suggested ? { projects.dismissSuggestion(space: space, name: container.name) } : nil,
-            onDetach: attached ? { projects.detachContainer(space: space, name: container.name) } : nil)
-    }
-
-    private func composeRow(_ group: ComposeGroup, attached: Bool) -> some View {
-        ComposeGroupRow(
-            group: group, isAttached: attached,
-            onToggle: {
-                if attached {
-                    projects.detachCompose(space: space, name: group.name)
-                } else {
-                    projects.attachCompose(space: space, name: group.name)
-                }
-            },
-            containers: {
-                ForEach(group.containers) { containerRow($0) }
-            })
-    }
-
     private func dockerSection(_ snapshot: ProjectSnapshot) -> some View {
-        let isEmpty = snapshot.compose.isEmpty && snapshot.attachedContainers.isEmpty
-            && snapshot.suggestedContainers.isEmpty
-        return ProjectCard("Docker", count: snapshot.compose.count + snapshot.attachedContainers.count, id: .docker) {
-            if let error = snapshot.host.dockerError {
-                ProjectCardNote("Docker is not reachable: \(error)", tint: Theme.warning)
-            } else if isEmpty {
-                ProjectCardNote("No Docker containers belong to this project.")
-            }
-            ForEach(snapshot.compose) { composeRow($0, attached: true) }
-            ForEach(snapshot.attachedContainers) { containerRow($0, attached: true) }
-            if !snapshot.suggestedContainers.isEmpty {
-                ProjectCardNote("Suggested containers").padding(.top, 6)
-                ForEach(snapshot.suggestedContainers) { containerRow($0, suggested: true) }
-            }
-            if !snapshot.otherCompose.isEmpty {
-                ProjectDisclosureCard("Other Compose projects", isExpanded: binding("otherCompose")) {
-                    ForEach(snapshot.otherCompose) { composeRow($0, attached: false) }
-                }
-                .padding(.vertical, 6)
-            }
-        }
+        ProjectDockerCard(
+            snapshot: snapshot, isRemote: !context.device.isLocal, isOtherExpanded: binding("otherCompose"),
+            actions: ProjectDockerActions(
+                attachCompose: { projects.attachCompose(space: space, name: $0) },
+                detachCompose: { projects.detachCompose(space: space, name: $0) },
+                attachContainer: { projects.attachContainer(space: space, name: $0) },
+                dismissSuggestion: { projects.dismissSuggestion(space: space, name: $0) },
+                detachContainer: { projects.detachContainer(space: space, name: $0) }))
     }
 
     private func hostsSection(_ snapshot: ProjectSnapshot) -> some View {

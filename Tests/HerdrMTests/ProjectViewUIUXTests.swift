@@ -194,4 +194,64 @@ final class ProjectViewUIUXTests: XCTestCase {
         XCTAssertNotNil(all.first { $0.name == "More" }, "no More menu on the dev server row")
         XCTAssertNil(all.first { $0.role == "AXButton" && $0.name == "Hide" }, "Hide must live in the menu, not inline")
     }
+
+    func testContainerTileClickRevealsDetailStrip() throws {
+        let long = container("c2", name: "acme-very-long-container-name-for-truncation-1", service: nil, state: "exited", health: nil, statusText: "Exited (0) 2 days ago")
+        let web = container("c1", name: "acme-web-1", service: "web")
+        let groups = [
+            ComposeGroup(name: "acme", workingDir: root, configFiles: [], match: .name, running: 1, total: 2, containers: [web, long]),
+            ComposeGroup(name: "acme-lake", workingDir: root, configFiles: [], match: .name, running: 0, total: 0, containers: []),
+        ]
+        let entry = ProjectInspectorModel.Entry(snapshot: snapshot(compose: groups), state: .live, lastProbe: Date(), rawProbe: nil, localVMs: nil)
+        let (model, _) = try model(entry: entry)
+        let (window, _) = host(model)
+        defer { window.close() }
+        settle()
+        var all = elements(in: window)
+        XCTAssertNil(element(all, id: "project.containerDetail"))
+        XCTAssertNil(all.first { $0.role == "AXButton" && $0.name == "Close" }, "tiles carry no buttons; the strip is the only action surface")
+        let tile = try XCTUnwrap(element(all, id: "project.container.c1"))
+        AccessibilityProbe.press(tile)
+        settle()
+        all = elements(in: window)
+        XCTAssertNotNil(element(all, id: "project.containerDetail"))
+        let texts = texts(all)
+        XCTAssertTrue(texts.contains("nginx:1.27"), "\(texts.sorted())")
+        XCTAssertTrue(texts.contains("0.0.0.0:8080 → 80/tcp"), "\(texts.sorted())")
+        AccessibilityProbe.press(try XCTUnwrap(element(all, id: "project.container.c1")))
+        settle()
+        XCTAssertNil(element(elements(in: window), id: "project.containerDetail"), "second click must close the strip")
+    }
+
+    func testUnhealthyTileIsLabelled() throws {
+        let sick = container("c1", name: "acme-web-1", service: "web", health: "unhealthy")
+        let groups = [ComposeGroup(name: "acme", workingDir: root, configFiles: [], match: .name, running: 1, total: 1, containers: [sick])]
+        let entry = ProjectInspectorModel.Entry(snapshot: snapshot(compose: groups), state: .live, lastProbe: Date(), rawProbe: nil, localVMs: nil)
+        let (model, _) = try model(entry: entry)
+        let (window, _) = host(model)
+        defer { window.close() }
+        settle()
+        let tile = try XCTUnwrap(element(elements(in: window), id: "project.container.c1"))
+        XCTAssertEqual(tile.name, "web, running, unhealthy")
+    }
+
+    func testSelectionIsPrunedWhenTheContainerDisappears() throws {
+        let web = container("c1", name: "acme-web-1", service: "web")
+        let groups = [ComposeGroup(name: "acme", workingDir: root, configFiles: [], match: .name, running: 1, total: 1, containers: [web])]
+        let entry = ProjectInspectorModel.Entry(snapshot: snapshot(compose: groups), state: .live, lastProbe: Date(), rawProbe: nil, localVMs: nil)
+        let (model, space) = try model(entry: entry)
+        let (window, _) = host(model)
+        defer { window.close() }
+        settle()
+        AccessibilityProbe.press(try XCTUnwrap(element(elements(in: window), id: "project.container.c1")))
+        settle()
+        XCTAssertNotNil(element(elements(in: window), id: "project.containerDetail"))
+        let replaced = container("c9", name: "acme-web-1", service: "web")
+        var next = snapshot(compose: [ComposeGroup(name: "acme", workingDir: root, configFiles: [], match: .name, running: 1, total: 1, containers: [replaced])])
+        next.probedAt = Date().addingTimeInterval(5)
+        model.projects._setEntryForTesting(space: space, key: "\(devbox.id.uuidString):\(root)", entry: ProjectInspectorModel.Entry(snapshot: next, state: .live, lastProbe: Date(), rawProbe: nil, localVMs: nil))
+        settle()
+        XCTAssertNil(element(elements(in: window), id: "project.containerDetail"), "stale selection must be pruned")
+        XCTAssertNotNil(element(elements(in: window), id: "project.container.c9"))
+    }
 }
