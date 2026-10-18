@@ -22,7 +22,7 @@ public struct ProjectIdentity: Equatable, Sendable, Codable {
         name
             .components(separatedBy: CharacterSet(charactersIn: "-_. "))
             .map { $0.lowercased() }
-            .filter { !$0.isEmpty && $0.range(of: #"^v?\d+(\.\d+)*$"#, options: .regularExpression) == nil }
+            .filter { !$0.isEmpty && $0.range(of: #"^v?\d+$"#, options: .regularExpression) == nil }
     }
 }
 
@@ -51,7 +51,7 @@ public enum ProjectRootResolver {
                     best = group
                 }
             }
-            return (best.rootPath, best.worktreeRoots)
+            return (best.rootPath, best.worktreeRoots.sorted())
         }
 
         let cwds = roots.map(\.cwd)
@@ -100,6 +100,7 @@ public enum ProjectRootResolver {
 
     /// The main repository root: the parent of a `.git` common dir (so a worktree maps
     /// to its main checkout), otherwise the toplevel. Nil for a non-git directory.
+    /// `commonDir` must be absolute: the probe resolves it with `pwd -P`.
     static func mainRoot(of probeRoot: ProbeRoot) -> String? {
         if let commonDir = probeRoot.commonDir {
             let common = normalized(commonDir)

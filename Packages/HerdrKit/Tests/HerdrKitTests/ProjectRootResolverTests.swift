@@ -64,6 +64,60 @@ final class ProjectRootResolverTests: XCTestCase {
         )
     }
 
+    func testMostFrequentMainRootWinsOverFocused() {
+        let roots = [
+            ProbeRoot(cwd: "/home/dev/beta/src", toplevel: "/home/dev/beta", commonDir: "/home/dev/beta/.git"),
+            ProbeRoot(cwd: "/home/dev/alpha/src", toplevel: "/home/dev/alpha", commonDir: "/home/dev/alpha/.git"),
+            ProbeRoot(cwd: "/home/dev/alpha/lib", toplevel: "/home/dev/alpha", commonDir: "/home/dev/alpha/.git"),
+        ]
+        let resolved = ProjectRootResolver.resolve(
+            roots: roots, focusedCwd: "/home/dev/beta/src", home: home, override: nil
+        )
+        XCTAssertEqual(resolved?.root, "/home/dev/alpha")
+    }
+
+    func testRootPrefixIsComponentWise() {
+        let roots = [
+            ProbeRoot(cwd: "/home/dev/acme-app/src"),
+            ProbeRoot(cwd: "/home/dev/acme-app2/x"),
+        ]
+        let resolved = ProjectRootResolver.resolve(
+            roots: roots, focusedCwd: "/home/dev/acme-app2/x", home: home, override: nil
+        )
+        XCTAssertEqual(resolved?.root, "/home/dev/acme-app2/x")
+        XCTAssertEqual(resolved?.worktreeRoots, ["/home/dev/acme-app2/x"])
+    }
+
+    func testTrailingSlashInputsResolveLikeCleanPaths() {
+        let roots = [
+            ProbeRoot(
+                cwd: "/home/dev/acme-app/",
+                toplevel: "/home/dev/acme-app/",
+                commonDir: "/home/dev/acme-app/.git/"
+            ),
+        ]
+        let resolved = ProjectRootResolver.resolve(roots: roots, focusedCwd: nil, home: "/home/dev/", override: nil)
+        XCTAssertEqual(resolved?.root, "/home/dev/acme-app")
+        XCTAssertEqual(resolved?.worktreeRoots, ["/home/dev/acme-app"])
+    }
+
+    func testNoRootsAndNoOverrideIsNil() {
+        XCTAssertNil(ProjectRootResolver.resolve(roots: [], focusedCwd: nil, home: home, override: nil))
+    }
+
+    func testWorktreeRootsAreSortedRegardlessOfPaneOrder() {
+        let main = ProbeRoot(cwd: "/home/dev/acme-app", toplevel: "/home/dev/acme-app", commonDir: "/home/dev/acme-app/.git")
+        let worktree = ProbeRoot(
+            cwd: "/home/dev/acme-app/.claude/worktrees/conntest",
+            toplevel: "/home/dev/acme-app/.claude/worktrees/conntest",
+            commonDir: "/home/dev/acme-app/.git"
+        )
+        let forward = ProjectRootResolver.resolve(roots: [main, worktree], focusedCwd: nil, home: home, override: nil)
+        let reverse = ProjectRootResolver.resolve(roots: [worktree, main], focusedCwd: nil, home: home, override: nil)
+        XCTAssertEqual(forward?.worktreeRoots, reverse?.worktreeRoots)
+        XCTAssertEqual(forward?.worktreeRoots, forward?.worktreeRoots.sorted())
+    }
+
     func testOverrideWins() {
         let roots = [ProbeRoot(cwd: "/home/dev/acme-app/frontend", toplevel: "/home/dev/acme-app")]
         let resolved = ProjectRootResolver.resolve(roots: roots, focusedCwd: nil, home: home, override: "/opt/other")
