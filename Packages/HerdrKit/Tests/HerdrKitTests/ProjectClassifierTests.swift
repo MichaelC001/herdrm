@@ -193,6 +193,11 @@ final class ProjectClassifierTests: XCTestCase {
             PublishedPort(hostIP: "100.64.0.7", hostPort: 4000, containerPort: 3000, proto: "tcp"),
             PublishedPort(hostIP: "::", hostPort: 5432, containerPort: 5432, proto: "tcp"),
         ])
+        XCTAssertEqual(ProjectClassifier.publishedPorts("0.0.0.0:8000-8001->8000-8001/tcp"), [
+            PublishedPort(hostIP: "0.0.0.0", hostPort: 8000, containerPort: 8000, proto: "tcp"),
+            PublishedPort(hostIP: "0.0.0.0", hostPort: 8001, containerPort: 8001, proto: "tcp"),
+        ])
+        XCTAssertEqual(ProjectClassifier.publishedPorts("0.0.0.0:8000-8002->8000-8001/tcp"), [])
         XCTAssertEqual(ProjectClassifier.publishedPorts("3000/tcp"), [])
         XCTAssertEqual(ProjectClassifier.publishedPorts(""), [])
     }
@@ -326,11 +331,11 @@ final class ProjectClassifierTests: XCTestCase {
     // MARK: - VMs
 
     func testVMsAttachedDeclaredSuggested() {
-        let ubuntu = ProbeVM(provider: .vmpal, id: "C702FAA5-A280-4AD4-8E15-A43794894702", name: "Ubuntu VM", state: "running", ip: "192.168.64.6")
+        let ubuntu = ProbeVM(provider: .vmpal, id: "0A0B0C0D-1111-4222-8333-444455556666", name: "Ubuntu VM", state: "running", ip: "192.168.64.6")
         let debian = ProbeVM(provider: .vmpal, id: "11111111-0000-0000-0000-000000000001", name: "Debian VM", state: "stopped")
         let fedora = ProbeVM(provider: .vmpal, id: "11111111-0000-0000-0000-000000000002", name: "Fedora VM", state: "stopped")
-        let win = ProbeVM(provider: .parallels, id: "2f2a8e6a-91d4-4893-9612-75e100d92339", name: "Win 11 Pro", state: "suspended")
-        let tests = ProbeVM(provider: .parallels, id: "3a3a8e6a-91d4-4893-9612-75e100d92340", name: "acme tests", state: "stopped")
+        let win = ProbeVM(provider: .parallels, id: "aaaaaaaa-1111-4222-8333-444444444444", name: "Win 11 Pro", state: "suspended")
+        let tests = ProbeVM(provider: .parallels, id: "bbbbbbbb-1111-4222-8333-555555555555", name: "acme tests", state: "stopped")
         let lima = ProbeVM(provider: .lima, id: "default", name: "default", state: "Stopped")
         var local = ProjectProbe()
         local.vms = [ubuntu, debian, fedora, win, tests, lima]
@@ -356,12 +361,15 @@ final class ProjectClassifierTests: XCTestCase {
 
     func testParallelsAndVmpalAreNeverDeclared() {
         var local = ProjectProbe()
-        local.vms = [ProbeVM(provider: .parallels, id: "p", name: "Win 11 Pro", state: "stopped")]
+        local.vms = [
+            ProbeVM(provider: .parallels, id: "p", name: "Win 11 Pro", state: "stopped"),
+            ProbeVM(provider: .vmpal, id: "v", name: "Ubuntu VM", state: "stopped"),
+        ]
         var probe = ProjectProbe()
         probe.files = [root: [root + "/lima.yaml"]]
         let snapshot = classify(probe, localVMs: local)
         XCTAssertEqual(snapshot.vms, [])
-        XCTAssertEqual(snapshot.otherVMs.map(\.name), ["Win 11 Pro"])
+        XCTAssertEqual(snapshot.otherVMs.map(\.name), ["Win 11 Pro", "Ubuntu VM"])
     }
 
     // MARK: - Host and secrets
@@ -399,6 +407,84 @@ final class ProjectClassifierTests: XCTestCase {
         let snapshot = classify(probe)
         XCTAssertEqual(snapshot.envEntries.map(\.key), ["API_PORT"])
         XCTAssertFalse(snapshot.envEntries.contains { $0.key.uppercased().contains("PASSWORD") })
+    }
+
+    func testServiceOverrideDecodesMinimalJSONAndRoundTrips() throws {
+        let decoder = JSONDecoder()
+        let minimal = try decoder.decode(ServiceOverride.self, from: Data(#"{"url":"x"}"#.utf8))
+        XCTAssertEqual(minimal, ServiceOverride(url: "x"))
+        let empty = try decoder.decode(ProjectOverrides.self, from: Data("{}".utf8))
+        XCTAssertEqual(empty, ProjectOverrides())
+        var full = ProjectOverrides()
+        full.services["a@b"] = .init(url: "x", hidden: true)
+        full.attachedCompose = ["acme"]
+        full.envFile = ".env"
+        let again = try decoder.decode(ProjectOverrides.self, from: JSONEncoder().encode(full))
+        XCTAssertEqual(again, full)
+        let partial = try decoder.decode(ProjectOverrides.self, from: Data(#"{"services":{"a@b":{"hidden":true}}}"#.utf8))
+        XCTAssertEqual(partial.services["a@b"]?.hidden, true)
+        XCTAssertEqual(partial.attachedCompose, [])
+    }
+
+    func testChildUsesOwnCommandLineBeforeParent() {
+        let result = ProjectClassifier.role(
+            comm: "python3", args: "python3 -m uvicorn app:app --port 8100",
+            parentArgs: #"concurrently "next dev" "uvicorn app:app --reload""#, port: 8100)
+        XCTAssertEqual(result.0, .backend)
+        XCTAssertEqual(result.framework, "uvicorn")
+        XCTAssertFalse(result.hotReload)
+        // Nothing in its own command line: the parent decides.
+        XCTAssertEqual(ProjectClassifier.role(comm: "node", args: "node server.js", parentArgs: "npm run vite", port: 5000).framework, "vite")
+    }
+
+    func testMcpIsMatchedAsWordNotPathSubstring() {
+        XCTAssertEqual(ProjectClassifier.role(comm: "node", args: "node /srv/mcpanel/server.js", parentArgs: nil, port: 3001).0, .frontend)
+        XCTAssertEqual(ProjectClassifier.role(comm: "node", args: "node /usr/bin/mcp-proxy", parentArgs: nil, port: 3001).0, .tooling)
+    }
+
+    func testVMSuggestionMatchesWholeWordsOnly() {
+        var local = ProjectProbe()
+        local.vms = [
+            ProbeVM(provider: .parallels, id: "h", name: "Happy VM", state: "stopped"),
+            ProbeVM(provider: .parallels, id: "t", name: "acme tests", state: "stopped"),
+        ]
+        let snapshot = classify(ProjectProbe(), localVMs: local)
+        XCTAssertEqual(snapshot.vms.map(\.name), ["acme tests"])
+        XCTAssertEqual(snapshot.otherVMs.map(\.name), ["Happy VM"])
+    }
+
+    func testSecondSameFamilyListenerGetsPortSuffixAndKeepsOverride() {
+        var probe = ProjectProbe()
+        probe.listeners = [
+            ProbeListener(bind: "0.0.0.0", port: 3100, pids: [60]),
+            ProbeListener(bind: "0.0.0.0", port: 3101, pids: [61]),
+        ]
+        probe.processes = [
+            60: ProbeProcess(pid: 60, ppid: 1, comm: "next-server (v1", cwd: root + "/frontend", args: "next-server"),
+            61: ProbeProcess(pid: 61, ppid: 1, comm: "next-server (v1", cwd: root + "/frontend", args: "next-server"),
+        ]
+        var overrides = ProjectOverrides()
+        overrides.services["next@frontend"] = .init(url: "https://hot.devbox.example")
+        let snapshot = classify(probe, overrides: overrides)
+        XCTAssertEqual(snapshot.devServers.map(\.signature), ["next@frontend#3100", "next@frontend#3101"])
+        XCTAssertEqual(snapshot.devServers.map { $0.urls.first?.url }, ["https://hot.devbox.example", "https://hot.devbox.example"])
+        XCTAssertEqual(snapshot.staleOverrides, [])
+    }
+
+    func testSiblingDirectoryWithSharedPrefixIsNotOwned() {
+        var probe = ProjectProbe()
+        probe.listeners = [ProbeListener(bind: "0.0.0.0", port: 3300, pids: [80])]
+        probe.processes = [80: ProbeProcess(pid: 80, ppid: 1, comm: "node", cwd: "/home/dev/acme-app2/x", args: "vite")]
+        let snapshot = classify(probe)
+        XCTAssertEqual(snapshot.devServers, [])
+        XCTAssertEqual(snapshot.otherListeners, [])
+    }
+
+    func testLocalLoopbackURLIsFlaggedLoopbackAndIPv6TargetIsBracketed() {
+        XCTAssertEqual(ProjectClassifier.detectedURL(bind: "127.0.0.1", port: 3000, device: .local)?.loopbackOnHost, true)
+        XCTAssertEqual(ProjectClassifier.detectedURL(bind: "0.0.0.0", port: 3000, device: .local)?.loopbackOnHost, false)
+        let v6 = Device(name: "v6", kind: .ssh(target: "dev@fd00::7"))
+        XCTAssertEqual(ProjectClassifier.detectedURL(bind: "::", port: 3000, device: v6)?.url, "http://[fd00::7]:3000")
     }
 
     func testPartialAndErrorsSurfaceAsWarnings() {

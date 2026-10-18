@@ -18,7 +18,10 @@ public enum ProjectClassifier {
         let vms = classifyVMs(
             localVMs: localVMs, files: probe.files, identity: identity, overrides: overrides)
 
-        let live = Set((listeners.devServers + listeners.other).map(\.signature))
+        // A `#<port>` suffix only disambiguates; an override on the plain signature still counts as live.
+        let live = Set((listeners.devServers + listeners.other).flatMap { row in
+            [row.signature, row.signature.hasSuffix("#\(row.port)") ? String(row.signature.dropLast("#\(row.port)".count)) : row.signature]
+        })
         let stale = overrides.services
             .filter { signature, value in
                 !(value.url ?? "").isEmpty && !live.contains(signature)
@@ -52,15 +55,20 @@ public enum ProjectClassifier {
         comm: String, args: String, parentArgs: String?, port: Int
     ) -> (ServiceRole, framework: String, hotReload: Bool) {
         let own = (comm + " " + args).lowercased()
-        let context = own + " " + (parentArgs ?? "").lowercased()
-        let reload = context.contains("--reload") || matches(context, #"\bnodemon\b"#)
+        let parent = (parentArgs ?? "").lowercased()
 
         if let tool = toolingFamily(comm: comm, args: args, own: own) {
-            return (.tooling, tool, reload)
+            return (.tooling, tool, hasReloadFlag(own))
         }
-        for family in RoleTable.families where matches(context, family.pattern) {
-            return (family.role, family.framework, reload || family.hotReload)
+        // The process's own command line decides first; the parent's only fills in when
+        // nothing matched, so a uvicorn child under `concurrently "next dev" "uvicorn"` stays uvicorn.
+        for text in [own, parent] where !text.isEmpty {
+            for family in RoleTable.families where matches(text, family.pattern) {
+                return (family.role, family.framework, hasReloadFlag(text) || family.hotReload)
+            }
         }
+        let context = own + " " + parent
+        let reload = hasReloadFlag(own) || hasReloadFlag(context)
         if RoleTable.isAir(comm: comm) { return (.backend, "air", true) }
 
         let name = comm.trimmingCharacters(in: .whitespaces)
@@ -68,9 +76,16 @@ public enum ProjectClassifier {
         return (roleForPort(port), framework, reload)
     }
 
-    private static func toolingFamily(comm: String, args: String, own: String) -> String? {
-        if own.contains("mcp") { return "mcp" }
+    private static func hasReloadFlag(_ text: String) -> Bool {
+        text.contains("--reload") || matches(text, #"\bnodemon\b"#)
+    }
+
+    private static func toolingFamily(comm: String, args: String, own _: String) -> String? {
         let names = executableNames(comm: comm, args: args)
+        // "mcp" as a word or executable-name prefix, not a substring of some path.
+        if names.contains(where: { $0.hasPrefix("mcp") || matches($0, #"(^|[^a-z0-9])mcp([^a-z0-9]|$)"#) }) {
+            return "mcp"
+        }
         for tool in RoleTable.tooling {
             if names.contains(where: { $0 == tool || $0.hasPrefix(tool + "-") || $0.hasPrefix(tool + ".") }) {
                 return tool
@@ -150,7 +165,7 @@ public enum ProjectClassifier {
         let loopback = isLoopback(bind)
         if loopback && !device.isLocal { return nil }
         let url = "http://\(urlHost(for: device)):\(port)"
-        return ProjectURL(label: url, url: url, source: .detected, loopbackOnHost: false)
+        return ProjectURL(label: url, url: url, source: .detected, loopbackOnHost: loopback)
     }
 
     static func isLoopback(_ bind: String) -> Bool {
@@ -161,7 +176,8 @@ public enum ProjectClassifier {
     private static func urlHost(for device: Device) -> String {
         if device.isLocal { return "localhost" }
         guard let target = device.sshTarget else { return device.name }
-        return target.split(separator: "@", omittingEmptySubsequences: false).last.map(String.init) ?? target
+        let host = target.split(separator: "@", omittingEmptySubsequences: false).last.map(String.init) ?? target
+        return host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
     }
 
     /// Parses docker's ports column: "100.64.0.7:4000->3000/tcp, [::]:5432->5432/tcp".
@@ -236,7 +252,7 @@ public enum ProjectClassifier {
         probe: ProjectProbe, roots: [String], identity: ProjectIdentity,
         device: Device, overrides: ProjectOverrides
     ) -> (devServers: [DevServer], other: [DevServer]) {
-        let published = Set(probe.containers.flatMap { publishedPorts($0.ports).map(\.hostPort) })
+        let published = Set(probe.containers.flatMap { publishedPorts($0.ports).filter { $0.proto == "tcp" }.map(\.hostPort) })
         var candidates: [Candidate] = []
         for group in portGroups(probe.listeners) {
             if group.pids.isEmpty {
@@ -252,7 +268,7 @@ public enum ProjectClassifier {
         for candidate in candidates {
             let signature = counts[candidate.baseSignature, default: 0] > 1
                 ? "\(candidate.baseSignature)#\(candidate.port)" : candidate.baseSignature
-            let override = overrides.services[signature]
+            let override = overrides.services[signature] ?? overrides.services[candidate.baseSignature]
             let role = override?.role.flatMap(ServiceRole.init(rawValue:)) ?? candidate.role
             let row = DevServer(
                 signature: signature, role: role, framework: candidate.framework, bind: candidate.bind,
@@ -307,9 +323,11 @@ public enum ProjectClassifier {
         let inside = group.pids.filter(insideProject)
         guard !inside.isEmpty else { return nil }
 
-        let owner = group.pids.first { pid in
-            !(processes[pid]?.ppid.map(group.pids.contains) ?? false)
-        } ?? group.pids.min()
+        let topLevel = group.pids.filter { pid in
+            guard let process = processes[pid] else { return false }
+            return !(process.ppid.map(group.pids.contains) ?? false)
+        }
+        let owner = topLevel.min() ?? group.pids.min()
         let anchor = owner.flatMap { inside.contains($0) ? $0 : nil } ?? inside[0]
         let ownerProcess = owner.flatMap { processes[$0] }
         let details = ([ownerProcess] + group.pids.map { processes[$0] }).compactMap { $0 }
@@ -465,7 +483,7 @@ public enum ProjectClassifier {
                 match = .attached
             } else if vm.provider == .lima && declaresLima {
                 match = .declared
-            } else if tokens.contains(where: { vm.name.lowercased().contains($0) }) {
+            } else if !Set(words(in: vm.name)).isDisjoint(with: tokens) {
                 match = .suggested
             } else {
                 match = nil
@@ -476,6 +494,13 @@ public enum ProjectClassifier {
         return (listed, other)
     }
 
+    /// Lowercased alphanumeric words, so the token "app" matches "app tests" but not "Happy".
+    private static func words(in name: String) -> [String] {
+        name.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+    }
+
+    /// M1 only checks that the project ships a lima config; it does not check which
+    /// instance the config names, so every lima VM counts as declared.
     private static func isLimaConfig(_ path: String) -> Bool {
         let name = (path as NSString).lastPathComponent.lowercased()
         return name.hasPrefix("lima") && (name.hasSuffix(".yaml") || name.hasSuffix(".yml"))

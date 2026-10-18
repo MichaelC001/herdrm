@@ -109,7 +109,7 @@ final class ProjectProbeParserTests: XCTestCase {
         let prl = """
         [
         \t{
-        \t\t"uuid": "2f2a8e6a-91d4-4893-9612-75e100d92339",
+        \t\t"uuid": "aaaaaaaa-1111-4222-8333-444444444444",
         \t\t"name": "Win 11 Pro",
         \t\t"status": "suspended",
         \t\t"ip_configured": "   "
@@ -117,11 +117,11 @@ final class ProjectProbeParserTests: XCTestCase {
         ]
         """
         XCTAssertEqual(ProjectProbeParser.parseParallels(prl), [
-            ProbeVM(provider: .parallels, id: "2f2a8e6a-91d4-4893-9612-75e100d92339", name: "Win 11 Pro", state: "suspended", ip: nil),
+            ProbeVM(provider: .parallels, id: "aaaaaaaa-1111-4222-8333-444444444444", name: "Win 11 Pro", state: "suspended", ip: nil),
         ])
-        let vmpal = #"{"vms":[{"activity":null,"guest":"linux","id":"C702FAA5-A280-4AD4-8E15-A43794894702","internetAddress":"192.168.64.6","name":"Ubuntu VM","state":"running"}]}"#
+        let vmpal = #"{"vms":[{"activity":null,"guest":"linux","id":"0A0B0C0D-1111-4222-8333-444455556666","internetAddress":"192.168.64.6","name":"Ubuntu VM","state":"running"}]}"#
         XCTAssertEqual(ProjectProbeParser.parseVmpal(vmpal), [
-            ProbeVM(provider: .vmpal, id: "C702FAA5-A280-4AD4-8E15-A43794894702", name: "Ubuntu VM", state: "running", ip: "192.168.64.6"),
+            ProbeVM(provider: .vmpal, id: "0A0B0C0D-1111-4222-8333-444455556666", name: "Ubuntu VM", state: "running", ip: "192.168.64.6"),
         ])
         let lima = #"{"name":"default","hostname":"lima-default","status":"Stopped","vmType":"vz","cpus":4}"#
         XCTAssertEqual(ProjectProbeParser.parseLima(lima), [

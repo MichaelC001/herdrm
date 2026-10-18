@@ -87,3 +87,43 @@ public struct ProjectOverrides: Codable, Equatable, Sendable {
         self.envFile = envFile
     }
 }
+
+// Synthesized Decodable ignores init defaults, so stored blobs missing a key would fail to load.
+extension ServiceOverride {
+    private enum CodingKeys: String, CodingKey {
+        case url, label, role, hidden, restartCommand, stopCommand, startCommand
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            url: try c.decodeIfPresent(String.self, forKey: .url),
+            label: try c.decodeIfPresent(String.self, forKey: .label),
+            role: try c.decodeIfPresent(String.self, forKey: .role),
+            hidden: try c.decodeIfPresent(Bool.self, forKey: .hidden) ?? false,
+            restartCommand: try c.decodeIfPresent(String.self, forKey: .restartCommand),
+            stopCommand: try c.decodeIfPresent(String.self, forKey: .stopCommand),
+            startCommand: try c.decodeIfPresent(String.self, forKey: .startCommand))
+    }
+}
+
+extension ProjectOverrides {
+    private enum CodingKeys: String, CodingKey {
+        case services, attachedCompose, detachedCompose, attachedContainers, dismissedSuggestions
+        case attachedVMs, linkedDevices, links, envFile
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            services: try c.decodeIfPresent([String: ServiceOverride].self, forKey: .services) ?? [:],
+            attachedCompose: try c.decodeIfPresent([String].self, forKey: .attachedCompose) ?? [],
+            detachedCompose: try c.decodeIfPresent([String].self, forKey: .detachedCompose) ?? [],
+            attachedContainers: try c.decodeIfPresent([String].self, forKey: .attachedContainers) ?? [],
+            dismissedSuggestions: try c.decodeIfPresent([String].self, forKey: .dismissedSuggestions) ?? [],
+            attachedVMs: try c.decodeIfPresent([AttachedVM].self, forKey: .attachedVMs) ?? [],
+            linkedDevices: try c.decodeIfPresent([LinkedDevice].self, forKey: .linkedDevices) ?? [],
+            links: try c.decodeIfPresent([NamedLink].self, forKey: .links) ?? [],
+            envFile: try c.decodeIfPresent(String.self, forKey: .envFile))
+    }
+}
