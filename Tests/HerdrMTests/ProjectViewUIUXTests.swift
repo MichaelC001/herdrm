@@ -114,4 +114,26 @@ final class ProjectViewUIUXTests: XCTestCase {
         XCTAssertTrue(texts.contains("ssh timed out"), "\(texts.sorted())")
         XCTAssertTrue(texts.contains("Hot reload"), "stale snapshot must stay visible")
     }
+
+    func testHiddenRowsLeaveTheListsAndSitInACollapsedDisclosure() throws {
+        var snap = snapshot()
+        var hiddenDev = server("vite@web", framework: "vite-hidden-fw", port: 5173)
+        hiddenDev.isHidden = true
+        var hiddenOther = server("redis@", framework: "redis-hidden-fw", port: 6379, role: .other, hot: false)
+        hiddenOther.isHidden = true
+        snap.devServers.append(hiddenDev)
+        snap.otherListeners.append(hiddenOther)
+        let entry = ProjectInspectorModel.Entry(snapshot: snap, state: .live, lastProbe: Date(), rawProbe: nil, localVMs: nil)
+        let (model, _) = try model(entry: entry)
+        let (window, _) = host(model)
+        defer { window.close() }
+        settle()
+
+        let texts = Set(AccessibilityProbe.elements(in: window).flatMap { [$0.value, $0.name].compactMap { $0 } })
+        XCTAssertTrue(texts.contains("Hidden (2)"), "no Hidden disclosure in \(texts.sorted())")
+        XCTAssertFalse(texts.contains("vite-hidden-fw"), "hidden dev server is still listed")
+        XCTAssertFalse(texts.contains("redis-hidden-fw"), "hidden listener is still listed")
+        XCTAssertTrue(texts.contains("Next.js"), "visible server must stay")
+        XCTAssertTrue(texts.contains("Other listeners"), "the visible listener keeps its section")
+    }
 }

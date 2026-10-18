@@ -16,9 +16,9 @@ the Sparkle update description — a release without a section here fails CI.
   host's load, memory and Docker version. Local Parallels, VMPal and Lima VMs
   can be attached, declared or suggested for the project. Its URLs can be
   opened or copied, or overridden with the public address actually used.
-  Overrides, attached containers and VMs, hidden listeners, linked hosts and a
-  custom project root persist per project in HerdrM's own store. Status
-  refreshes every 15 seconds while the panel is visible. The panel is read-only
+  Overrides, attached containers and VMs, hidden listeners, remembered linked
+  hosts and a custom project root persist per project in HerdrM's own store.
+  Status refreshes every 15 seconds while the panel is visible. The panel is read-only
   in this release; start, stop and logs come next.
 
 ## [0.6.18] - 2026-10-17

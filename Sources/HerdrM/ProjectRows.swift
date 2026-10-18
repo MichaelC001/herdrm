@@ -187,10 +187,6 @@ struct DevServerRow: View {
     let onSetURL: ((String?) -> Void)?
     let onToggleHidden: () -> Void
 
-    private var isLoopback: Bool {
-        ["127.0.0.1", "::1", "[::1]", "localhost"].contains(server.bind)
-    }
-
     private var roleName: LocalizedStringKey {
         switch server.role {
         case .frontend: "Frontend"
@@ -212,10 +208,10 @@ struct DevServerRow: View {
             Text(verbatim: "\(server.bind):\(server.port)")
                 .font(.system(size: 11.5, design: .monospaced))
                 .foregroundStyle(Theme.textSecondary)
-            if isLoopback {
-                ProjectTag("loopback only")
-            } else if server.isPublicBind {
+            if server.isPublicBind {
                 ProjectTag("public", tint: Theme.warning)
+            } else {
+                ProjectTag("loopback only")
             }
             if let unit = server.unit {
                 ProjectVerbatimTag(text: unit, systemImage: "gearshape")

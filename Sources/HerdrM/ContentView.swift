@@ -400,7 +400,8 @@ struct DetailView: View {
                 }
             }
             Group {
-                if model.isFileManagerActive {
+                switch model.detailMode {
+                case .files:
                     Image(systemName: "folder")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Theme.textTertiary)
@@ -408,73 +409,75 @@ struct DetailView: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.text)
                     Spacer()
-                } else if model.detailMode == .project {
+                case .project:
                     Image(systemName: "shippingbox")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Theme.textTertiary)
-                    ProjectTitleText(projects: model.projects, space: model.selectedSpace)
+                    ProjectTitleText(projects: model.projects, space: model.projectSpace)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.text)
                     Spacer()
-                } else if let shell = model.selectedShell {
-                    Image(systemName: "terminal")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Theme.textTertiary)
-                    Text(shell.title)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.text)
-                    Text(shell.device.name)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.textTertiary)
-                    Spacer()
-                } else if let attached = model.selectedAttachedEntry {
-                    switch attached {
-                    case .agent(let entry):
-                        let agent = entry.agent
-                        statusGlyph(agent.status)
-                        Text(entry.title)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Theme.text)
-                            .lineLimit(1)
-                            .layoutPriority(1)
-                            .help((agent.cwd as NSString?)?.abbreviatingWithTildeInPath ?? "")
-                        Spacer(minLength: 12)
-                        AgentKindBadge(kind: agent.agent)
-                        Text("\u{b7}")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(Theme.textGhost)
-                        Text(model.spaceName(deviceID: entry.device.id, workspaceID: agent.workspaceID))
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(Theme.textTertiary)
-                            .lineLimit(1)
-                        if model.showsRowDeviceBadges {
-                            DeviceChip(device: entry.device)
-                        }
-                        statusPill(agent.status)
-                    case .terminal(let entry):
+                case .terminal:
+                    if let shell = model.selectedShell {
                         Image(systemName: "terminal")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(Theme.textTertiary)
-                        Text(entry.title)
+                        Text(shell.title)
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Theme.text)
-                            .lineLimit(1)
-                            .layoutPriority(1)
-                            .help((entry.pane.cwd as NSString?)?.abbreviatingWithTildeInPath ?? "")
-                        Spacer(minLength: 12)
-                        Text(model.spaceName(deviceID: entry.device.id, workspaceID: entry.pane.workspaceID))
+                        Text(shell.device.name)
                             .font(.system(size: 11.5))
                             .foregroundStyle(Theme.textTertiary)
-                            .lineLimit(1)
-                        if model.showsRowDeviceBadges {
-                            DeviceChip(device: entry.device)
+                        Spacer()
+                    } else if let attached = model.selectedAttachedEntry {
+                        switch attached {
+                        case .agent(let entry):
+                            let agent = entry.agent
+                            statusGlyph(agent.status)
+                            Text(entry.title)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(Theme.text)
+                                .lineLimit(1)
+                                .layoutPriority(1)
+                                .help((agent.cwd as NSString?)?.abbreviatingWithTildeInPath ?? "")
+                            Spacer(minLength: 12)
+                            AgentKindBadge(kind: agent.agent)
+                            Text("\u{b7}")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Theme.textGhost)
+                            Text(model.spaceName(deviceID: entry.device.id, workspaceID: agent.workspaceID))
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Theme.textTertiary)
+                                .lineLimit(1)
+                            if model.showsRowDeviceBadges {
+                                DeviceChip(device: entry.device)
+                            }
+                            statusPill(agent.status)
+                        case .terminal(let entry):
+                            Image(systemName: "terminal")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Theme.textTertiary)
+                            Text(entry.title)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(Theme.text)
+                                .lineLimit(1)
+                                .layoutPriority(1)
+                                .help((entry.pane.cwd as NSString?)?.abbreviatingWithTildeInPath ?? "")
+                            Spacer(minLength: 12)
+                            Text(model.spaceName(deviceID: entry.device.id, workspaceID: entry.pane.workspaceID))
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Theme.textTertiary)
+                                .lineLimit(1)
+                            if model.showsRowDeviceBadges {
+                                DeviceChip(device: entry.device)
+                            }
                         }
+                    } else {
+                        Text("No terminal selected")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.textTertiary)
+                        Spacer()
                     }
-                } else {
-                    Text("No terminal selected")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.textTertiary)
-                    Spacer()
                 }
             }
             .allowsHitTesting(false)

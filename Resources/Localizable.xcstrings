@@ -7106,6 +7106,22 @@
           }
         }
       }
+    },
+    "Hidden (%lld)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hidden (%lld)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已隐藏 (%lld)"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

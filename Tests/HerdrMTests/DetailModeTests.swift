@@ -54,4 +54,16 @@ final class DetailModeTests: XCTestCase {
         model.openProject(nil)
         XCTAssertFalse(model.isClaudeHistorySelected)
     }
+
+    func testProjectSpaceFallsBackToTheSelectedPanesWorkspace() throws {
+        let model = try modelWithSelectedClaudeAgent()
+        XCTAssertNil(model.selectedSpace)
+        XCTAssertEqual(model.projectSpace, SpaceRef(deviceID: Device.local.id, workspaceID: "ws-0"))
+        let filter = SpaceRef(deviceID: Device.local.id, workspaceID: "ws-9")
+        model.selectedSpace = filter
+        XCTAssertEqual(model.projectSpace, filter)
+        model.selectedSpace = nil
+        model.selectedPane = nil
+        XCTAssertNil(model.projectSpace)
+    }
 }

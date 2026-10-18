@@ -395,6 +395,17 @@ final class AppModel: ObservableObject {
     }
 
     /// What the Project view probes for a Space: every pane directory in it, the focused one first.
+    /// The Space the Project pane shows: the sidebar's Space filter, else the Space of the
+    /// selected pane, so Project works with no filter set.
+    var projectSpace: SpaceRef? {
+        if let selectedSpace { return selectedSpace }
+        guard let selected = selectedPane else { return nil }
+        let state = session(selected.deviceID)
+        let workspace = state.agents.first { $0.paneID == selected.paneID }?.workspaceID
+            ?? state.panes.first { $0.paneID == selected.paneID }?.workspaceID
+        return workspace.map { SpaceRef(deviceID: selected.deviceID, workspaceID: $0) }
+    }
+
     func projectContext(for space: SpaceRef) -> ProjectContext? {
         guard let device = device(space.deviceID) else { return nil }
         let state = session(space.deviceID)

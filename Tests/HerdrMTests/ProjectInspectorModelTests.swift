@@ -297,4 +297,69 @@ final class ProjectInspectorModelTests: XCTestCase {
         await reprobe?.value
         XCTAssertEqual(outcome, .dropped)
     }
+
+    func testFrameCutBeforeEndIsLiveAndPartial() async {
+        let runner = FakeRunner()
+        // The ssh run died before `@@pp-end`; the runner still hands over what arrived.
+        runner.setFrame(String(Self.devboxFrame.dropLast("@@pp-end".count)), for: devbox.id)
+        let model = makeModel(runner)
+        let outcome = await model.probe(space: space(), context: context())
+
+        XCTAssertEqual(outcome, .applied)
+        let entry = model.entry(for: space())
+        XCTAssertEqual(entry?.state, .live)
+        XCTAssertEqual(entry?.snapshot?.partial, true)
+        XCTAssertEqual(entry?.snapshot?.devServers.count, 2)
+    }
+
+    func testRemoteCwdsThatAreAllUnsafeAreSkippedWithoutBackoff() async {
+        let runner = FakeRunner()
+        let model = makeModel(runner)
+        var unsafe = context()
+        unsafe.cwds = ["/home/dev/back\\slash"]
+        let outcome = await model.probe(space: space(), context: unsafe)
+
+        XCTAssertEqual(outcome, .skipped)
+        XCTAssertTrue(runner.calls.isEmpty)
+        guard case .failed(let message) = model.entry(for: space())?.state else { return XCTFail("expected failed") }
+        XCTAssertTrue(message.contains("No project directory"))
+
+        // An apostrophe is fine for a remote shell and is probed.
+        var quoted = context()
+        quoted.cwds = ["/home/dev/it's here"]
+        _ = await model.probe(space: space(), context: quoted)
+        XCTAssertEqual(runner.calls.first?.cwds, ["/home/dev/it's here"])
+    }
+
+    func testDetachingAnAttachedComposeGroupOnlyRemovesTheAttachment() async throws {
+        let runner = FakeRunner()
+        let frame = Self.devboxFrame.replacingOccurrences(
+            of: "@@pp-end",
+            with: "@@compose\n[{\"Name\":\"billing\",\"Status\":\"running(1)\",\"ConfigFiles\":\"/srv/billing/compose.yml\"}]\n@@pp-end")
+        runner.setFrame(frame, for: devbox.id)
+        let model = makeModel(runner)
+        await model.probe(space: space(), context: context())
+        let key = try XCTUnwrap(model.keyBySpace[space()])
+        let store = ProjectStore(directory: storeDirectory)
+
+        model.attachCompose(space: space(), name: "billing")
+        await model.settleMutations()
+        XCTAssertEqual(model.entry(for: space())?.snapshot?.compose.map(\.match), [.attached])
+
+        model.detachCompose(space: space(), name: "billing")
+        await model.settleMutations()
+        XCTAssertEqual(store.overrides(for: key).attachedCompose, [])
+        XCTAssertEqual(store.overrides(for: key).detachedCompose, [])
+        XCTAssertEqual(model.entry(for: space())?.snapshot?.otherCompose.map(\.name), ["billing"])
+    }
+
+    func testFinishedReclassifyTasksAreNotRetained() async {
+        let runner = FakeRunner()
+        runner.setFrame(Self.devboxFrame, for: devbox.id)
+        let model = makeModel(runner)
+        await model.probe(space: space(), context: context())
+        for index in 0..<20 { model.setHidden(space: space(), signature: "x@\(index)", hidden: true) }
+        await model.settleMutations()
+        XCTAssertEqual(model.pendingReclassifyCount, 0)
+    }
 }

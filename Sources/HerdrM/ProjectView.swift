@@ -15,12 +15,13 @@ struct ProjectView: View {
     /// Off in tests that inject a snapshot and must not probe.
     var polling = true
     @State private var windowVisible = false
+    @State private var appActive = NSApp?.isActive ?? true
 
     private var taskKey: ProjectTaskKey {
-        let space = model.selectedSpace
+        let space = model.projectSpace
         return ProjectTaskKey(
             space: space, context: space.flatMap { model.projectContext(for: $0) },
-            active: polling && model.detailMode == .project && windowVisible)
+            active: polling && model.detailMode == .project && windowVisible && appActive)
     }
 
     var body: some View {
@@ -28,6 +29,8 @@ struct ProjectView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.contentBackground)
             .background(WindowVisibilityReader(isVisible: $windowVisible))
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in appActive = true }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in appActive = false }
             .task(id: taskKey) {
                 let key = taskKey
                 guard key.active, let space = key.space, let context = key.context else { return }
@@ -37,7 +40,7 @@ struct ProjectView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let space = model.selectedSpace {
+        if let space = model.projectSpace {
             if let context = model.projectContext(for: space) {
                 ProjectPanel(model: model, projects: model.projects, space: space, context: context)
                     .id(space)
@@ -76,6 +79,7 @@ private struct ProjectPanel: View {
         VStack(spacing: 0) {
             header
             Rectangle().fill(Theme.hairline).frame(height: 1)
+            if let rootError { errorBanner(rootError, showsStale: false) }
             if !ProjectProbeScript.isSupported(context.device) {
                 ContentUnavailableView(
                     "Project details unavailable", systemImage: "shippingbox",
@@ -97,8 +101,11 @@ private struct ProjectPanel: View {
         .alert("Change project root", isPresented: $changingRoot) {
             TextField("Absolute path on \(context.device.name)", text: $rootText)
             Button("Change") { applyRoot(rootText) }
-            Button("Use Automatic Root") { projects.setRoot(space: space, context: context, root: nil) }
-            Button("Cancel", role: .cancel) {}
+            Button("Use Automatic Root") {
+                rootError = nil
+                projects.setRoot(space: space, context: context, root: nil)
+            }
+            Button("Cancel", role: .cancel) { rootError = nil }
         } message: {
             Text("Pin the folder this Space's project lives in.")
         }
@@ -132,7 +139,6 @@ private struct ProjectPanel: View {
 
     private func loaded(_ snapshot: ProjectSnapshot) -> some View {
         VStack(spacing: 0) {
-            if let rootError { errorBanner(rootError, showsStale: false) }
             if case .failed(let message) = entry?.state { errorBanner(message) }
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -142,6 +148,7 @@ private struct ProjectPanel: View {
                     linksSection(snapshot)
                     filesSection(snapshot)
                     otherListenersSection(snapshot)
+                    hiddenSection(snapshot)
                     warnings(snapshot)
                 }
                 .padding(.horizontal, 14)
@@ -353,9 +360,10 @@ private struct ProjectPanel: View {
     }
 
     private func hotReloadSection(_ snapshot: ProjectSnapshot) -> some View {
-        section("hot", "Hot reload", count: snapshot.devServers.count) {
-            if snapshot.devServers.isEmpty { note("No dev servers are running for this project.") }
-            ForEach(snapshot.devServers) { devServerRow($0, canSetURL: true) }
+        let visible = snapshot.devServers.filter { !$0.isHidden }
+        return section("hot", "Hot reload", count: visible.count) {
+            if visible.isEmpty { note("No dev servers are running for this project.") }
+            ForEach(visible) { devServerRow($0, canSetURL: true) }
             if !snapshot.staleOverrides.isEmpty {
                 note("URL overrides without a running server: \(snapshot.staleOverrides.joined(separator: ", "))")
             }
@@ -491,10 +499,32 @@ private struct ProjectPanel: View {
     }
 
     private func otherListenersSection(_ snapshot: ProjectSnapshot) -> some View {
-        Group {
-            if !snapshot.otherListeners.isEmpty {
-                section("other", "Other listeners", count: snapshot.otherListeners.count) {
-                    ForEach(snapshot.otherListeners) { devServerRow($0, canSetURL: false) }
+        let visible = snapshot.otherListeners.filter { !$0.isHidden }
+        return Group {
+            if !visible.isEmpty {
+                section("other", "Other listeners", count: visible.count) {
+                    ForEach(visible) { devServerRow($0, canSetURL: false) }
+                }
+            }
+        }
+    }
+
+    /// Hidden servers and listeners, collapsed; each row keeps its Unhide button.
+    private func hiddenSection(_ snapshot: ProjectSnapshot) -> some View {
+        let devHidden = snapshot.devServers.filter(\.isHidden)
+        let otherHidden = snapshot.otherListeners.filter(\.isHidden)
+        let count = devHidden.count + otherHidden.count
+        return Group {
+            if count > 0 {
+                DisclosureGroup(isExpanded: binding("hidden")) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(devHidden) { devServerRow($0, canSetURL: true) }
+                        ForEach(otherHidden) { devServerRow($0, canSetURL: false) }
+                    }
+                    .padding(.top, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } label: {
+                    SheetSectionLabel("Hidden (\(count))")
                 }
             }
         }

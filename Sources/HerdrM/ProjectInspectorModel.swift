@@ -34,7 +34,8 @@ final class ProjectInspectorModel: ObservableObject {
     private var contexts: [SpaceRef: ProjectContext] = [:]
     private var generation: [SpaceRef: Int] = [:]
     private var reclassifySeq: [String: Int] = [:]
-    private var reclassifyTasks: [Task<Void, Never>] = []
+    private var reclassifyTasks: [Int: Task<Void, Never>] = [:]
+    private var reclassifyCounter = 0
 
     init(
         runner: ProjectProbeRunning = DeviceProjectProbeRunner(), store: ProjectStore = ProjectStore(),
@@ -58,6 +59,8 @@ final class ProjectInspectorModel: ObservableObject {
 
     /// Test seam: shows `entry` for `space` without probing.
     #if DEBUG
+    var pendingReclassifyCount: Int { reclassifyTasks.count }
+
     func _setEntryForTesting(space: SpaceRef, key: String, entry: Entry) {
         entries[key] = entry
         keyBySpace[space] = key
@@ -113,7 +116,10 @@ final class ProjectInspectorModel: ObservableObject {
                 message: String(localized: "Project details need a shell (tailcat and Windows devices are not supported)"))
             return .skipped
         }
-        let cwds = Self.unique(context.cwds + (overrideRoot.map { [$0] } ?? []))
+        // Paths a remote login shell could misread are not probed; nothing left is "no directory",
+        // not a failure, so it does not grow the backoff.
+        let cwds = DeviceProjectProbeRunner.safeCwds(
+            Self.unique(context.cwds + (overrideRoot.map { [$0] } ?? [])), for: device)
         guard !cwds.isEmpty else {
             fail(space: space, key: failKey, message: String(localized: "No project directory found for this Space"))
             return .skipped
@@ -137,13 +143,13 @@ final class ProjectInspectorModel: ObservableObject {
         let runner = self.runner
         let localDevice = self.localDevice
 
-        let main: ProjectProbe
-        var localVMs: ProjectProbe?
+        let mainText: String
+        let vmText: String?
         do {
-            async let mainText = runner.run(device: device, sections: sections, cwds: cwds)
-            async let vmText: String? = local ? nil : (try? await runner.run(device: localDevice, sections: ["host", "vms"], cwds: []))
-            main = ProjectProbeParser.parse(try await mainText)
-            localVMs = await vmText.map(ProjectProbeParser.parse)
+            async let mainRun = runner.run(device: device, sections: sections, cwds: cwds)
+            async let vmRun: String? = local ? nil : (try? await runner.run(device: localDevice, sections: ["host", "vms"], cwds: []))
+            mainText = try await mainRun
+            vmText = await vmRun
         } catch {
             // The view's task was cancelled mid-probe: not a failure of the device.
             if error is CancellationError || Task.isCancelled {
@@ -154,7 +160,12 @@ final class ProjectInspectorModel: ObservableObject {
             fail(space: space, key: failKey, message: error.localizedDescription)
             return .failed
         }
-        if local { localVMs = main }
+        // A frame cut short (timeout, dropped ssh) parses as `partial` and is still shown.
+        let parsed = await Task.detached {
+            (ProjectProbeParser.parse(mainText), vmText.map(ProjectProbeParser.parse))
+        }.value
+        let main = parsed.0
+        let localVMs = local ? main : parsed.1
         guard current() else { return .dropped }
 
         let home = homeDirectory(for: device, probe: main)
@@ -197,10 +208,13 @@ final class ProjectInspectorModel: ObservableObject {
         }
     }
 
+    /// A group the user attached by hand just loses the attachment; a path- or name-matched one
+    /// is detached. Either way it moves to "Other Compose projects", where Attach undoes it.
     func detachCompose(space: SpaceRef, name: String) {
+        let wasAttached = entry(for: space)?.snapshot?.compose.first { $0.name == name }?.match == .attached
         mutate(space) {
             $0.attachedCompose.removeAll { $0 == name }
-            if !$0.detachedCompose.contains(name) { $0.detachedCompose.append(name) }
+            if !wasAttached, !$0.detachedCompose.contains(name) { $0.detachedCompose.append(name) }
         }
     }
 
@@ -279,7 +293,11 @@ final class ProjectInspectorModel: ObservableObject {
         let localVMs = entry.localVMs
         let overrides = store.overrides(for: key)
         let stamp = entry.lastProbe ?? now()
-        reclassifyTasks.append(Task { [weak self] in
+        reclassifyCounter += 1
+        let taskID = reclassifyCounter
+        // A finished task removes itself, so the table never outgrows the edits in flight.
+        reclassifyTasks[taskID] = Task { [weak self] in
+            defer { self?.reclassifyTasks[taskID] = nil }
             let snapshot = await Task.detached {
                 ProjectClassifier.classify(
                     probe: probe, localVMs: localVMs, identity: identity, device: device, overrides: overrides, now: stamp)
@@ -288,14 +306,13 @@ final class ProjectInspectorModel: ObservableObject {
             else { return }
             current.snapshot = snapshot
             self.entries[key] = current
-        })
+        }
     }
 
     /// Waits until every mutator's re-classification has been applied.
     func settleMutations() async {
-        while let task = reclassifyTasks.first {
+        while let task = reclassifyTasks.values.first {
             await task.value
-            reclassifyTasks.removeFirst()
         }
     }
 
