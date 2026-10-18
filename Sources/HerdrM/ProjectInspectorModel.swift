@@ -56,6 +56,12 @@ final class ProjectInspectorModel: ObservableObject {
         entry(for: space)?.snapshot?.identity
     }
 
+    /// Test seam: shows `entry` for `space` without probing.
+    func _setEntryForTesting(space: SpaceRef, key: String, entry: Entry) {
+        entries[key] = entry
+        keyBySpace[space] = key
+    }
+
     // MARK: - Probing
 
     enum ProbeOutcome: Equatable {
@@ -235,6 +241,11 @@ final class ProjectInspectorModel: ObservableObject {
         if let old = keyBySpace[space], Self.isPending(old) { entries[old] = nil }
         keyBySpace[space] = root.map { Self.key(device: context.device, root: $0) }
         return Task { [weak self] in await self?.probe(space: space, context: context) }
+    }
+
+    /// Forgets every override of the Space's project (URLs, hidden listeners, attachments, links).
+    func resetOverrides(space: SpaceRef) {
+        mutate(space) { $0 = ProjectOverrides() }
     }
 
     // MARK: - Internals
