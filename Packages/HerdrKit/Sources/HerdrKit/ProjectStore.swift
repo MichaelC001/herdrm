@@ -52,8 +52,12 @@ public final class ProjectStore: @unchecked Sendable {
         queue.sync { loadUnlocked().file }
     }
 
+    /// Skips the write when the existing file exists but cannot be read.
     public func save(_ file: ProjectStoreFile) {
-        queue.sync { saveUnlocked(file) }
+        queue.sync {
+            guard loadUnlocked().readable else { return }
+            saveUnlocked(file)
+        }
     }
 
     public func overrides(for key: String) -> ProjectOverrides {

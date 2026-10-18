@@ -51,6 +51,7 @@ final class ProjectStoreTests: XCTestCase {
     }
 
     func testUnreadableFileIsNotRenamedOrOverwritten() throws {
+        guard getuid() != 0 else { throw XCTSkip("root reads mode-000 files") }
         let store = ProjectStore(directory: dir)
         store.update(key: "keep") { $0.envFile = ".env" }
         let original = try Data(contentsOf: file)
@@ -61,6 +62,7 @@ final class ProjectStoreTests: XCTestCase {
             atPath: dir.appendingPathComponent("projects.json.corrupt").path))
 
         store.update(key: "other") { $0.envFile = ".env.local" }
+        store.save(ProjectStoreFile(projects: ["other": ProjectOverrides(envFile: ".env.local")]))
 
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path)
         XCTAssertEqual(try Data(contentsOf: file), original)
