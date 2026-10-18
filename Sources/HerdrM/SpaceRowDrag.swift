@@ -107,6 +107,7 @@ struct AgentRowDragHost: View {
     var allowsDrag = true
     let onClick: () -> Void
     let onRename: () -> Void
+    let onOpenProject: () -> Void
     let onPluginAction: (PluginAction) -> Void
     let onGrazrAccounts: () -> Void
     let onSwitchGrazrAccount: (GrazrAccount) -> Void
@@ -144,6 +145,7 @@ struct AgentRowDragHost: View {
     private var menuItems: [SidebarContextMenuItem] {
         var items: [SidebarContextMenuItem] = [
             .item(title: String(localized: "Rename Agent…"), action: onRename),
+            .item(title: String(localized: "Project…"), action: onOpenProject),
         ]
         if !pluginActions.isEmpty {
             items.append(.separator)
@@ -241,6 +243,7 @@ struct TerminalRowDragHost: View {
     var allowsDrag = true
     let onClick: () -> Void
     let onRename: () -> Void
+    let onOpenProject: () -> Void
     let onClose: () -> Void
     let onDragStart: (String) -> Void
     let onDragEnd: () -> Void
@@ -254,6 +257,7 @@ struct TerminalRowDragHost: View {
             pasteboardType: SidebarRowDragNSView.terminalPasteboardType,
             menuItems: [
                 .item(title: String(localized: "Rename Terminal…"), action: onRename),
+                .item(title: String(localized: "Project…"), action: onOpenProject),
                 .separator,
                 .destructive(title: String(localized: "Close Terminal…"), action: onClose),
             ],

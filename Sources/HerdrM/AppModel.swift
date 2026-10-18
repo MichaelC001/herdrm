@@ -1325,6 +1325,19 @@ final class AppModel: ObservableObject {
         selectedShellID = nil
     }
 
+    /// The Project panel for the Space a pane lives in: the titlebar button
+    /// and the agent/terminal row menus open it from the pane, not from a
+    /// Space row.
+    func openProject(for entry: AttachedEntry) {
+        openProject(SpaceRef(deviceID: entry.device.id, workspaceID: entry.workspaceID))
+    }
+
+    /// Back to the terminal that was selected before the panel covered it.
+    func closeProject() {
+        guard detailMode == .project else { return }
+        detailMode = .terminal
+    }
+
     func selectAgent(_ ref: PaneRef) {
         isFileManagerActive = false
         selectedPane = ref

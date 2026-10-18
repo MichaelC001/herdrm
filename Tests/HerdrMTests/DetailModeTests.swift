@@ -48,6 +48,20 @@ final class DetailModeTests: XCTestCase {
         XCTAssertEqual(model.detailMode, .project)
     }
 
+    func testOpenProjectForAPaneUsesItsSpaceAndCloseProjectReturnsToIt() throws {
+        let model = try modelWithSelectedClaudeAgent()
+        let entry = try XCTUnwrap(model.selectedAttachedEntry)
+        model.openProject(for: entry)
+        XCTAssertEqual(model.detailMode, .project)
+        XCTAssertEqual(model.selectedSpace, SpaceRef(deviceID: Device.local.id, workspaceID: "ws-0"))
+        model.closeProject()
+        XCTAssertEqual(model.detailMode, .terminal)
+        XCTAssertEqual(model.selectedPane, PaneRef(deviceID: Device.local.id, paneID: "pane-0"))
+        XCTAssertNotNil(model.selectedAttachedEntry)
+        model.closeProject()
+        XCTAssertEqual(model.detailMode, .terminal, "a no-op outside project mode")
+    }
+
     func testProjectModeHidesTheClaudeHistory() throws {
         let model = try modelWithSelectedClaudeAgent()
         XCTAssertTrue(model.isClaudeHistorySelected, "precondition: a Claude agent is selected")

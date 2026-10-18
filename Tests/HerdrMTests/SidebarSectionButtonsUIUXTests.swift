@@ -70,11 +70,12 @@ final class SidebarSectionButtonsUIUXTests: XCTestCase {
         XCTAssertFalse(sidebar.model.showNewSpace)
     }
 
-    func testProjectActionRowFollowsFiles() throws {
+    /// The panel belongs to a pane's Space, so it opens from the pane's titlebar
+    /// and row menu, not from a sidebar action row.
+    func testProjectIsNotASidebarActionRow() throws {
         let sidebar = try SidebarHarness(spaces: 3, agents: 4, pinnedHeaders: false)
         let names = sidebar.actionRowNames()
-        let files = try XCTUnwrap(names.firstIndex(of: String(localized: "Files")), "\(names)")
-        let project = try XCTUnwrap(names.firstIndex(of: String(localized: "Project")), "\(names)")
-        XCTAssertEqual(project, files + 1, "\(names)")
+        XCTAssertTrue(names.contains(String(localized: "Files")), "\(names)")
+        XCTAssertFalse(names.contains(String(localized: "Project")), "\(names)")
     }
 }

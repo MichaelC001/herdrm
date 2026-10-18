@@ -85,9 +85,6 @@ struct SidebarView: View {
                 actionRow(icon: "folder", label: "Files") {
                     model.openFileManager()
                 }
-                actionRow(icon: "shippingbox", label: "Project") {
-                    model.openProject(model.selectedSpace)
-                }
                 actionRow(icon: "magnifyingglass", label: "Search") {
                     model.showSearch = true
                 }
@@ -434,6 +431,7 @@ struct SidebarView: View {
                     allowsDrag: draggable,
                     onClick: { model.selectAgent(entry.ref) },
                     onRename: { model.terminalToRename = entry },
+                    onOpenProject: { model.openProject(for: .terminal(entry)) },
                     onClose: { model.requestClosePane(entry.ref, name: entry.title) },
                     onDragStart: { draggingTerminalID = $0 },
                     onDragEnd: {
@@ -605,6 +603,7 @@ struct SidebarView: View {
                 allowsDrag: draggable,
                 onClick: { model.selectAgent(entry.ref) },
                 onRename: { model.agentToRename = entry },
+                onOpenProject: { model.openProject(for: .agent(entry)) },
                 onPluginAction: { model.runPluginAction($0, for: entry) },
                 onGrazrAccounts: { model.grazrAccountsDevice = entry.device },
                 onSwitchGrazrAccount: { model.switchGrazrAccount($0, on: entry.device) },

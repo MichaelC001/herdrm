@@ -389,6 +389,29 @@ struct DetailView: View {
         }
     }
 
+    /// Opens the Project panel for the selected pane's Space, and closes it
+    /// again while the panel is up. Standalone shells have no Space, so no
+    /// button.
+    @ViewBuilder
+    private var projectToggle: some View {
+        switch model.detailMode {
+        case .project:
+            TitlebarIconButton(systemName: "shippingbox", help: "Project", active: true) {
+                model.closeProject()
+            }
+            .accessibilityIdentifier("titlebar.project")
+        case .terminal:
+            if model.selectedShell == nil, let entry = model.selectedAttachedEntry {
+                TitlebarIconButton(systemName: "shippingbox", help: "Project") {
+                    model.openProject(for: entry)
+                }
+                .accessibilityIdentifier("titlebar.project")
+            }
+        case .files:
+            EmptyView()
+        }
+    }
+
     // MARK: - Titlebar strip (28pt, traditional)
 
     private var titlebar: some View {
@@ -481,6 +504,7 @@ struct DetailView: View {
                 }
             }
             .allowsHitTesting(false)
+            projectToggle
         }
         .padding(.leading, sidebarCollapsed ? 10 : 14)
         .padding(.trailing, 12)
