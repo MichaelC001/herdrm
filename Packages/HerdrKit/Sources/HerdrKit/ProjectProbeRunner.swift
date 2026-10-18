@@ -15,13 +15,15 @@ public struct DeviceProjectProbeRunner: ProjectProbeRunning {
         self.timeout = timeout
     }
 
-    /// Drops directories a remote login shell could misread: a fish shell treats a backslash as
-    /// an escape even inside single quotes, and control characters never belong in a path.
-    /// Local runs go through `sh -c` directly, so nothing is dropped there.
+    /// Drops directories the probe cannot print safely. Control characters go everywhere: the script
+    /// echoes each cwd into its frame, so a newline could forge a frame line. A backslash only
+    /// matters to a remote login shell (fish treats it as an escape even inside single quotes).
     public static func safeCwds(_ cwds: [String], for device: Device) -> [String] {
-        guard !device.isLocal else { return cwds }
+        let remote = !device.isLocal
         return cwds.filter { cwd in
-            !cwd.unicodeScalars.contains { $0 == "\\" || $0.value < 0x20 || $0.value == 0x7f }
+            !cwd.unicodeScalars.contains {
+                $0.value < 0x20 || $0.value == 0x7f || (remote && $0 == "\\")
+            }
         }
     }
 

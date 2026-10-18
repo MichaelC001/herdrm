@@ -12,9 +12,9 @@ final class ProjectProbeRunnerTests: XCTestCase {
             ["/home/dev/app", "/home/dev/it's", "/home/dev/ok dir"])
     }
 
-    func testSafeCwdsKeepsEverythingForLocalRuns() {
-        let input = ["/Users/dev/it's", "/Users/dev/a\\b"]
-        XCTAssertEqual(DeviceProjectProbeRunner.safeCwds(input, for: .local), input)
+    func testSafeCwdsOnLocalDropsControlCharactersButKeepsBackslashes() {
+        let input = ["/Users/dev/it's", "/Users/dev/a\\b", "/Users/dev/a\nb", "/Users/dev/a\u{7f}b"]
+        XCTAssertEqual(DeviceProjectProbeRunner.safeCwds(input, for: .local), ["/Users/dev/it's", "/Users/dev/a\\b"])
     }
 
     func testRunCollectingReturnsStdoutSoFarOnTimeout() async throws {
