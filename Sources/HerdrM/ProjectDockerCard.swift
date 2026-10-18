@@ -23,6 +23,21 @@ enum ContainerPorts {
             .joined(separator: ", ")
     }
 
+    static let displayLimit = 12
+
+    /// Docker reports a dual-stack mapping twice (`0.0.0.0` and `::`); show it once, order preserved.
+    static func displayPorts(_ ports: [PublishedPort]) -> [PublishedPort] {
+        var seen = Set<String>()
+        var out: [PublishedPort] = []
+        for port in ports {
+            var port = port
+            if port.hostIP == "0.0.0.0" || port.hostIP == "::" { port.hostIP = "0.0.0.0" }
+            guard seen.insert("\(port.hostIP)|\(port.hostPort)|\(port.containerPort)|\(port.proto)").inserted else { continue }
+            out.append(port)
+        }
+        return out
+    }
+
     static func detail(_ port: PublishedPort) -> String {
         "\(port.hostIP):\(port.hostPort) → \(port.containerPort)/\(port.proto)"
     }
@@ -85,7 +100,7 @@ struct ContainerTile: View {
                 }
                 Text(verbatim: secondLine)
                     .font(.system(size: 10.5))
-                    .foregroundStyle(isRunning ? Theme.textTertiary : Theme.textGhost)
+                    .foregroundStyle(Theme.textTertiary)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -188,12 +203,19 @@ struct ContainerDetailStrip: View {
                 ProjectIconButton(systemImage: "doc.on.doc", label: "Copy image name", action: copyImage)
             }
             if !container.ports.isEmpty {
+                let ports = ContainerPorts.displayPorts(container.ports)
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("Ports").foregroundStyle(Theme.textTertiary)
-                    ForEach(Array(container.ports.enumerated()), id: \.offset) { _, port in
-                        Text(verbatim: ContainerPorts.detail(port))
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(Theme.textSecondary)
+                    FlowLayout(spacing: 8) {
+                        ForEach(Array(ports.prefix(ContainerPorts.displayLimit).enumerated()), id: \.offset) { _, port in
+                            Text(verbatim: ContainerPorts.detail(port))
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(Theme.textSecondary)
+                                .lineLimit(1)
+                        }
+                        if ports.count > ContainerPorts.displayLimit {
+                            ProjectTag("+\(ports.count - ContainerPorts.displayLimit) more")
+                        }
                     }
                 }
             }

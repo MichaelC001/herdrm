@@ -283,6 +283,7 @@ final class ProjectViewUIUXTests: XCTestCase {
         let chips = all.filter { $0.role == "AXButton" && $0.name == "http://localhost:3200" }
         XCTAssertFalse(chips.isEmpty, "public URL must be a clickable chip")
         XCTAssertTrue(all.filter { $0.role == "AXButton" && $0.name == "http://localhost:3100" }.isEmpty, "remote loopback URL must not be a button anywhere")
+        XCTAssertTrue(texts(all).contains("http://localhost:3100"), "remote loopback URL stays visible as plain text")
     }
 
     func testEnvKeysAreUniquePerFileInFirstSeenOrder() {
@@ -333,7 +334,10 @@ final class ProjectViewUIUXTests: XCTestCase {
 
     func testNarrowPaneKeepsEveryCardInsideTheWindow() throws {
         let long = container("c2", name: "acme-very-long-container-name-for-truncation-1", service: nil)
-        let groups = [ComposeGroup(name: "acme", workingDir: root, configFiles: [], match: .name, running: 2, total: 2, containers: [container("c1", name: "acme-web-1", service: "web"), long])]
+        let twins = [9092, 9093, 9094].flatMap { p in
+            ["0.0.0.0", "::"].map { PublishedPort(hostIP: $0, hostPort: p, containerPort: p, proto: "tcp") }
+        }
+        let groups = [ComposeGroup(name: "acme", workingDir: root, configFiles: [], match: .name, running: 2, total: 2, containers: [container("c1", name: "acme-web-1", service: "web", ports: twins), long])]
         let entry = ProjectInspectorModel.Entry(snapshot: snapshot(compose: groups), state: .live, lastProbe: Date(), rawProbe: nil, localVMs: nil)
         let (model, _) = try model(entry: entry)
         let (window, _) = host(model, width: 500)
@@ -351,5 +355,28 @@ final class ProjectViewUIUXTests: XCTestCase {
         }
         XCTAssertGreaterThan(checked, 5, "the clipping check must actually see framed project elements")
         XCTAssertNotNil(element(all, id: "project.overview.lane.docker"))
+
+        AccessibilityProbe.press(try XCTUnwrap(element(all, id: "project.container.c1")))
+        settle()
+        let strip = elements(in: window)
+        XCTAssertNotNil(element(strip, id: "project.containerDetail"), "pressing the tile opens the detail strip")
+        let stripBounds = try XCTUnwrap(strip.first { $0.role == "AXWindow" }?.frame)
+        for element in strip where element.identifier?.hasPrefix("project.") == true {
+            guard let frame = element.frame else { continue }
+            XCTAssertGreaterThanOrEqual(frame.minX, stripBounds.minX - 0.5, "\(element.identifier!) clips left with the strip open")
+            XCTAssertLessThanOrEqual(frame.maxX, stripBounds.maxX + 0.5, "\(element.identifier!) clips right with the strip open")
+        }
+    }
+
+    func testDisplayPortsCollapsesDualStackTwins() {
+        func p(_ ip: String, _ h: Int, _ c: Int, _ proto: String = "tcp") -> PublishedPort {
+            PublishedPort(hostIP: ip, hostPort: h, containerPort: c, proto: proto)
+        }
+        let out = ContainerPorts.displayPorts([
+            p("0.0.0.0", 9092, 9092), p("::", 9092, 9092), p("127.0.0.1", 5432, 5432),
+            p("0.0.0.0", 53, 53, "udp"), p("::", 53, 53, "udp"), p("0.0.0.0", 53, 53, "tcp"),
+        ])
+        XCTAssertEqual(out, [p("0.0.0.0", 9092, 9092), p("127.0.0.1", 5432, 5432), p("0.0.0.0", 53, 53, "udp"), p("0.0.0.0", 53, 53, "tcp")])
+        XCTAssertEqual(ContainerPorts.displayPorts([p("::", 80, 80)]), [p("0.0.0.0", 80, 80)])
     }
 }

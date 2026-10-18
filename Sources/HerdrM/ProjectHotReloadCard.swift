@@ -125,17 +125,21 @@ struct DevServerMenu: View {
 
     @ViewBuilder
     private var urlItems: some View {
+        // Opening a remote loopback URL would hit the Mac's own localhost; copying it is harmless.
         if openable.count == 1, let url = openable.first {
             Button("Open URL") { ProjectURLActions.open(url) }
-            Button("Copy URL") { ProjectURLActions.copy(url) }
         } else if openable.count > 1 {
             Menu("Open") {
                 ForEach(Array(openable.enumerated()), id: \.offset) { _, url in
                     Button(url.label) { ProjectURLActions.open(url) }
                 }
             }
+        }
+        if server.urls.count == 1, let url = server.urls.first {
+            Button("Copy URL") { ProjectURLActions.copy(url) }
+        } else if server.urls.count > 1 {
             Menu("Copy URL") {
-                ForEach(Array(openable.enumerated()), id: \.offset) { _, url in
+                ForEach(Array(server.urls.enumerated()), id: \.offset) { _, url in
                     Button(url.label) { ProjectURLActions.copy(url) }
                 }
             }

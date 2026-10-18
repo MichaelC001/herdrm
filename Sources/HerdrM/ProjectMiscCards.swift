@@ -60,6 +60,7 @@ struct ProjectLinkChip: View {
     var body: some View {
         if isRemote && url.loopbackOnHost {
             label.foregroundStyle(Theme.textGhost).help("Only reachable from the host itself")
+                .contextMenu { Button("Copy URL") { ProjectURLActions.copy(url) } }
         } else {
             Button { ProjectURLActions.open(url) } label: { label.foregroundStyle(Theme.text) }
                 .buttonStyle(.plain)
