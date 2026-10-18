@@ -3057,6 +3057,38 @@
         }
       }
     },
+    "Project details need a shell (tailcat and Windows devices are not supported)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Project details need a shell (tailcat and Windows devices are not supported)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "项目详情需要 shell（不支持 tailcat 和 Windows 设备）"
+          }
+        }
+      }
+    },
+    "No project directory found for this Space": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No project directory found for this Space"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未找到此空间的项目目录"
+          }
+        }
+      }
+    },
     "Project": {
       "localizations": {
         "en": {

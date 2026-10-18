@@ -336,6 +336,8 @@ final class AppModel: ObservableObject {
     /// Machine stats under the terminal: the sampler state lives in its own object so its
     /// two-second ticks don't republish the whole app model.
     let machineStats = MachineStatsModel()
+    /// Per-Space project probes behind the Project detail view.
+    let projects = ProjectInspectorModel()
     @Published var showMachineStats = false
     @Published var deviceToEdit: Device?
     @Published var sshAuthenticationRequest: SSHAuthenticationRequest?
@@ -390,6 +392,26 @@ final class AppModel: ObservableObject {
 
     func device(_ id: UUID) -> Device? {
         devices.first { $0.id == id }
+    }
+
+    /// What the Project view probes for a Space: every pane directory in it, the focused one first.
+    func projectContext(for space: SpaceRef) -> ProjectContext? {
+        guard let device = device(space.deviceID) else { return nil }
+        let state = session(space.deviceID)
+        let agents = state.agents.filter { $0.workspaceID == space.workspaceID }
+        let panes = state.panes.filter { $0.workspaceID == space.workspaceID }
+        var focused: String?
+        if let selected = selectedPane, selected.deviceID == space.deviceID {
+            focused = agents.first { $0.paneID == selected.paneID }?.cwd ?? panes.first { $0.paneID == selected.paneID }?.cwd
+        }
+        if focused?.isEmpty != false { focused = agents.first { $0.focused == true }?.cwd }
+        if focused?.isEmpty == true { focused = nil }
+        var cwds: [String] = []
+        for cwd in [focused] + agents.map(\.cwd) + panes.map(\.cwd) {
+            if let cwd, !cwd.isEmpty, !cwds.contains(cwd) { cwds.append(cwd) }
+        }
+        let label = state.workspaces.first { $0.workspaceID == space.workspaceID }?.label ?? ""
+        return ProjectContext(device: device, workspaceLabel: label, cwds: cwds, focusedCwd: focused)
     }
 
     func session(_ id: UUID) -> DeviceSessionState {
