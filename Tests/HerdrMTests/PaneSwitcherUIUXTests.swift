@@ -64,6 +64,8 @@ final class PaneSwitcherUIUXTests: XCTestCase {
         h.holdControlTab()
         h.tab()
         let opened = h.rows
+        XCTAssertEqual(opened.count, 5, "the list is up with every pane")
+        guard opened.count == 5 else { return }
         h.tab()
         h.tab()
         XCTAssertEqual(h.rows, opened)
@@ -79,6 +81,7 @@ final class PaneSwitcherUIUXTests: XCTestCase {
         h.select("a2")
         h.holdControlTab()
         h.tab()
+        XCTAssertFalse(h.rows.isEmpty, "the list is up before Esc")
         h.press(keyCode: 53, characters: "\u{1B}", modifiers: .control)
         XCTAssertEqual(h.rows, [])
         h.releaseControl()
@@ -113,7 +116,7 @@ final class PaneSwitcherUIUXTests: XCTestCase {
         h.model.sessions[h.local.id]?.agents.removeAll { $0.paneID == "a2" }
         h.holdControlTab()
         h.tab()
-        XCTAssertFalse(h.rows.map(h.firstPart).contains("test2"))
+        XCTAssertEqual(h.rows.map(h.firstPart), ["test1", "test3", "test4", "test5"])
     }
 
     func testClickingARowWithControlHeldOpensIt() throws {
