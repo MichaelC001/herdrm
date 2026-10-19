@@ -73,6 +73,8 @@ struct RootView: View {
                 )
             }
         }
+        .overlay { PaneSwitcherLayer(model: model) }
+        .background(PaneSwitcherKeyCatcher(model: model))
         .animation(.spring(response: 0.25, dampingFraction: 0.85), value: model.showDevicePanel)
         .animation(.spring(response: 0.25, dampingFraction: 0.85), value: model.showMachineStats)
         .background(
