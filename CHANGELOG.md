@@ -5,6 +5,15 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
+## [Unreleased]
+
+### Added
+- **Sort files by name, size or modification time.** Click a column heading
+  in either Files pane to sort it; click again to reverse the direction.
+  Folders stay first, and each pane keeps its own order when refreshing or
+  changing folders. The active heading shows an arrow and announces its
+  direction to VoiceOver.
+
 ## [0.6.18] - 2026-10-17
 
 ### Added
