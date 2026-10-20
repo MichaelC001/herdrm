@@ -8,6 +8,11 @@ the Sparkle update description — a release without a section here fails CI.
 ## [Unreleased]
 
 ### Added
+- **Select and transfer several files at once.** Use Command-click, Shift-click
+  or Select All in either Files pane, then upload or download the selection
+  in order. Choose one policy for existing files, see queue progress and a
+  completion summary, or cancel the remaining transfers. A failed file is
+  reported without preventing later files from being copied.
 - **Sort files by name, size or modification time.** Click a column heading
   in either Files pane to sort it; click again to reverse the direction.
   Folders stay first, and each pane keeps its own order when refreshing or

@@ -33,7 +33,7 @@ final class DeviceFileSortUIUXTests: XCTestCase {
 
     func testPanesSortIndependentlyAndKeepTheirOrderAndSelectionOnRefresh() async throws {
         let files = try await DeviceFilesHarness()
-        files.left.selectedPath = try XCTUnwrap(files.left.entries.first { $0.name == "test1.txt" }).path
+        files.left.selectedPaths = [try XCTUnwrap(files.left.entries.first { $0.name == "test1.txt" }).path]
         try files.click("Modified")
         try files.click("Size", pane: 1)
         try files.click("Size", pane: 1)
@@ -45,7 +45,7 @@ final class DeviceFileSortUIUXTests: XCTestCase {
         await files.right.refresh()
         XCTAssertEqual(files.left.entries.map(\.name), ["test-folder", "test3.txt", "test10.txt", "test1.txt", "test2.txt"])
         XCTAssertEqual(files.right.entries.map(\.name), ["test-folder", "test10.txt", "test3.txt", "test1.txt", "test2.txt"])
-        XCTAssertEqual(files.left.selectedEntry?.name, "test1.txt")
+        XCTAssertEqual(files.left.selectedEntries.first?.name, "test1.txt")
 
         await files.left.navigate(to: files.directory.appendingPathComponent("test-folder").path)
         await files.left.navigate(to: files.directory.path)
@@ -57,7 +57,7 @@ final class DeviceFileSortUIUXTests: XCTestCase {
 /// Like SidebarHarness, hosts real views with fake files and routes mouse
 /// events through AppKit hit-testing. No server or SSH connection is needed.
 @MainActor
-private final class DeviceFilesHarness {
+final class DeviceFilesHarness {
     let left = DeviceFileBrowserModel()
     let right = DeviceFileBrowserModel()
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("herdrm-files-\(UUID().uuidString)")
@@ -108,24 +108,47 @@ private final class DeviceFilesHarness {
 
     func click(_ name: String.LocalizationValue, pane: Int = 0) throws {
         let rect = try XCTUnwrap(heading(name, pane: pane).frame)
+        try click(rect, modifiers: [])
+    }
+
+    var visibleText: [String] {
+        settle()
+        return AccessibilityProbe.elements(in: window).compactMap { $0.value ?? $0.name }
+    }
+
+    func clickFile(_ name: String, pane: Int = 0, modifiers: NSEvent.ModifierFlags = []) throws {
+        let matches = AccessibilityProbe.elements(in: window).filter {
+            ($0.role == "AXStaticText" && $0.value == name)
+                || ($0.role == "AXButton" && ($0.name == name || $0.name?.hasPrefix(name + ",") == true))
+        }.sorted { ($0.frame?.minX ?? 0) < ($1.frame?.minX ?? 0) }
+        let element = try XCTUnwrap(matches.indices.contains(pane) ? matches[pane] : nil)
+        try click(XCTUnwrap(element.frame), modifiers: modifiers)
+    }
+
+    func selectAll() throws {
+        XCTAssertTrue(try XCTUnwrap(window.firstResponder).tryToPerform(#selector(NSText.selectAll(_:)), with: nil))
+        settle()
+    }
+
+    private func click(_ rect: CGRect, modifiers: NSEvent.ModifierFlags) throws {
         let screenTop = try XCTUnwrap(NSScreen.screens.first).frame.maxY
         let point = window.convertPoint(fromScreen: NSPoint(x: rect.midX, y: screenTop - rect.midY))
         let content = try XCTUnwrap(window.contentView)
-        let target = try XCTUnwrap(content.hitTest(content.superview?.convert(point, from: nil) ?? point))
+        _ = try XCTUnwrap(content.hitTest(content.superview?.convert(point, from: nil) ?? point))
         let down = try XCTUnwrap(NSEvent.mouseEvent(
-            with: .leftMouseDown, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            with: .leftMouseDown, location: point, modifierFlags: modifiers, timestamp: ProcessInfo.processInfo.systemUptime,
             windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
         let up = try XCTUnwrap(NSEvent.mouseEvent(
-            with: .leftMouseUp, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime + 0.05,
+            with: .leftMouseUp, location: point, modifierFlags: modifiers, timestamp: ProcessInfo.processInfo.systemUptime + 0.05,
             windowNumber: window.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0))
-        if target.acceptsFirstMouse(for: down) {
-            window.sendEvent(down)
-            settle()
-            window.sendEvent(up)
-        } else {
-            target.mouseDown(with: down)
-            settle()
-            target.mouseUp(with: up)
+        // Native lists track mouse-up synchronously inside mouseDown.
+        // Queue it first so real hit-testing can run without hanging the test.
+        NSApp.postEvent(up, atStart: true)
+        // AppKit's list selection reads the current event's modifiers.
+        window.makeKey()
+        NSApp.sendEvent(down)
+        if let release = NSApp.nextEvent(matching: .leftMouseUp, until: Date(), inMode: .default, dequeue: true) {
+            window.sendEvent(release)
         }
         settle()
     }
