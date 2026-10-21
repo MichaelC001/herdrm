@@ -5,6 +5,13 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
+## [Unreleased]
+
+### Fixed
+- **SSH agent choices reflect installed CLIs.** New Agent checks the remote
+  login-shell PATH instead of listing every supported manifest. Failed checks
+  show the existing retry action; local binary overrides remain local.
+
 ## [0.6.20] - 2026-10-21
 
 ### Changed

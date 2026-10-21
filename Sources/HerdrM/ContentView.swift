@@ -1788,7 +1788,7 @@ struct NewAgentSheet: View {
                     case .loaded(let loadedKinds, _) where loadedKinds.isEmpty:
                         Text(chosenDevice.isLocal
                             ? String(localized: "No supported agent CLI was found on this Mac. Install one, or set a binary path in Settings → Agents.")
-                            : String(localized: "This server advertises no agent manifests."))
+                            : String(localized: "No supported agent CLI was found on this server."))
                             .foregroundStyle(Theme.textSecondary)
                             .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
                     case .loaded(let loadedKinds, let paths):
