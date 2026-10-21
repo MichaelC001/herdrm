@@ -66,7 +66,10 @@ public struct DeviceFileTransferBatch: Sendable {
             entries: entries, direction: direction, service: service,
             localDirectory: direction == .download ? listing.path : localDirectory,
             targetDirectory: direction == .upload ? listing.path : targetDirectory,
-            existingKinds: Dictionary(uniqueKeysWithValues: listing.entries.map { ($0.name, $0.kind) }))
+            // Swift String equality is canonical, so a remote directory holding both
+            // the precomposed and decomposed spelling of a name yields duplicate
+            // keys; keep the first instead of trapping.
+            existingKinds: Dictionary(listing.entries.map { ($0.name, $0.kind) }, uniquingKeysWith: { first, _ in first }))
     }
 
     public func run(

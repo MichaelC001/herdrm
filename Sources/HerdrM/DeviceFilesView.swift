@@ -127,6 +127,9 @@ struct DeviceFilesView: View {
         .task {
             targetDeviceID = preferredTargetDeviceID()
         }
+        // The running batch task retains the model, so its deinit can't cancel;
+        // stop here, as leaving Files did before multi-file transfers.
+        .onDisappear { transfer.cancel() }
         .onChange(of: model.deviceFilter) { _, deviceID in
             if let deviceID, transferDevices.contains(where: { $0.id == deviceID }) {
                 targetDeviceID = deviceID
@@ -141,13 +144,16 @@ struct DeviceFilesView: View {
             "Files Already Exist",
             isPresented: Binding(
                 get: { transfer.pendingBatch != nil },
-                set: { if !$0, transfer.pendingBatch != nil { transfer.cancel() } }
+                // SwiftUI may clear the binding before running the chosen button's
+                // action. Defer the dismiss-means-cancel check so a choice made in
+                // the dialog has already taken the pending batch by then.
+                set: { if !$0 { Task { @MainActor in if transfer.pendingBatch != nil { transfer.cancel() } } } }
             ),
             presenting: transfer.pendingBatch
-        ) { _ in
-            Button("Replace Existing", role: .destructive) { transfer.startPending(resolution: .replace) }
-            Button("Keep Both") { transfer.startPending(resolution: .keepBoth) }
-            Button("Skip Existing") { transfer.startPending(resolution: .skip) }
+        ) { batch in
+            Button("Replace Existing", role: .destructive) { transfer.startPending(batch, resolution: .replace) }
+            Button("Keep Both") { transfer.startPending(batch, resolution: .keepBoth) }
+            Button("Skip Existing") { transfer.startPending(batch, resolution: .skip) }
             Button("Cancel", role: .cancel) { transfer.cancel() }
         } message: { batch in
             Text("\(batch.conflictingNames.count) selected files already exist in the destination. Apply this choice to every conflicting file in this batch.")

@@ -33,6 +33,7 @@ final class DeviceFileTransferModel: ObservableObject {
                 let batch = try await DeviceFileTransferBatch.prepare(
                     direction: direction, entries: entries, device: targetDevice,
                     localDirectory: localDirectory, targetDirectory: targetDirectory)
+                try Task.checkCancellation()
                 if batch.conflictingNames.isEmpty {
                     start(batch, resolution: .skip)
                 } else {
@@ -56,6 +57,13 @@ final class DeviceFileTransferModel: ObservableObject {
 
     func startPending(resolution: DeviceFileTransferBatch.ConflictResolution) {
         guard let batch = pendingBatch else { return }
+        startPending(batch, resolution: resolution)
+    }
+
+    /// Starts the batch a conflict dialog presented. Takes it explicitly so the
+    /// choice still applies if the dialog's binding is cleared before its action runs.
+    func startPending(_ batch: DeviceFileTransferBatch, resolution: DeviceFileTransferBatch.ConflictResolution) {
+        guard isTransferring else { return }
         pendingBatch = nil
         start(batch, resolution: resolution)
     }
