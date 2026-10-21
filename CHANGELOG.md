@@ -5,7 +5,7 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
-## [Unreleased]
+## [0.6.20] - 2026-10-21
 
 ### Changed
 - **New app icon.** A sidebar and a terminal pane on a blue gradient, deep at
