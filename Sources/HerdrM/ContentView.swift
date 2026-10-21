@@ -786,6 +786,7 @@ struct DetailView: View {
                 workingDirectory: model.workingDirectory(for: session.ref),
                 serverVersion: model.serverVersion(deviceID: session.device.id),
                 attachmentCapabilities: attachmentCapabilities,
+                agentKind: { if case .agent(let agentEntry) = session { agentEntry.agent.agentKindRaw } else { nil } }(),
                 fontName: terminalFontName,
                 fontSize: terminalFontSize,
                 thinStrokes: terminalThinStrokes,
