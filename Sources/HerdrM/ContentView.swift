@@ -130,6 +130,21 @@ struct RootView: View {
             Text(model.actionError ?? "")
         }
         .alert(
+            model.capacityWarning?.title ?? "",
+            isPresented: Binding(
+                get: { model.capacityWarning != nil },
+                set: { if !$0 { model.capacityWarning = nil } }
+            )
+        ) {
+            Button("Start Anyway", role: .destructive) {
+                model.capacityWarning?.proceed()
+                model.capacityWarning = nil
+            }
+            Button("Cancel", role: .cancel) { model.capacityWarning = nil }
+        } message: {
+            Text(model.capacityWarning?.message ?? "")
+        }
+        .alert(
             model.closeRequest?.title ?? "",
             isPresented: Binding(
                 get: { model.closeRequest != nil },
