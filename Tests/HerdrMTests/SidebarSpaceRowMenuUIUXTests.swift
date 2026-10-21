@@ -21,7 +21,8 @@ final class SidebarSpaceRowMenuUIUXTests: XCTestCase {
 
         try sidebar.chooseFromSpaceMenu("Space 3", String(localized: "Project…"))
         XCTAssertEqual(sidebar.model.detailMode, .project)
-        XCTAssertEqual(sidebar.model.selectedSpace, spaces[2].ref)
+        XCTAssertEqual(sidebar.model.projectSpace, spaces[2].ref)
+        XCTAssertNil(sidebar.model.selectedSpace, "the sidebar's Space filter is left as it was")
     }
 
     func testNewAgentFromASpaceStartsInThatSpace() throws {
