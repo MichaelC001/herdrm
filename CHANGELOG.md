@@ -14,6 +14,12 @@ the Sparkle update description — a release without a section here fails CI.
   image it delivered, so the preview no longer depends on Claude detecting a
   picture-capable terminal. When HerdrM cannot tell which image a box belongs
   to, it draws nothing rather than guessing.
+- **Add a Claude account from the Claude Accounts window.** "Add Account…"
+  offers grazr's two ways to enrol without a terminal menu: save the login
+  this machine uses now, or log in to another account, which opens a terminal
+  on the device for Claude's sign-in and leaves the current login untouched.
+  The name can be listed in ACCOUNTS at the same time, so grazr rotates to it;
+  grazr's refusals, such as a name already in use, show in the form.
 
 ## [0.6.18] - 2026-10-17
 

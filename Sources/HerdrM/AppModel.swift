@@ -1567,13 +1567,71 @@ final class AppModel: ObservableObject {
     func reauthenticateGrazrAccount(_ account: GrazrAccount, on device: Device, workspaceID: String? = nil) {
         Task {
             await openGrazrTerminal(
-                install: Grazr.installReauthCommand,
+                install: Grazr.installEnrolCommand,
                 invocation: Grazr.reauthInvocation(accountID: account.id, name: account.name),
                 label: String(localized: "grazr sign-in"),
                 on: device,
                 workspaceID: workspaceID
             )
         }
+    }
+
+    /// Saves the login Claude is using on `device` as a grazr account named
+    /// `name`, listed in ACCOUNTS when `listInRotation`, with nothing to type:
+    /// grazr's enrol, pre-answered. Returns grazr's refusal, nil when saved.
+    func saveGrazrLogin(name: String, listInRotation: Bool, on device: Device) async -> String? {
+        do {
+            let output = try await DeviceFileService(device: device)
+                .run(Grazr.saveLoginCommand(name: name, listInRotation: listInRotation))
+            let result = try JSONDecoder().decode(GrazrSwitchResult.self, from: output)
+            await loadGrazrReport(deviceID: device.id)
+            if result.ok { return nil }
+            return result.summary ?? String(localized: "grazr could not save the login")
+        } catch {
+            return actionErrorMessage(error, device: device)
+        }
+    }
+
+    /// Adds another Claude account to grazr on `device`: a terminal there runs
+    /// grazr's enrol with `claude auth login` in an isolated config dir, so the
+    /// account Claude is on is left alone, and the new login is enrolled as
+    /// `name`. Once it appears in grazr's records, says so.
+    func addGrazrAccount(name: String, listInRotation: Bool, on device: Device, workspaceID: String? = nil) {
+        Task {
+            let known = Set((session(device.id).grazrReport?.accounts ?? []).map(\.id))
+            guard let paneID = await openGrazrTerminal(
+                install: Grazr.installEnrolCommand,
+                invocation: Grazr.enrolInvocation(name: name, listInRotation: listInRotation),
+                label: String(localized: "grazr sign-in"),
+                on: device,
+                workspaceID: workspaceID
+            ) else { return }
+            if await waitForGrazrAccount(named: name, besides: known, signInPane: paneID, on: device) {
+                NotificationManager.shared.postPluginResult(
+                    title: String(localized: "grazr: account added"),
+                    body: String(localized: "\(name) is enrolled on \(device.name)"),
+                    deviceName: device.name
+                )
+            }
+        }
+    }
+
+    /// Waits for an account named `name` that grazr did not know before to be
+    /// enrolled from the terminal in `signInPane`: true once it is there,
+    /// false when that terminal closes without one or after a quarter of an hour.
+    private func waitForGrazrAccount(
+        named name: String, besides known: Set<String>, signInPane: String, on device: Device
+    ) async -> Bool {
+        let service = service(for: device)
+        let deadline = Date().addingTimeInterval(15 * 60)
+        while Date() < deadline {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            await loadGrazrReport(deviceID: device.id)
+            let accounts = session(device.id).grazrReport?.accounts ?? []
+            if accounts.contains(where: { $0.name == name && !known.contains($0.id) }) { return true }
+            if (try? await service.readPane(paneID: signInPane)) == nil { return false }
+        }
+        return false
     }
 
     /// Signs `account` in for pinned agents, in a terminal on the device:
