@@ -37,6 +37,11 @@ the Sparkle update description — a release without a section here fails CI.
   detail strip when selected, and the layout holds up in narrow panes.
   Status refreshes every 15 seconds while the panel is visible. The panel is read-only
   in this release; start, stop and logs come next.
+- **Sort files by name, size or modification time.** Click a column heading
+  in either Files pane to sort it; click again to reverse the direction.
+  Folders stay first, and each pane keeps its own order when refreshing or
+  changing folders. The active heading shows an arrow and announces its
+  direction to VoiceOver.
 
 ## [0.6.18] - 2026-10-17
 

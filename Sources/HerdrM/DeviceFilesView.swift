@@ -3,11 +3,12 @@ import HerdrKit
 import SwiftUI
 
 @MainActor
-private final class DeviceFileBrowserModel: ObservableObject {
+final class DeviceFileBrowserModel: ObservableObject {
     @Published private(set) var device: Device = .local
     @Published private(set) var currentPath = "~"
     @Published var pathText = "~"
     @Published private(set) var entries: [DeviceFileEntry] = []
+    @Published private(set) var sort = DeviceFileSort()
     @Published var selectedPath: String?
     @Published var includesHidden = false
     @Published private(set) var isLoading = false
@@ -64,6 +65,11 @@ private final class DeviceFileBrowserModel: ObservableObject {
         await load(currentPath)
     }
 
+    func sortBy(_ column: DeviceFileSort.Column) {
+        sort.select(column)
+        entries = sort.sorted(entries)
+    }
+
     private func load(_ requestedPath: String) async {
         generation += 1
         let requestGeneration = generation
@@ -80,7 +86,7 @@ private final class DeviceFileBrowserModel: ObservableObject {
             guard requestGeneration == generation, !Task.isCancelled else { return }
             currentPath = listing.path
             pathText = (listing.path as NSString).abbreviatingWithTildeInPath
-            entries = listing.entries
+            entries = sort.sorted(listing.entries)
             if let selectedPath, !entries.contains(where: { $0.path == selectedPath }) {
                 self.selectedPath = nil
             }
@@ -397,7 +403,7 @@ private struct PendingFileTransfer: Identifiable {
     let entry: DeviceFileEntry
 }
 
-private struct DeviceFilePane: View {
+struct DeviceFilePane: View {
     let title: String
     let device: Device
     @ObservedObject var browser: DeviceFileBrowserModel
@@ -496,11 +502,11 @@ private struct DeviceFilePane: View {
 
     private var columnHeader: some View {
         HStack(spacing: 8) {
-            Text("Name")
+            sortButton("Name", column: .name, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text("Size")
+            sortButton("Size", column: .size, alignment: .trailing)
                 .frame(width: 72, alignment: .trailing)
-            Text("Modified")
+            sortButton("Modified", column: .modified, alignment: .leading)
                 .frame(width: 126, alignment: .leading)
         }
         .font(.system(size: 10.5, weight: .medium))
@@ -508,6 +514,34 @@ private struct DeviceFilePane: View {
         .padding(.horizontal, 12)
         .frame(height: 25)
         .background(Theme.statusBarBackground.opacity(0.7))
+    }
+
+    private func sortButton(
+        _ title: LocalizedStringKey,
+        column: DeviceFileSort.Column,
+        alignment: Alignment
+    ) -> some View {
+        let selected = browser.sort.column == column
+        let direction: LocalizedStringKey = browser.sort.ascending ? "Ascending" : "Descending"
+        return Button {
+            browser.sortBy(column)
+        } label: {
+            HStack(spacing: 4) {
+                Text(title)
+                if selected {
+                    Image(systemName: browser.sort.ascending ? "arrow.up" : "arrow.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .accessibilityHidden(true)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 25, alignment: alignment)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(selected ? Theme.text : Theme.textTertiary)
+        .accessibilityLabel(Text(title))
+        .accessibilityValue(Text(selected ? direction : "Not sorted"))
+        .help("Click to change sort order")
     }
 
     private var listing: some View {
