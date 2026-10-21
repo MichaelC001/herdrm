@@ -132,6 +132,21 @@ final class SidebarHarness {
         settle(seconds: 0.8) // the sheet slides out
     }
 
+    /// Choose a device using the native popup's selection action.
+    func selectSheetDevice(from current: String, to name: String) throws {
+        let sheet = try XCTUnwrap(window.sheets.first)
+        let popup = try XCTUnwrap(Self.popup(named: current, in: XCTUnwrap(sheet.contentView)))
+        XCTAssertTrue(popup.itemTitles.contains(name))
+        popup.selectItem(withTitle: name)
+        popup.sendAction(popup.action, to: popup.target)
+        settle()
+    }
+
+    private static func popup(named title: String, in view: NSView) -> NSPopUpButton? {
+        if let popup = view as? NSPopUpButton, popup.titleOfSelectedItem == title { return popup }
+        return view.subviews.lazy.compactMap { popup(named: title, in: $0) }.first
+    }
+
     /// The texts on the sheet attached to the sidebar's window; empty when there is none.
     var sheetTexts: [String] {
         let all = AccessibilityProbe.elements(in: window)

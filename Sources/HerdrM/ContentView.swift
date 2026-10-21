@@ -1522,6 +1522,16 @@ struct NewTerminalSheet: View {
     @State private var deviceID = Device.local.id
     @State private var workspaceID = ""
 
+    /// Only a choice in the picker resets the space. Setting the initial
+    /// device in onAppear must preserve the space that opened this sheet.
+    private var deviceSelection: Binding<UUID> {
+        Binding(get: { deviceID }, set: { id in
+            guard id != deviceID else { return }
+            deviceID = id
+            workspaceID = spaces.first?.workspaceID ?? ""
+        })
+    }
+
     private var chosenDevice: Device {
         model.device(deviceID) ?? .local
     }
@@ -1561,16 +1571,13 @@ struct NewTerminalSheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 if model.showsDeviceBadges {
                     SheetSectionLabel("DEVICE")
-                    Picker("", selection: $deviceID) {
+                    Picker("DEVICE", selection: deviceSelection) {
                         ForEach(model.devices) { device in
                             Text(device.name).tag(device.id)
                         }
                     }
                     .labelsHidden()
                     .fixedSize()
-                    .onChange(of: deviceID) { _, _ in
-                        workspaceID = spaces.first?.workspaceID ?? ""
-                    }
 
                     Spacer().frame(height: 8)
                 }
@@ -1585,7 +1592,7 @@ struct NewTerminalSheet: View {
                         .foregroundStyle(Theme.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    Picker("", selection: $workspaceID) {
+                    Picker("SPACE", selection: $workspaceID) {
                         ForEach(spaces) { workspace in
                             Text(workspace.label).tag(workspace.workspaceID)
                         }
@@ -1660,6 +1667,17 @@ struct NewAgentSheet: View {
     @State private var arguments = ""
     /// A grazr account for the agent alone; "" is the shared rotation.
     @State private var grazrAccountID = ""
+
+    /// Initializing a remote device is not a user request to change spaces.
+    private var deviceSelection: Binding<UUID> {
+        Binding(get: { deviceID }, set: { id in
+            guard id != deviceID else { return }
+            deviceID = id
+            workspaceID = ""
+            grazrAccountID = ""
+            if !kinds.contains(kind) { kind = kinds.first ?? "" }
+        })
+    }
 
     private var chosenDevice: Device {
         model.device(deviceID) ?? .local
@@ -1745,18 +1763,13 @@ struct NewAgentSheet: View {
 
                 if model.showsDeviceBadges {
                     SheetSectionLabel("DEVICE")
-                    Picker("", selection: $deviceID) {
+                    Picker("DEVICE", selection: deviceSelection) {
                         ForEach(model.devices) { device in
                             Text(device.name).tag(device.id)
                         }
                     }
                     .labelsHidden()
                     .fixedSize()
-                    .onChange(of: deviceID) { _, _ in
-                        workspaceID = ""
-                        grazrAccountID = ""
-                        if !kinds.contains(kind) { kind = kinds.first ?? "" }
-                    }
 
                     Spacer().frame(height: 8)
                 }
@@ -1810,7 +1823,7 @@ struct NewAgentSheet: View {
                 Spacer().frame(height: 8)
 
                 SheetSectionLabel("SPACE")
-                Picker("", selection: $workspaceID) {
+                Picker("SPACE", selection: $workspaceID) {
                     Text("Focused space").tag("")
                     ForEach(session.workspaces) { workspace in
                         Text(workspace.label).tag(workspace.workspaceID)

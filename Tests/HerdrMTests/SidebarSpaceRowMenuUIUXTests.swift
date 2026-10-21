@@ -43,6 +43,21 @@ final class SidebarSpaceRowMenuUIUXTests: XCTestCase {
         XCTAssertTrue(sidebar.sheetTexts.contains { $0.contains("Space 2") }, "\(sidebar.sheetTexts)")
     }
 
+    func testManuallyChangingDeviceStillResetsTheSpace() throws {
+        let sidebar = try SidebarHarness(spaces: 3, agents: 0, device: remote, sheets: true, pinnedHeaders: false)
+
+        try sidebar.chooseFromSpaceMenu("Space 3", String(localized: "New Terminal…"))
+        try sidebar.selectSheetDevice(from: remote.name, to: Device.local.name)
+        XCTAssertTrue(sidebar.sheetTexts.contains(String(localized: "Start a login shell on this Mac")), "\(sidebar.sheetTexts)")
+        sidebar.dismissSheet()
+
+        try sidebar.chooseFromSpaceMenu("Space 3", String(localized: "New Agent…"))
+        try sidebar.selectSheetDevice(from: remote.name, to: Device.local.name)
+        XCTAssertTrue(sidebar.sheetTexts.contains {
+            $0.contains(String(localized: "the focused space"))
+        }, "\(sidebar.sheetTexts)")
+    }
+
     func testSpaceMenuOffersNewAgentAndNewTerminal() throws {
         let sidebar = try SidebarHarness(spaces: 3, agents: 4, pinnedHeaders: false)
         let items = try sidebar.spaceMenu("Space 2")
