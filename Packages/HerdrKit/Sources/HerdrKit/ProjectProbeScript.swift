@@ -39,8 +39,13 @@ trap 'cleanup; exit 0' HUP INT TERM PIPE
 
 has() { case "$sections" in *",$1,"*) return 0;; esac; return 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
-# macOS has no timeout(1); without it a tool simply runs unbounded.
-if have timeout; then tm() { timeout 8 "$@"; }; else tm() { "$@"; }; fi
+# macOS has no timeout(1). perl's alarm survives exec, so the tool itself is
+# killed after 8 s; that also closes its end of our stdout. Without it a hung
+# tool (a wedged Docker daemon, a stale NFS cwd) would hold the probe forever:
+# the TERM trap only runs once the foreground command returns.
+if have timeout; then tm() { timeout 8 "$@"; }
+elif have perl; then tm() { perl -e 'alarm shift; exec @ARGV or exit 127' 8 "$@"; }
+else tm() { "$@"; }; fi
 # errdetail: the first stderr lines, with nothing that could pass for a frame header.
 errdetail() { head -3 "$errf" | cut -c1-300 | grep -v '^@@'; return 0; }
 # run <section> <cmd...>: a failure becomes `@@error <section>` plus the first stderr lines.

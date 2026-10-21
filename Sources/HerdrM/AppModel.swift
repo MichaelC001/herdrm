@@ -290,8 +290,15 @@ final class AppModel: ObservableObject {
     /// modes cover it with a view of their own.
     enum DetailMode: Equatable { case terminal, files, project }
     @Published var detailMode: DetailMode = .terminal {
-        didSet { synchronizeConversationHistory() }
+        didSet {
+            if detailMode != .project { projectSpaceOverride = nil }
+            synchronizeConversationHistory()
+        }
     }
+    /// The Space "Project…" was opened on. Kept apart from `selectedSpace`, the
+    /// sidebar's filter, so opening a Project never narrows the sidebar or
+    /// leaves it listing a different Space than the selected pane.
+    @Published private(set) var projectSpaceOverride: SpaceRef?
     /// True while the file manager specifically is showing. Setting it is the
     /// shorthand the many "go back to the terminal" sites use.
     var isFileManagerActive: Bool {
@@ -407,6 +414,7 @@ final class AppModel: ObservableObject {
     /// The Space the Project pane shows: the sidebar's Space filter, else the Space of the
     /// selected pane, so Project works with no filter set.
     var projectSpace: SpaceRef? {
+        if let projectSpaceOverride { return projectSpaceOverride }
         if let selectedSpace { return selectedSpace }
         guard let selected = selectedPane else { return nil }
         let state = session(selected.deviceID)
@@ -1329,8 +1337,8 @@ final class AppModel: ObservableObject {
 
     /// Shows the Project pane, on `space` when one is given.
     func openProject(_ space: SpaceRef?) {
-        if let space { selectedSpace = space }
         detailMode = .project
+        projectSpaceOverride = space
         selectedShellID = nil
     }
 

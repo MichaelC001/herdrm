@@ -38,12 +38,13 @@ final class DetailModeTests: XCTestCase {
         XCTAssertEqual(model.detailMode, .terminal)
     }
 
-    func testOpenProjectSelectsTheGivenSpaceAndClearsTheShell() {
+    func testOpenProjectShowsTheGivenSpaceWithoutFilteringTheSidebar() {
         let model = AppModel()
         let space = SpaceRef(deviceID: Device.local.id, workspaceID: "ws-1")
         model.selectedShellID = UUID()
         model.openProject(space)
-        XCTAssertEqual(model.selectedSpace, space)
+        XCTAssertEqual(model.projectSpace, space)
+        XCTAssertNil(model.selectedSpace, "opening Project leaves the sidebar's Space filter alone")
         XCTAssertNil(model.selectedShellID)
         XCTAssertEqual(model.detailMode, .project)
     }
@@ -53,9 +54,11 @@ final class DetailModeTests: XCTestCase {
         let entry = try XCTUnwrap(model.selectedAttachedEntry)
         model.openProject(for: entry)
         XCTAssertEqual(model.detailMode, .project)
-        XCTAssertEqual(model.selectedSpace, SpaceRef(deviceID: Device.local.id, workspaceID: "ws-0"))
+        XCTAssertEqual(model.projectSpace, SpaceRef(deviceID: Device.local.id, workspaceID: "ws-0"))
+        XCTAssertNil(model.selectedSpace)
         model.closeProject()
         XCTAssertEqual(model.detailMode, .terminal)
+        XCTAssertNil(model.projectSpaceOverride, "leaving Project forgets the Space it was opened on")
         XCTAssertEqual(model.selectedPane, PaneRef(deviceID: Device.local.id, paneID: "pane-0"))
         XCTAssertNotNil(model.selectedAttachedEntry)
         model.closeProject()

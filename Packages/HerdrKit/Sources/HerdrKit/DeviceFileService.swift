@@ -1055,7 +1055,14 @@ private final class CancellableProcess: @unchecked Sendable {
             self.timedOut = self.timedOut || timedOut
             return process
         }
-        if runningProcess?.isRunning == true { runningProcess?.terminate() }
+        guard let runningProcess, runningProcess.isRunning else { return }
+        runningProcess.terminate()
+        // A shell that traps TERM defers it until its foreground command returns,
+        // so a hung child would keep waitUntilExit() blocked forever. Escalate.
+        let pid = runningProcess.processIdentifier
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 3) {
+            if runningProcess.isRunning, runningProcess.processIdentifier == pid { kill(pid, SIGKILL) }
+        }
     }
 }
 
