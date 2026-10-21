@@ -13,7 +13,7 @@ public enum Grazr {
     /// contributes the active account's id and plan and nothing else.
     public static let readerCommand = #"""
     python3 - <<'GRAZR_EOF'
-    import glob, json, os
+    import glob, json, os, shlex
     from datetime import datetime
 
     home = os.path.expanduser("~")
@@ -76,16 +76,26 @@ public enum Grazr {
             "token_expires": (tokens.get(identifier) or {}).get("expires_at") if isinstance(tokens, dict) else None,
         })
 
+    order = None
     try:
         with open(config) as handle:
             for line in handle:
+                key, separator, rest = line.partition("=")
+                if separator and key.strip() == "ACCOUNTS":
+                    # One double-quoted value grazr splits again, names inside it
+                    # quoted when they need it: split twice, as grazr and herdrm's
+                    # own list_in_rotation do, so "my work" stays one name.
+                    try:
+                        order = shlex.split(" ".join(shlex.split(rest, comments=True)))
+                    except ValueError:
+                        order = None
                 line = line.split("#", 1)[0].strip()
                 if "=" in line:
                     key, value = line.split("=", 1)
                     report["settings"][key.strip()] = value.strip().strip("\"'")
     except Exception:
         pass
-    report["order"] = report["settings"].get("ACCOUNTS", "").split()
+    report["order"] = order if order is not None else report["settings"].get("ACCOUNTS", "").split()
 
     for identifier, entry in (load(os.path.join(state, "blocked.json"), {}) or {}).items():
         if isinstance(entry, dict):
@@ -272,6 +282,9 @@ public enum Grazr {
                 print(json.dumps({"ok": False, "output": output}))
                 sys.exit(0)
 
+            if listing and "#" in name:
+                fail("A name listed in ACCOUNTS can't contain #: grazr's config.env reads it as a comment.")
+
             """#
             + pluginPreamble
             + listInRotationSnippet
@@ -315,6 +328,9 @@ public enum Grazr {
                 print(message + "\n\npress return to close")
                 sys.stdin.readline()
                 sys.exit(1)
+
+            if listing and "#" in name:
+                fail("A name listed in ACCOUNTS can't contain #: grazr's config.env reads it as a comment.")
 
             """#
             + pluginPreamble

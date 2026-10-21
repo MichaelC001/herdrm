@@ -300,6 +300,26 @@ final class GrazrAccountsTests: XCTestCase {
     #if os(macOS)
     /// The reader script itself, against grazr's real file layout in a
     /// throwaway home: what it reports, and that nothing else leaves.
+    /// Names that need quoting come back whole: `list_in_rotation` writes
+    /// `ACCOUNTS="work \"my work\""`, and the reader splits it the way grazr does.
+    func testTheReaderKeepsAQuotedNameInACCOUNTSWhole() async throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("grazr-reader-quoted-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let config = home.appendingPathComponent(".config/herdr/plugins/config/wazum.grazr")
+        try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: home.appendingPathComponent(".local/state/herdr/plugins/wazum.grazr/accounts"),
+            withIntermediateDirectories: true)
+        try #"ACCOUNTS="work \"my work\" spare"  # rotation order"#
+            .write(to: config.appendingPathComponent("config.env"), atomically: true, encoding: .utf8)
+
+        let environment = "HOME='\(home.path)' XDG_STATE_HOME= XDG_CONFIG_HOME= CLAUDE_CONFIG_DIR= "
+        let output = try await DeviceFileService(device: .local).run(environment + Grazr.readerCommand)
+        let report = try JSONDecoder().decode(GrazrReport.self, from: output)
+        XCTAssertEqual(report.order, ["work", "my work", "spare"])
+    }
+
     func testTheReaderReportsGrazrsFilesAndNothingSecret() async throws {
         let home = FileManager.default.temporaryDirectory
             .appendingPathComponent("grazr-reader-\(UUID().uuidString)")
