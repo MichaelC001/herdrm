@@ -379,7 +379,7 @@ struct SidebarView: View {
         @State private var hovered = false
 
         var body: some View {
-            let selected = !model.isFileManagerActive
+            let selected = !model.isDetailCovered
                 && model.selectedPane == entry.ref
                 && model.selectedShellID == nil
             VStack(alignment: .leading, spacing: 4) {
@@ -431,6 +431,7 @@ struct SidebarView: View {
                     allowsDrag: draggable,
                     onClick: { model.selectAgent(entry.ref) },
                     onRename: { model.terminalToRename = entry },
+                    onOpenProject: { model.openProject(for: .terminal(entry)) },
                     onClose: { model.requestClosePane(entry.ref, name: entry.title) },
                     onDragStart: { draggingTerminalID = $0 },
                     onDragEnd: {
@@ -465,7 +466,7 @@ struct SidebarView: View {
     /// App-owned standalone shell (local login shell or plain ssh), outside
     /// any herdr space.
     private func shellRow(_ session: ShellSession) -> some View {
-        let selected = !model.isFileManagerActive && model.selectedShellID == session.id
+        let selected = !model.isDetailCovered && model.selectedShellID == session.id
         return Button {
             model.selectShell(session.id)
         } label: {
@@ -519,7 +520,7 @@ struct SidebarView: View {
         let agent = entry.agent
         let statsLines = agent.statsLines
         let supportsHistory = ["claude", "claude-code"].contains(agent.agent.lowercased())
-        let selected = !model.isFileManagerActive
+        let selected = !model.isDetailCovered
             && model.selectedPane == entry.ref
             && model.selectedShellID == nil
         let unread = model.isUnread(entry)
@@ -602,6 +603,7 @@ struct SidebarView: View {
                 allowsDrag: draggable,
                 onClick: { model.selectAgent(entry.ref) },
                 onRename: { model.agentToRename = entry },
+                onOpenProject: { model.openProject(for: .agent(entry)) },
                 onPluginAction: { model.runPluginAction($0, for: entry) },
                 onGrazrAccounts: { model.grazrAccountsDevice = entry.device },
                 onSwitchGrazrAccount: { model.switchGrazrAccount($0, on: entry.device) },
@@ -1104,6 +1106,7 @@ private struct SpaceRowView: View {
                     onClick: { model.selectSpace(entry.ref) },
                     onNewAgent: { model.showNewAgent(in: entry.ref) },
                     onNewTerminal: { model.showNewTerminal(in: entry.ref) },
+                    onOpenProject: { model.openProject(entry.ref) },
                     onRename: { model.spaceToRename = entry },
                     onClose: { model.requestCloseSpace(entry) },
                     onDragStart: { draggingSpaceID = $0 },

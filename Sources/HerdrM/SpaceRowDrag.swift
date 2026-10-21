@@ -64,6 +64,7 @@ struct SpaceRowDragHost: View {
     let onClick: () -> Void
     let onNewAgent: () -> Void
     let onNewTerminal: () -> Void
+    let onOpenProject: () -> Void
     let onRename: () -> Void
     let onClose: () -> Void
     let onDragStart: (String) -> Void
@@ -79,6 +80,7 @@ struct SpaceRowDragHost: View {
             menuItems: [
                 .item(title: String(localized: "New Agent…"), action: onNewAgent),
                 .item(title: String(localized: "New Terminal…"), action: onNewTerminal),
+                .item(title: String(localized: "Project…"), action: onOpenProject),
                 .separator,
                 .item(title: String(localized: "Rename Space…"), action: onRename),
                 .separator,
@@ -105,6 +107,7 @@ struct AgentRowDragHost: View {
     var allowsDrag = true
     let onClick: () -> Void
     let onRename: () -> Void
+    let onOpenProject: () -> Void
     let onPluginAction: (PluginAction) -> Void
     let onGrazrAccounts: () -> Void
     let onSwitchGrazrAccount: (GrazrAccount) -> Void
@@ -142,6 +145,7 @@ struct AgentRowDragHost: View {
     private var menuItems: [SidebarContextMenuItem] {
         var items: [SidebarContextMenuItem] = [
             .item(title: String(localized: "Rename Agent…"), action: onRename),
+            .item(title: String(localized: "Project…"), action: onOpenProject),
         ]
         if !pluginActions.isEmpty {
             items.append(.separator)
@@ -239,6 +243,7 @@ struct TerminalRowDragHost: View {
     var allowsDrag = true
     let onClick: () -> Void
     let onRename: () -> Void
+    let onOpenProject: () -> Void
     let onClose: () -> Void
     let onDragStart: (String) -> Void
     let onDragEnd: () -> Void
@@ -252,6 +257,7 @@ struct TerminalRowDragHost: View {
             pasteboardType: SidebarRowDragNSView.terminalPasteboardType,
             menuItems: [
                 .item(title: String(localized: "Rename Terminal…"), action: onRename),
+                .item(title: String(localized: "Project…"), action: onOpenProject),
                 .separator,
                 .destructive(title: String(localized: "Close Terminal…"), action: onClose),
             ],

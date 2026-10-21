@@ -12,6 +12,16 @@ final class SidebarSpaceRowMenuUIUXTests: XCTestCase {
         XCTAssertTrue(items.contains(String(localized: "Rename Space…")), "known-yes: the row's menu is read: \(items)")
         XCTAssertTrue(items.contains(String(localized: "New Agent…")), "\(items)")
         XCTAssertTrue(items.contains(String(localized: "New Terminal…")), "\(items)")
+        XCTAssertTrue(items.contains(String(localized: "Project…")), "\(items)")
+    }
+
+    func testProjectFromASpaceOpensTheProjectPaneOnThatSpace() throws {
+        let sidebar = try SidebarHarness(spaces: 3, agents: 4, pinnedHeaders: false)
+        let spaces = sidebar.model.visibleSpaces
+
+        try sidebar.chooseFromSpaceMenu("Space 3", String(localized: "Project…"))
+        XCTAssertEqual(sidebar.model.detailMode, .project)
+        XCTAssertEqual(sidebar.model.selectedSpace, spaces[2].ref)
     }
 
     func testNewAgentFromASpaceStartsInThatSpace() throws {

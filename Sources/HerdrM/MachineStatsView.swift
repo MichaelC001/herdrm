@@ -130,7 +130,7 @@ private struct SidebarMeter: View {
 
 /// Reports whether the hosting window is on screen, so the sampler stops while
 /// the window is minimized, hidden, or fully covered.
-private struct WindowVisibilityReader: NSViewRepresentable {
+struct WindowVisibilityReader: NSViewRepresentable {
     @Binding var isVisible: Bool
 
     func makeNSView(context: Context) -> VisibilityView {

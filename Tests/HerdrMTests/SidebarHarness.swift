@@ -222,6 +222,13 @@ final class SidebarHarness {
         headerButtonElements(header).compactMap(\.name)
     }
 
+    /// Names of the sidebar's top action rows (New Agent … Search), top to bottom.
+    func actionRowNames() -> [String] {
+        AccessibilityProbe.elements(in: window)
+            .filter { $0.role == "AXButton" && $0.identifier == nil }
+            .compactMap(\.name)
+    }
+
     /// Names of the buttons on the sheet attached to the sidebar's window; empty when there is none.
     var sheetButtons: [String] {
         let all = AccessibilityProbe.elements(in: window)

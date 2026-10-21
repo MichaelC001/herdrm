@@ -286,9 +286,20 @@ final class AppModel: ObservableObject {
     /// from that space's menu; the sheet reads it once, then clears it.
     @Published var newItemSpace: SpaceRef?
     @Published var showSearch = false
-    @Published var isFileManagerActive = false {
+    /// What the right pane shows. `.terminal` is the attached terminal; the other
+    /// modes cover it with a view of their own.
+    enum DetailMode: Equatable { case terminal, files, project }
+    @Published var detailMode: DetailMode = .terminal {
         didSet { synchronizeConversationHistory() }
     }
+    /// True while the file manager specifically is showing. Setting it is the
+    /// shorthand the many "go back to the terminal" sites use.
+    var isFileManagerActive: Bool {
+        get { detailMode == .files }
+        set { detailMode = newValue ? .files : .terminal }
+    }
+    /// True whenever something other than the terminal fills the right pane.
+    var isDetailCovered: Bool { detailMode != .terminal }
     @Published var shellSplitAxis: SplitAxis?
     /// Set by `reveal` when a jump lands while the local-shell split is open, and consumed once the
     /// main window is key again. Only an actual jump sets it: dismissing the search with
@@ -325,6 +336,8 @@ final class AppModel: ObservableObject {
     /// Machine stats under the terminal: the sampler state lives in its own object so its
     /// two-second ticks don't republish the whole app model.
     let machineStats = MachineStatsModel()
+    /// Per-Space project probes behind the Project detail view.
+    let projects = ProjectInspectorModel()
     @Published var showMachineStats = false
     @Published var deviceToEdit: Device?
     @Published var sshAuthenticationRequest: SSHAuthenticationRequest?
@@ -388,6 +401,37 @@ final class AppModel: ObservableObject {
 
     func device(_ id: UUID) -> Device? {
         devices.first { $0.id == id }
+    }
+
+    /// What the Project view probes for a Space: every pane directory in it, the focused one first.
+    /// The Space the Project pane shows: the sidebar's Space filter, else the Space of the
+    /// selected pane, so Project works with no filter set.
+    var projectSpace: SpaceRef? {
+        if let selectedSpace { return selectedSpace }
+        guard let selected = selectedPane else { return nil }
+        let state = session(selected.deviceID)
+        let workspace = state.agents.first { $0.paneID == selected.paneID }?.workspaceID
+            ?? state.panes.first { $0.paneID == selected.paneID }?.workspaceID
+        return workspace.map { SpaceRef(deviceID: selected.deviceID, workspaceID: $0) }
+    }
+
+    func projectContext(for space: SpaceRef) -> ProjectContext? {
+        guard let device = device(space.deviceID) else { return nil }
+        let state = session(space.deviceID)
+        guard let label = state.workspaces.first(where: { $0.workspaceID == space.workspaceID })?.label else { return nil }
+        let agents = state.agents.filter { $0.workspaceID == space.workspaceID }
+        let panes = state.panes.filter { $0.workspaceID == space.workspaceID }
+        var focused: String?
+        if let selected = selectedPane, selected.deviceID == space.deviceID {
+            focused = agents.first { $0.paneID == selected.paneID }?.cwd ?? panes.first { $0.paneID == selected.paneID }?.cwd
+        }
+        if focused?.isEmpty != false { focused = agents.first { $0.focused == true }?.cwd }
+        if focused?.isEmpty == true { focused = nil }
+        var cwds: [String] = []
+        for cwd in [focused] + agents.map(\.cwd) + panes.map(\.cwd) {
+            if let cwd, !cwd.isEmpty, !cwds.contains(cwd) { cwds.append(cwd) }
+        }
+        return ProjectContext(device: device, workspaceLabel: label, cwds: cwds, focusedCwd: focused)
     }
 
     func session(_ id: UUID) -> DeviceSessionState {
@@ -816,7 +860,7 @@ final class AppModel: ObservableObject {
     }
 
     var isClaudeHistorySelected: Bool {
-        guard !isFileManagerActive, selectedShellID == nil,
+        guard !isDetailCovered, selectedShellID == nil,
               let entry = selectedEntry else { return false }
         return ["claude", "claude-code"].contains(entry.agent.agent.lowercased())
     }
@@ -1283,6 +1327,26 @@ final class AppModel: ObservableObject {
         selectedShellID = nil
     }
 
+    /// Shows the Project pane, on `space` when one is given.
+    func openProject(_ space: SpaceRef?) {
+        if let space { selectedSpace = space }
+        detailMode = .project
+        selectedShellID = nil
+    }
+
+    /// The Project panel for the Space a pane lives in: the titlebar button
+    /// and the agent/terminal row menus open it from the pane, not from a
+    /// Space row.
+    func openProject(for entry: AttachedEntry) {
+        openProject(SpaceRef(deviceID: entry.device.id, workspaceID: entry.workspaceID))
+    }
+
+    /// Back to the terminal that was selected before the panel covered it.
+    func closeProject() {
+        guard detailMode == .project else { return }
+        detailMode = .terminal
+    }
+
     func selectAgent(_ ref: PaneRef) {
         isFileManagerActive = false
         selectedPane = ref
@@ -1295,7 +1359,7 @@ final class AppModel: ObservableObject {
 
     /// The host the machine stats follow: the selected pane's device.
     var statsDevice: Device? {
-        guard !isFileManagerActive else { return nil }
+        guard !isDetailCovered else { return nil }
         guard let device = selectedShell?.device ?? selectedAttachedEntry?.device else { return nil }
         return MachineStatsStream.isSupported(device) ? device : nil
     }

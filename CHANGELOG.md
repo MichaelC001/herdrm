@@ -20,6 +20,23 @@ the Sparkle update description — a release without a section here fails CI.
   on the device for Claude's sign-in and leaves the current login untouched.
   The name can be listed in ACCOUNTS at the same time, so grazr rotates to it;
   grazr's refusals, such as a name already in use, show in the form.
+- **Project panel.** Each space has a Project view in the right pane, opened
+  from the Project toggle in the pane titlebar or "Project…" in the agent,
+  terminal and space row menus. It probes the space's device and lists the
+  project's hot-reload servers with their ports, bind addresses, systemd units
+  and log files. Docker Compose
+  projects and containers show health and published ports, alongside the
+  host's load, memory and Docker version. Local Parallels, VMPal and Lima VMs
+  can be attached, declared or suggested for the project. Its URLs can be
+  opened or copied, or overridden with the public address actually used.
+  Overrides, attached containers and VMs, hidden listeners, remembered linked
+  hosts and a custom project root persist per project in HerdrM's own store.
+  The view is a config page of cards: an architecture overview shows the Mac,
+  the host and its hot-reload, Docker and VM lanes with their linked hosts,
+  followed by one card per section. Containers appear as tiles that reveal a
+  detail strip when selected, and the layout holds up in narrow panes.
+  Status refreshes every 15 seconds while the panel is visible. The panel is read-only
+  in this release; start, stop and logs come next.
 
 ## [0.6.18] - 2026-10-17
 

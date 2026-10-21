@@ -13,6 +13,8 @@ enum AccessibilityProbe {
         let identifier: String?
         /// A text's contents, a control's current value.
         let value: String?
+        /// Whether the control accepts input; nil when the element does not say.
+        let isEnabled: Bool?
         /// Screen frame, top-left origin, as the accessibility API reports it.
         let frame: CGRect?
         fileprivate let ref: AXUIElement
@@ -59,6 +61,7 @@ enum AccessibilityProbe {
             name: name,
             identifier: attribute(element, kAXIdentifierAttribute) as? String,
             value: attribute(element, kAXValueAttribute) as? String,
+            isEnabled: attribute(element, kAXEnabledAttribute) as? Bool,
             frame: frame(of: element),
             ref: element
         ))
