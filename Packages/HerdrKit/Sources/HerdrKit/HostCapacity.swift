@@ -30,6 +30,15 @@ public struct HostCapacity: Sendable, Equatable {
 
     static let criticalAvailableBytes: UInt64 = 6 << 30
     static let busyAvailableBytes: UInt64 = 10 << 30
+    /// The fixed lines suit big dev VMs; on a small host (a 4 GB VPS, a Pi) free
+    /// memory is always under 6 GiB, so the lines also scale down with total RAM.
+    static let criticalAvailableFraction = 0.10
+    static let busyAvailableFraction = 0.16
+
+    static func availableThresholds(total: UInt64) -> (critical: UInt64, busy: UInt64) {
+        (min(criticalAvailableBytes, UInt64(Double(total) * criticalAvailableFraction)),
+         min(busyAvailableBytes, UInt64(Double(total) * busyAvailableFraction)))
+    }
     /// Swap counts as critical only while RAM is also short: idle pages parked in
     /// swap are not pressure on their own.
     static let criticalSwap = 0.50
@@ -59,16 +68,17 @@ public struct HostCapacity: Sendable, Equatable {
         }
 
         let available = snapshot.memTotalBytes - min(snapshot.memTotalBytes, snapshot.memUsedBytes)
-        if available < Self.criticalAvailableBytes {
+        let lines = Self.availableThresholds(total: snapshot.memTotalBytes)
+        if available < lines.critical {
             critical.append(.lowMemory(available: available))
-        } else if available < Self.busyAvailableBytes {
+        } else if available < lines.busy {
             busy.append(.lowMemory(available: available))
         }
 
         if snapshot.swapTotalBytes > 0 {
             let swap = Double(snapshot.swapUsedBytes) / Double(snapshot.swapTotalBytes)
             let reason = Reason.swap(used: snapshot.swapUsedBytes, total: snapshot.swapTotalBytes)
-            if swap > Self.criticalSwap, available < Self.busyAvailableBytes {
+            if swap > Self.criticalSwap, available < lines.busy {
                 critical.append(reason)
             } else if swap > Self.busySwap {
                 busy.append(reason)

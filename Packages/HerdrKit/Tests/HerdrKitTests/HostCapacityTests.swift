@@ -27,6 +27,21 @@ final class HostCapacityTests: XCTestCase {
         )
     }
 
+    /// A small host is not "full" just for being small: on a 4 GB box, 1.5 GB free is fine.
+    func testSmallHostScalesTheMemoryLines() throws {
+        let fine = try XCTUnwrap(snapshot(available: 1536 << 20, total: 4 * gib, swapTotal: 0).capacity)
+        XCTAssertEqual(fine.level, .ok)
+        let tight = try XCTUnwrap(snapshot(available: 300 << 20, total: 4 * gib, swapTotal: 0).capacity)
+        XCTAssertEqual(tight.level, .critical)
+        XCTAssertEqual(tight.reasons, [.lowMemory(available: 300 << 20)])
+    }
+
+    /// Big hosts keep the fixed 6 / 10 GiB lines.
+    func testBigHostKeepsTheFixedMemoryLines() throws {
+        XCTAssertEqual(try XCTUnwrap(snapshot(available: 5 * gib).capacity).level, .critical)
+        XCTAssertEqual(try XCTUnwrap(snapshot(available: 8 * gib).capacity).level, .busy)
+    }
+
     func testIdleHostIsOK() throws {
         let capacity = try XCTUnwrap(snapshot(available: 40 * gib, agents: (4 * gib, 32 * gib)).capacity)
         XCTAssertEqual(capacity.level, .ok)

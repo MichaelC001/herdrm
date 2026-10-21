@@ -106,6 +106,16 @@ final class MachineStatsTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(sample.disks.first).fraction, 0.898, accuracy: 0.001)
     }
 
+    /// Without MemAvailable (Linux before 3.14, some containers) free memory is
+    /// estimated from MemFree + Buffers + Cached instead of reading as none.
+    func testEstimatesAvailableMemoryWithoutMemAvailable() throws {
+        let frame = linuxFrame().replacingOccurrences(
+            of: "mem MemAvailable 23923008",
+            with: "mem MemFree 10000000\nmem Buffers 2000000\nmem Cached 8000000")
+        let sample = try XCTUnwrap(MachineStatsParser.parse(frame))
+        XCTAssertEqual(sample.memUsedBytes, (65_792_224 - 20_000_000) * 1024)
+    }
+
     func testParsesHerdrCgroupLine() throws {
         let capped = try XCTUnwrap(MachineStatsParser.parse(linuxFrame(extraHeader: ["agentcg 27917287424 34359738368"])))
         XCTAssertEqual(capped.agentsMemBytes, 27_917_287_424)

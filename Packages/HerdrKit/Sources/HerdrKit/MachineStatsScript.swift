@@ -34,9 +34,13 @@ while :; do
     read l1 l5 l15 _ < /proc/loadavg; echo "load $l1 $l5 $l15"
     read c rest < /proc/stat; echo "cpu $rest"
     while read k v _; do
-      case $k in MemTotal:|MemAvailable:|SwapTotal:|SwapFree:) echo "mem ${k%:} $v";; esac
+      case $k in MemTotal:|MemAvailable:|MemFree:|Buffers:|Cached:|SwapTotal:|SwapFree:) echo "mem ${k%:} $v";; esac
     done < /proc/meminfo
-    hp=$(ps -eo pid=,args= | awk '$2 ~ /(^|\/)herdr$/ && $3 == "server" {print $1; exit}')
+    # Only our own herdr: on a shared host another user's server has its own cap.
+    hp=
+    for p in $(ps -eo pid=,args= | awk '$2 ~ /(^|\/)herdr$/ && $3 == "server" {print $1}'); do
+      if [ -O "/proc/$p" ]; then hp=$p; break; fi
+    done
     if [ -n "$hp" ]; then
       cg=$(sed -n 's/^0:://p' "/proc/$hp/cgroup" 2>/dev/null)
       if [ -n "$cg" ] && [ -r "/sys/fs/cgroup$cg/memory.max" ]; then

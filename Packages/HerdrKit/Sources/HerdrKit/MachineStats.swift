@@ -275,7 +275,11 @@ public enum MachineStatsParser {
             // /proc/meminfo reports kB.
             let kib: (String) -> UInt64 = { (vm[$0] ?? 0) * 1024 }
             sample.memTotalBytes = kib("MemTotal")
-            sample.memUsedBytes = sample.memTotalBytes - min(sample.memTotalBytes, kib("MemAvailable"))
+            // MemAvailable needs Linux 3.14+ and is missing in some containers; without
+            // it, estimate as free + buffers + page cache rather than reading 0 free.
+            let available = vm["MemAvailable"] != nil
+                ? kib("MemAvailable") : kib("MemFree") + kib("Buffers") + kib("Cached")
+            sample.memUsedBytes = sample.memTotalBytes - min(sample.memTotalBytes, available)
             sample.swapTotalBytes = kib("SwapTotal")
             sample.swapUsedBytes = sample.swapTotalBytes - min(sample.swapTotalBytes, kib("SwapFree"))
         } else {

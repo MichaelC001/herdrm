@@ -42,6 +42,13 @@ the Sparkle update description — a release without a section here fails CI.
   in order. Choose one policy for existing files, see queue progress and a
   completion summary, or cancel the remaining transfers. A failed file is
   reported without preventing later files from being copied.
+- **See how full a host is before starting an agent there.** The machine-stats
+  panel shows a Linux host's room for another agent: free memory, swap, load
+  per CPU, and how close herdr's panes are to herdr's own memory cap. When a
+  host is critically full, New Agent asks before starting there; Start Anyway
+  always proceeds, and a host that can't be read (macOS, offline, slow) never
+  blocks a start. The memory lines scale with the host's RAM, so a small VPS
+  isn't flagged just for being small.
 - **Sort files by name, size or modification time.** Click a column heading
   in either Files pane to sort it; click again to reverse the direction.
   Folders stay first, and each pane keeps its own order when refreshing or
