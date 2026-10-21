@@ -98,6 +98,8 @@ targets:
     deploymentTarget: "18.0"
     sources:
       - Sources/HerdrMobile
+      # Same Icon Composer icon as the macOS app.
+      - path: Sources/HerdrM/AppIcon.icon
     dependencies:
       - package: HerdrKit
       - package: HerdrSSH
@@ -110,6 +112,7 @@ targets:
       properties:
         CFBundleName: herdrm
         CFBundleDisplayName: herdrm
+        CFBundleIconName: AppIcon
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSApplicationCategoryType: public.app-category.developer-tools
@@ -130,6 +133,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.bybee.herdrm.ios
         PRODUCT_NAME: HerdrMobile
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         IPHONEOS_DEPLOYMENT_TARGET: "18.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_VERSION: "5.10"

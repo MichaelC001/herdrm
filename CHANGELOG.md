@@ -5,6 +5,13 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
+## [Unreleased]
+
+### Changed
+- **New app icon.** A sidebar and a terminal pane on a blue gradient, deep at
+  the top and lighter toward the bottom. The iOS app now ships the same icon;
+  it had none before.
+
 ## [0.6.19] - 2026-10-21
 
 ### Added
