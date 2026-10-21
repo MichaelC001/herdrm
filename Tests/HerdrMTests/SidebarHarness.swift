@@ -136,9 +136,13 @@ final class SidebarHarness {
     func selectSheetDevice(from current: String, to name: String) throws {
         let sheet = try XCTUnwrap(window.sheets.first)
         let popup = try XCTUnwrap(Self.popup(named: current, in: XCTUnwrap(sheet.contentView)))
-        XCTAssertTrue(popup.itemTitles.contains(name))
-        popup.selectItem(withTitle: name)
-        popup.sendAction(popup.action, to: popup.target)
+        let menu = try XCTUnwrap(popup.menu)
+        let index = menu.indexOfItem(withTitle: name)
+        XCTAssertNotEqual(index, -1, "no device \(name)")
+        guard index != -1 else { return }
+        // SwiftUI's picker binding is updated by the menu item's action,
+        // not by selecting the NSPopUpButton's displayed item programmatically.
+        menu.performActionForItem(at: index)
         settle()
     }
 
