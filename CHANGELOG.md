@@ -5,6 +5,14 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
+## [Unreleased]
+
+### Fixed
+- **New terminals and agents keep the chosen remote space.** Opening either
+  sheet from a remote space's menu or the current selection no longer resets
+  the space while initializing the device picker. Manually changing devices
+  still resets the space for the newly chosen device.
+
 ## [0.6.20] - 2026-10-21
 
 ### Changed
@@ -13,12 +21,6 @@ the Sparkle update description — a release without a section here fails CI.
   it had none before.
 
 ## [0.6.19] - 2026-10-21
-
-### Fixed
-- **New terminals and agents keep the chosen remote space.** Opening either
-  sheet from a remote space's menu or the current selection no longer resets
-  the space while initializing the device picker. Manually changing devices
-  still resets the space for the newly chosen device.
 
 ### Added
 - **Real thumbnails inside Claude's `[Image #N]` boxes.** Images you paste or
