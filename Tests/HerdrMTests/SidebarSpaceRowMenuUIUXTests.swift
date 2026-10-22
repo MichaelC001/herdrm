@@ -1,10 +1,63 @@
 import XCTest
+import HerdrKit
 @testable import herdrm
 
 /// Right-clicking a space's row offers New Agent and New Terminal, and the
 /// sheet they open starts in that space, whichever space is selected.
 @MainActor
 final class SidebarSpaceRowMenuUIUXTests: XCTestCase {
+    private let remote = Device(name: "test-server", kind: .ssh(target: "test.invalid"))
+
+    func testNewTerminalKeepsTheRemoteSpaceFromItsMenu() throws {
+        let sidebar = try SidebarHarness(spaces: 3, agents: 0, device: remote, sheets: true, pinnedHeaders: false)
+        let spaces = sidebar.model.visibleSpaces
+        sidebar.model.selectSpace(spaces[0].ref)
+
+        try sidebar.chooseFromSpaceMenu("Space 3", String(localized: "New Terminal…"))
+
+        XCTAssertTrue(sidebar.sheetTexts.contains { $0.contains("Space 3") }, "\(sidebar.sheetTexts)")
+        XCTAssertEqual(sidebar.model.selectedSpace, spaces[0].ref)
+        XCTAssertNil(sidebar.model.newItemSpace)
+    }
+
+    func testNewAgentKeepsTheRemoteSpaceFromItsMenu() throws {
+        let sidebar = try SidebarHarness(spaces: 3, agents: 0, device: remote, sheets: true, pinnedHeaders: false)
+        let spaces = sidebar.model.visibleSpaces
+        sidebar.model.selectSpace(spaces[0].ref)
+
+        try sidebar.chooseFromSpaceMenu("Space 3", String(localized: "New Agent…"))
+
+        XCTAssertTrue(sidebar.sheetTexts.contains { $0.contains("Space 3") }, "\(sidebar.sheetTexts)")
+        XCTAssertEqual(sidebar.model.selectedSpace, spaces[0].ref)
+        XCTAssertNil(sidebar.model.newItemSpace)
+    }
+
+    func testGlobalNewTerminalKeepsTheSelectedRemoteSpaceAfterDismissingAMenuSheet() throws {
+        let sidebar = try SidebarHarness(spaces: 3, agents: 0, device: remote, sheets: true, pinnedHeaders: false)
+        sidebar.model.selectSpace(sidebar.model.visibleSpaces[1].ref)
+        try sidebar.chooseFromSpaceMenu("Space 3", String(localized: "New Terminal…"))
+        sidebar.dismissSheet()
+
+        try sidebar.clickAction(named: String(localized: "New Terminal"))
+
+        XCTAssertTrue(sidebar.sheetTexts.contains { $0.contains("Space 2") }, "\(sidebar.sheetTexts)")
+    }
+
+    func testManuallyChangingDeviceStillResetsTheSpace() throws {
+        let sidebar = try SidebarHarness(spaces: 3, agents: 0, device: remote, sheets: true, pinnedHeaders: false)
+
+        try sidebar.chooseFromSpaceMenu("Space 3", String(localized: "New Terminal…"))
+        try sidebar.selectSheetDevice(from: remote.name, to: Device.local.name)
+        XCTAssertTrue(sidebar.sheetTexts.contains(String(localized: "Start a login shell on this Mac")), "\(sidebar.sheetTexts)")
+        sidebar.dismissSheet()
+
+        try sidebar.chooseFromSpaceMenu("Space 3", String(localized: "New Agent…"))
+        try sidebar.selectSheetDevice(from: remote.name, to: Device.local.name)
+        XCTAssertTrue(sidebar.sheetTexts.contains {
+            $0.contains(String(localized: "the focused space"))
+        }, "\(sidebar.sheetTexts)")
+    }
+
     func testSpaceMenuOffersNewAgentAndNewTerminal() throws {
         let sidebar = try SidebarHarness(spaces: 3, agents: 4, pinnedHeaders: false)
         let items = try sidebar.spaceMenu("Space 2")

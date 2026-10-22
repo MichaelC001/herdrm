@@ -25,8 +25,8 @@ final class SidebarHarness {
     /// - Parameter sheets: attach the app's New Agent / New Terminal / New Space
     ///   sheets, so a button press can be followed to the sheet it opens.
     /// - Parameter pinnedHeaders: learn the header titles for `pinnedHeader`; needs a list long enough to scroll.
-    init(spaces: Int, agents: Int, terminals: Int = 0, agentTokens: [String: String]? = nil, agentKinds: [String] = [], sheets: Bool = false, appearance: NSAppearance.Name = .darkAqua, pinnedHeaders: Bool = true, width: CGFloat = 260, height: CGFloat = 600) throws {
-        model = try Self.fakeModel(spaces: spaces, agents: agents, terminals: terminals, agentTokens: agentTokens, agentKinds: agentKinds)
+    init(spaces: Int, agents: Int, terminals: Int = 0, agentTokens: [String: String]? = nil, agentKinds: [String] = [], device: Device = .local, sheets: Bool = false, appearance: NSAppearance.Name = .darkAqua, pinnedHeaders: Bool = true, width: CGFloat = 260, height: CGFloat = 600) throws {
+        model = try Self.fakeModel(spaces: spaces, agents: agents, terminals: terminals, agentTokens: agentTokens, agentKinds: agentKinds, device: device)
         let sidebar = SidebarView(model: model, collapsed: .constant(false), width: width).frame(width: width, height: height)
         root = NSHostingView(rootView: sheets ? AnyView(sidebar.newItemSheets(model: model)) : AnyView(sidebar))
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.titled], backing: .buffered, defer: false)
@@ -47,6 +47,15 @@ final class SidebarHarness {
     }
 
     // MARK: - Actions
+
+    /// Click a named action at the top of the sidebar through real hit-testing.
+    func clickAction(named name: String) throws {
+        let button = try XCTUnwrap(AccessibilityProbe.elements(in: window).first {
+            $0.role == "AXButton" && $0.name == name && $0.frame != nil
+        }, "no sidebar action \(name)")
+        try click(atScreen: XCTUnwrap(button.frame))
+        settle(seconds: 0.8)
+    }
 
     func scroll(_ target: ScrollTarget) {
         let y: CGFloat
@@ -121,6 +130,25 @@ final class SidebarHarness {
         model.showNewTerminal = false
         model.showNewSpace = false
         settle(seconds: 0.8) // the sheet slides out
+    }
+
+    /// Choose a device using the native popup's selection action.
+    func selectSheetDevice(from current: String, to name: String) throws {
+        let sheet = try XCTUnwrap(window.sheets.first)
+        let popup = try XCTUnwrap(Self.popup(named: current, in: XCTUnwrap(sheet.contentView)))
+        let menu = try XCTUnwrap(popup.menu)
+        let index = menu.indexOfItem(withTitle: name)
+        XCTAssertNotEqual(index, -1, "no device \(name)")
+        guard index != -1 else { return }
+        // SwiftUI's picker binding is updated by the menu item's action,
+        // not by selecting the NSPopUpButton's displayed item programmatically.
+        menu.performActionForItem(at: index)
+        settle()
+    }
+
+    private static func popup(named title: String, in view: NSView) -> NSPopUpButton? {
+        if let popup = view as? NSPopUpButton, popup.titleOfSelectedItem == title { return popup }
+        return view.subviews.lazy.compactMap { popup(named: title, in: $0) }.first
     }
 
     /// The texts on the sheet attached to the sidebar's window; empty when there is none.
@@ -346,10 +374,9 @@ final class SidebarHarness {
 
     // MARK: - Fake data
 
-    private static func fakeModel(spaces: Int, agents: Int, terminals: Int, agentTokens: [String: String]?, agentKinds: [String]) throws -> AppModel {
+    private static func fakeModel(spaces: Int, agents: Int, terminals: Int, agentTokens: [String: String]?, agentKinds: [String], device: Device) throws -> AppModel {
         let model = AppModel()
-        let device = Device.local
-        model.devices = [device]
+        model.devices = device == .local ? [device] : [.local, device]
         var state = DeviceSessionState()
         state.workspaces = try (0..<spaces).map { i in
             try decode(WorkspaceInfo.self, ["workspace_id": "ws-\(i)", "number": i + 1, "label": "Space \(i + 1)"])
