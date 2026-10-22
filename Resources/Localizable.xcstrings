@@ -2433,18 +2433,18 @@
         }
       }
     },
-    "This server advertises no agent manifests.": {
+    "No supported agent CLI was found on this server.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This server advertises no agent manifests."
+            "value": "No supported agent CLI was found on this server."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "此服务器未声明任何 Agent manifest。"
+            "value": "此服务器上未找到受支持的 Agent 命令行工具。"
           }
         }
       }

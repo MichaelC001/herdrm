@@ -158,6 +158,12 @@ final class SidebarHarness {
         return all[start...].filter { $0.role == "AXStaticText" }.compactMap { $0.value ?? $0.name }
     }
 
+    var sheetButtonNames: [String] {
+        let all = AccessibilityProbe.elements(in: window)
+        guard let start = all.firstIndex(where: { $0.role == "AXSheet" }) else { return [] }
+        return all[start...].filter { $0.role == "AXButton" }.compactMap(\.name)
+    }
+
     /// What VoiceOver reads for the disclosure chevron on a space's row.
     func spaceDisclosureName(_ space: String) throws -> String? {
         settle()

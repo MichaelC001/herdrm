@@ -12,6 +12,9 @@ the Sparkle update description — a release without a section here fails CI.
   sheet from a remote space's menu or the current selection no longer resets
   the space while initializing the device picker. Manually changing devices
   still resets the space for the newly chosen device.
+- **SSH agent choices reflect installed CLIs.** New Agent checks the remote
+  login-shell PATH instead of listing every supported manifest. Failed checks
+  show the existing retry action; local binary overrides remain local.
 
 ## [0.6.20] - 2026-10-21
 
