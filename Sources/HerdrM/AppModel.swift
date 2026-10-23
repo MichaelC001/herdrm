@@ -192,11 +192,9 @@ final class AppModel: ObservableObject {
     @Published var selectedSpace: SpaceRef?
     @Published var selectedPane: PaneRef? {
         didSet {
-            // Leaving a finished agent marks it viewed. Staying on it while
-            // the turn ends must not swallow the unread flag.
-            if let old = oldValue, old != selectedPane {
-                unreadAgents.remove(AgentUnreadKey(deviceID: old.deviceID, paneID: old.paneID))
-            }
+            // Opening a finished agent acknowledges its result, including
+            // clicking the already-selected row again.
+            markSelectedAgentRead()
             if selectedPane != oldValue {
                 // Release the previous terminal during the selection event. The
                 // first attach can take time to mount; it must not leave input
@@ -299,6 +297,7 @@ final class AppModel: ObservableObject {
         didSet {
             if detailMode != .project { projectSpaceOverride = nil }
             synchronizeConversationHistory()
+            if detailMode == .terminal { markVisibleAgentRead() }
         }
     }
     /// The Space "Project…" was opened on. Kept apart from `selectedSpace`, the
@@ -662,6 +661,27 @@ final class AppModel: ObservableObject {
 
     func isUnread(_ entry: AgentEntry) -> Bool {
         unreadAgents.contains(AgentUnreadKey(deviceID: entry.device.id, paneID: entry.agent.paneID))
+    }
+
+    private func markSelectedAgentRead() {
+        guard let pane = selectedPane else { return }
+        unreadAgents.remove(AgentUnreadKey(deviceID: pane.deviceID, paneID: pane.paneID))
+    }
+
+    /// A result already visible in the active terminal needs no unread badge.
+    /// Background windows and covering detail views keep their unread state.
+    func markVisibleAgentRead() {
+        guard NSApplication.shared.isActive, !isDetailCovered, selectedShellID == nil,
+              let entry = selectedAttachedEntry,
+              AttachViewRegistry.view(for: entry.id)?.window?.isKeyWindow == true
+        else { return }
+        markSelectedAgentRead()
+    }
+
+    func updateUnreadAgents(previous: [String: AgentStatus], agents: [AgentInfo], deviceID: UUID) {
+        unreadAgents = AgentUnread.applying(previous: previous, agents: agents,
+                                           unread: unreadAgents, deviceID: deviceID)
+        markVisibleAgentRead()
     }
 
     // MARK: - Sidebar tree
@@ -1232,7 +1252,11 @@ final class AppModel: ObservableObject {
     /// so the sidebar, unread marks and viewport snap follow. Selection stays a
     /// herdrm-side notion; herdr's own focus is left alone, as it is for sidebar clicks.
     func focusVisiblePane(_ ref: PaneRef) {
-        guard ref != selectedPane, visiblePaneRefs.contains(ref) else { return }
+        guard visiblePaneRefs.contains(ref) else { return }
+        if ref == selectedPane {
+            markSelectedAgentRead()
+            return
+        }
         selectedPane = ref
     }
 
@@ -1285,8 +1309,10 @@ final class AppModel: ObservableObject {
         selectedSpace = ref
         selectedShellID = nil
         if let entry = selectedAttachedEntry {
-            if ref == nil { return }
-            if entry.device.id == ref!.deviceID && entry.workspaceID == ref!.workspaceID { return }
+            if ref == nil || (entry.device.id == ref!.deviceID && entry.workspaceID == ref!.workspaceID) {
+                markSelectedAgentRead()
+                return
+            }
         }
         selectedPane = preferredVisibleAgent()?.ref ?? firstVisiblePaneRef
     }
@@ -2138,10 +2164,9 @@ final class AppModel: ObservableObject {
                 refreshRequested.insert(deviceID)
                 return true
             }
-            unreadAgents = AgentUnread.applying(
+            updateUnreadAgents(
                 previous: previousStatuses[deviceID] ?? [:],
                 agents: snapshot.agents,
-                unread: unreadAgents,
                 deviceID: device.id
             )
             notifyTransitions(
@@ -2259,10 +2284,9 @@ final class AppModel: ObservableObject {
         guard state.agents[index].status != status else { return true }
         let previous = previousStatuses[deviceID] ?? [:]
         state.agents[index] = state.agents[index].updatingStatus(status)
-        unreadAgents = AgentUnread.applying(
+        updateUnreadAgents(
             previous: previous,
             agents: state.agents,
-            unread: unreadAgents,
             deviceID: deviceID
         )
         notifyTransitions(

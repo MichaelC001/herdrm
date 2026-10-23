@@ -120,6 +120,21 @@ final class SidebarHarness {
 
     var terminalFirstResponder: NSResponder? { window.firstResponder }
 
+    func activateWindow() {
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        // The command-line test host has no NSApplication.run() loop. Drain
+        // its AppKit events so the requested activation actually takes effect.
+        let deadline = Date().addingTimeInterval(1)
+        while Date() < deadline && !(NSApp.isActive && window.isKeyWindow) {
+            if let event = NSApp.nextEvent(matching: .any, until: Date().addingTimeInterval(0.05),
+                                          inMode: .default, dequeue: true) {
+                NSApp.sendEvent(event)
+            }
+        }
+        settle()
+    }
+
     func settleTerminalFocus() async {
         // Let deferred AppKit focus run even when the test itself is executing
         // on the main dispatch queue, where a nested RunLoop cannot drain it.

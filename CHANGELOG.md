@@ -8,6 +8,9 @@ the Sparkle update description — a release without a section here fails CI.
 ## [Unreleased]
 
 ### Fixed
+- **Unread completion dots clear when opened.** Selecting an agent or its
+  current space acknowledges the result immediately. Results visible in the
+  active terminal do not gain unread dots; background results stay unread.
 - **Reconnect a device's dropped SSH terminals together.** One click restores
   the disconnected attaches on that device, preserving healthy terminals and
   panes closed normally or taken over by another client.
