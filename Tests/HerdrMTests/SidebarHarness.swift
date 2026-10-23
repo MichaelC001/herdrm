@@ -190,6 +190,35 @@ final class SidebarHarness {
         return all[start...].filter { $0.role == "AXButton" }.compactMap(\.name)
     }
 
+    /// Hit-test the actual sheet, so a clipped or covered agent choice cannot
+    /// pass just because its accessibility action exists.
+    func clickSheetButton(named name: String) throws {
+        let sheet = try XCTUnwrap(window.sheets.first)
+        let all = AccessibilityProbe.elements(in: window)
+        let start = try XCTUnwrap(all.firstIndex { $0.role == "AXSheet" })
+        let button = try XCTUnwrap(all[start...].first { $0.role == "AXButton" && $0.name == name })
+        let frame = try XCTUnwrap(button.frame)
+        XCTAssertGreaterThan(frame.height, 0)
+        let screenTop = try XCTUnwrap(NSScreen.screens.first).frame.maxY
+        let point = sheet.convertPoint(fromScreen: NSPoint(x: frame.midX, y: screenTop - frame.midY))
+        let content = try XCTUnwrap(sheet.contentView)
+        let target = try XCTUnwrap(content.hitTest(content.superview?.convert(point, from: nil) ?? point))
+        let down = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: sheet.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+        let up = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseUp, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime + 0.05,
+            windowNumber: sheet.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0))
+        if target.acceptsFirstMouse(for: down) {
+            sheet.sendEvent(down)
+            sheet.sendEvent(up)
+        } else {
+            target.mouseDown(with: down)
+            target.mouseUp(with: up)
+        }
+        settle()
+    }
+
     /// What VoiceOver reads for the disclosure chevron on a space's row.
     func spaceDisclosureName(_ space: String) throws -> String? {
         settle()
