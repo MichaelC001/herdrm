@@ -48,6 +48,12 @@ final class SidebarHarness {
 
     // MARK: - Actions
 
+    func showReconnectOverlay(_ view: TerminalReconnectOverlay) {
+        root.rootView = AnyView(view)
+        root.layoutSubtreeIfNeeded()
+        settle()
+    }
+
     /// Click a named action at the top of the sidebar through real hit-testing.
     func clickAction(named name: String) throws {
         let button = try XCTUnwrap(AccessibilityProbe.elements(in: window).first {
