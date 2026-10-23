@@ -431,8 +431,8 @@ private enum ClipboardFileError: LocalizedError {
 /// press. Turning Mouse Reporting off keeps every gesture local.
 ///
 /// IME: Ghostty implements `NSTextInputClient` itself and renders the marked
-/// text in the grid; the only hook needed here is keeping ⌘/⌃ chords off the
-/// PTY while `hasMarkedText()`.
+/// text in the grid. Host hooks keep ⌘/⌃ chords off the PTY during composition
+/// and expose valid insertion ranges to external input methods.
 final class LineBreakTerminalView: AppTerminalView {
     /// When false, mouse button events always stay local even if the TUI
     /// requested mouse reporting (Shift bypasses it either way).
@@ -1326,6 +1326,28 @@ final class LineBreakTerminalView: AppTerminalView {
     }
 
     // MARK: Accessibility
+
+    // Report the terminal cursor as a valid insertion point when no composition
+    // is active. During IME composition, preserve the marked text's own ranges.
+    override func selectedRange() -> NSRange {
+        hasMarkedText() ? super.selectedRange() : accessibilitySelectedTextRange()
+    }
+
+    override func markedRange() -> NSRange {
+        hasMarkedText() ? super.markedRange() : NSRange(location: 0, length: 0)
+    }
+
+    override func characterIndex(for point: NSPoint) -> Int { 0 }
+
+    override func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
+        var rect = super.firstRect(forCharacterRange: range, actualRange: actualRange)
+        if range.length == 0 {
+            if range.location != NSNotFound { rect.origin.x += rect.width * Double(range.location) }
+            rect.size.width = 0
+        }
+        actualRange?.pointee = range
+        return rect
+    }
 
     // Dictation tools (Typeless and the like) paste with ⌘V and then look for
     // a focused text area to confirm the insert landed. Without an
