@@ -600,7 +600,7 @@ struct TerminalSettingsView: View {
                 Toggle(isOn: $thinStrokes) {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Thin strokes")
-                        Text("Turns off macOS font smoothing, which thickens glyph stems and makes agent output — Claude Code's bold text especially — look heavy and smudged.")
+                        Text("Turns off extra font thickening in the terminal.")
                             .font(.system(size: 10.5))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
