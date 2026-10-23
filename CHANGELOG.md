@@ -5,6 +5,13 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
+## [Unreleased]
+
+### Fixed
+- **First-open terminal focus follows the selected agent.** Clicking another
+  agent releases the previous terminal immediately and focuses the new view
+  when it mounts. Other newly created panes no longer take the keyboard.
+
 ## [0.6.21] - 2026-10-21
 
 ### Fixed

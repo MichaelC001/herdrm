@@ -197,6 +197,12 @@ final class AppModel: ObservableObject {
             if let old = oldValue, old != selectedPane {
                 unreadAgents.remove(AgentUnreadKey(deviceID: old.deviceID, paneID: old.paneID))
             }
+            if selectedPane != oldValue {
+                // Release the previous terminal during the selection event. The
+                // first attach can take time to mount; it must not leave input
+                // going to the agent we just left.
+                AttachViewRegistry.select(selectedAttachedEntry?.id)
+            }
             noteVisibleAttachSessions()
             if let pane = selectedPane, pane != oldValue {
                 snapPaneViewportToBottom(pane)

@@ -97,6 +97,32 @@ final class SidebarHarness {
         settle()
     }
 
+    /// Inspect focus immediately after the row click, before SwiftUI has time to
+    /// mount a terminal for an agent that has never been opened.
+    func clickAgentTitleWithoutSettling(_ title: String) throws {
+        let element = try XCTUnwrap(AccessibilityProbe.elements(in: window)
+            .filter { $0.role == "AXButton" && ($0.name ?? "").hasPrefix(title) && $0.frame != nil }
+            .max { $0.frame!.width < $1.frame!.width },
+            "no agent row \(title)\n\(accessibilityDump)")
+        try click(atScreen: XCTUnwrap(element.frame))
+    }
+
+    func mountTerminal(_ view: LineBreakTerminalView, focus: Bool = false) {
+        root.addSubview(view)
+        if focus { window.makeFirstResponder(view) }
+    }
+
+    var terminalFirstResponder: NSResponder? { window.firstResponder }
+
+    func settleTerminalFocus() async {
+        // Let deferred AppKit focus run even when the test itself is executing
+        // on the main dispatch queue, where a nested RunLoop cannot drain it.
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        settle()
+    }
+
     /// Click, with the mouse, the disclosure chevron on a space's row (grouped mode).
     func clickSpaceDisclosure(_ space: String) throws {
         try click(atScreen: XCTUnwrap(spaceDisclosure(space).frame))
