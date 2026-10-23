@@ -192,9 +192,9 @@ final class AppModel: ObservableObject {
     @Published var selectedSpace: SpaceRef?
     @Published var selectedPane: PaneRef? {
         didSet {
-            // Opening a finished agent acknowledges its result, including
-            // clicking the already-selected row again.
-            markSelectedAgentRead()
+            // Refreshes can change selection in a background or covered window.
+            // Only a visible result or an explicit navigation action is read.
+            markVisibleAgentRead()
             if selectedPane != oldValue {
                 // Release the previous terminal during the selection event. The
                 // first attach can take time to mount; it must not leave input
@@ -1217,6 +1217,7 @@ final class AppModel: ObservableObject {
               let next = TabLayoutGeometry.neighbor(of: selected.paneID, in: layout.root, direction: direction)
         else { return }
         selectedPane = PaneRef(deviceID: selected.deviceID, paneID: next)
+        markSelectedAgentRead()
     }
 
     /// Keyboard focus to the next (+1) or previous (-1) pane in the tab's reading
@@ -1227,6 +1228,7 @@ final class AppModel: ObservableObject {
         guard let index = order.firstIndex(of: selected.paneID), order.count > 1 else { return }
         let next = order[((index + offset) % order.count + order.count) % order.count]
         selectedPane = PaneRef(deviceID: selected.deviceID, paneID: next)
+        markSelectedAgentRead()
     }
 
     /// The sidebar's confirmed close, for the selected pane. In a tab layout the
@@ -1258,6 +1260,7 @@ final class AppModel: ObservableObject {
             return
         }
         selectedPane = ref
+        markSelectedAgentRead()
     }
 
     private var firstVisiblePaneRef: PaneRef? {
@@ -1301,20 +1304,24 @@ final class AppModel: ObservableObject {
     /// The space a New Agent / New Terminal sheet should open on.
     func takeNewItemSpace() -> SpaceRef? {
         defer { newItemSpace = nil }
-        return newItemSpace ?? selectedSpace
+        return newItemSpace ?? selectedSpace ?? selectedAttachedEntry.map {
+            SpaceRef(deviceID: $0.device.id, workspaceID: $0.workspaceID)
+        }
     }
 
     func selectSpace(_ ref: SpaceRef?) {
-        isFileManagerActive = false
         selectedSpace = ref
         selectedShellID = nil
         if let entry = selectedAttachedEntry {
             if ref == nil || (entry.device.id == ref!.deviceID && entry.workspaceID == ref!.workspaceID) {
+                isFileManagerActive = false
                 markSelectedAgentRead()
                 return
             }
         }
         selectedPane = preferredVisibleAgent()?.ref ?? firstVisiblePaneRef
+        isFileManagerActive = false
+        markSelectedAgentRead()
     }
 
     func setDeviceFilter(_ id: UUID?) {
@@ -1341,13 +1348,14 @@ final class AppModel: ObservableObject {
 
     /// Jump target used by the search sheet and by notification clicks.
     func reveal(_ ref: PaneRef) {
-        isFileManagerActive = false
         if let filter = deviceFilter, filter != ref.deviceID {
             deviceFilter = nil
         }
         selectedSpace = nil
         selectedPane = ref
         selectedShellID = nil
+        isFileManagerActive = false
+        markSelectedAgentRead()
         // Only the search sheet needs the deferred request: its dismissal restores the
         // parent window's previous responder after the view tree has asked for focus.
         // `showSearch` is still true here — SearchView calls this before dismissing.
@@ -1388,9 +1396,10 @@ final class AppModel: ObservableObject {
     }
 
     func selectAgent(_ ref: PaneRef) {
-        isFileManagerActive = false
         selectedPane = ref
         selectedShellID = nil
+        isFileManagerActive = false
+        markSelectedAgentRead()
     }
 
     var selectedShell: ShellSession? {
@@ -1417,8 +1426,8 @@ final class AppModel: ObservableObject {
     }
 
     func selectShell(_ id: UUID) {
-        isFileManagerActive = false
         selectedShellID = id
+        isFileManagerActive = false
         ShellViewRegistry.focus(id)
     }
 

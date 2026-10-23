@@ -5,6 +5,47 @@ import XCTest
 
 @MainActor
 final class AgentUnreadUIUXTests: XCTestCase {
+    func testOpeningAnotherAgentFromFilesDoesNotReadTheCoveredAgent() throws {
+        let sidebar = try SidebarHarness(spaces: 1, agents: 2, pinnedHeaders: false)
+        let entries = sidebar.model.visibleAgents
+        sidebar.model.selectAgent(entries[0].ref)
+        let id = AppModel.AttachedEntry.agent(entries[0]).id
+        let terminal = LineBreakTerminalView(frame: .zero)
+        AttachViewRegistry.register(terminal, for: id)
+        defer { AttachViewRegistry.unregister(id) }
+        sidebar.mountTerminal(terminal, focus: true)
+        sidebar.activateWindow()
+        sidebar.model.detailMode = .files
+        finish(entries[0], in: sidebar.model)
+        finish(entries[1], in: sidebar.model)
+
+        try sidebar.clickAgentTitleWithoutSettling("Agent 2")
+
+        XCTAssertTrue(sidebar.model.isUnread(entries[0]), "The covered result was never opened")
+        XCTAssertFalse(sidebar.model.isUnread(entries[1]))
+
+        // Returning to a standalone shell must not briefly read the covered agent either.
+        sidebar.model.detailMode = .files
+        sidebar.model.selectedPane = entries[0].ref
+        sidebar.model.newShellSession(on: entries[0].device)
+        XCTAssertTrue(sidebar.model.isUnread(entries[0]))
+    }
+
+    func testAutomaticSelectionWhileFilesCoverTerminalKeepsResultUnread() throws {
+        let sidebar = try SidebarHarness(spaces: 1, agents: 2, pinnedHeaders: false)
+        let entries = sidebar.model.visibleAgents
+        sidebar.model.selectAgent(entries[0].ref)
+        sidebar.model.detailMode = .files
+        finish(entries[1], in: sidebar.model)
+
+        // A refresh can replace a pane closed in another client while Files is open.
+        sidebar.model.selectedPane = entries[1].ref
+
+        XCTAssertTrue(sidebar.model.isUnread(entries[1]), "Automatic selection did not reveal the result")
+        try sidebar.clickAgentTitleWithoutSettling("Agent 2")
+        XCTAssertFalse(sidebar.model.isUnread(entries[1]), "Opening the result still acknowledges it")
+    }
+
     func testOpeningUnreadAgentClearsOnlyItsDot() throws {
         let sidebar = try SidebarHarness(spaces: 1, agents: 2, pinnedHeaders: false)
         let entries = sidebar.model.visibleAgents

@@ -11,6 +11,11 @@ the Sparkle update description — a release without a section here fails CI.
 - **Unread completion dots clear when opened.** Selecting an agent or its
   current space acknowledges the result immediately. Results visible in the
   active terminal do not gain unread dots; background results stay unread.
+  Automatic selection while Files covers the terminal, and opening another
+  agent or shell from Files, leave the unseen result unread.
+- **New Agent keeps the viewed space in All Spaces.** The global creation
+  action inherits the viewed remote pane's device and space when no space
+  filter is selected, matching New Terminal.
 - **Reconnect a device's dropped SSH terminals together.** One click restores
   the disconnected attaches on that device, preserving healthy terminals and
   panes closed normally or taken over by another client.
