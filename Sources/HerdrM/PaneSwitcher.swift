@@ -7,6 +7,16 @@ import SwiftUI
 // ⌃ and pressing Tab again shows the list, and releasing ⌃ opens the
 // highlighted pane.
 
+extension View {
+    /// The ⌃Tab switcher over this view and the key handling that drives it.
+    /// One modifier rather than two keeps `RootView`'s long chain within what
+    /// the type checker solves in reasonable time.
+    func paneSwitcher(model: AppModel) -> some View {
+        overlay { PaneSwitcherLayer(model: model) }
+            .background(PaneSwitcherKeyCatcher(model: model))
+    }
+}
+
 /// The panel over the window while ⌃ is held, plus a click-away layer that cancels.
 struct PaneSwitcherLayer: View {
     @ObservedObject var model: AppModel
