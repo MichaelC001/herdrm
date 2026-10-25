@@ -15,23 +15,34 @@ final class TerminalFontFallbackTests: XCTestCase {
     }
 
     func testOnlyMissingSymbolsUseFallbackIncludingSupplementaryPlanes() {
-        let symbols = CharacterSet(charactersIn: "\u{E0B0}\u{E0B1}\u{F179}\u{F0001}\u{100001}A")
-        let primary = CharacterSet(charactersIn: "\u{E0B0}\u{F179}\u{100001}")
-        XCTAssertEqual(TerminalFontFallback.ranges(primary: primary as CFCharacterSet, symbols: symbols as CFCharacterSet), [
-            0xE0B1...0xE0B1, 0xF0001...0xF0001,
+        let symbols = characterSet(0xE0B0, 0xE0B1, 0xF179, 0xF0001, 0x100001, 0x100002, 0x41)
+        let primary = characterSet(0xE0B0, 0xF179, 0x100001)
+        XCTAssertTrue(CFCharacterSetIsLongCharacterMember(symbols, 0xF0001))
+        XCTAssertTrue(CFCharacterSetIsLongCharacterMember(symbols, 0x100002))
+        XCTAssertFalse(CFCharacterSetIsLongCharacterMember(primary, 0xF0001))
+        XCTAssertEqual(TerminalFontFallback.ranges(primary: primary, symbols: symbols), [
+            0xE0B1...0xE0B1, 0xF0001...0xF0001, 0x100002...0x100002,
         ])
     }
 
     func testPatchedFontKeepsItsOwnIcons() {
-        let symbols = CharacterSet(charactersIn: "\u{E0B0}\u{F179}\u{F017}\u{E73C}\u{F0001}")
-        XCTAssertTrue(TerminalFontFallback.ranges(primary: symbols as CFCharacterSet, symbols: symbols as CFCharacterSet).isEmpty)
+        let symbols = characterSet(0xE0B0, 0xF179, 0xF017, 0xE73C, 0xF0001)
+        XCTAssertTrue(TerminalFontFallback.ranges(primary: symbols, symbols: symbols).isEmpty)
     }
 
     func testAdjacentMissingSymbolsAreCoalescedWithoutOverridingAnExistingGlyph() {
-        let symbols = CharacterSet(charactersIn: "\u{E000}\u{E001}\u{E002}\u{E003}\u{E004}")
-        let primary = CharacterSet(charactersIn: "\u{E002}")
-        XCTAssertEqual(TerminalFontFallback.ranges(primary: primary as CFCharacterSet, symbols: symbols as CFCharacterSet), [
+        let symbols = characterSet(0xE000, 0xE001, 0xE002, 0xE003, 0xE004)
+        let primary = characterSet(0xE002)
+        XCTAssertEqual(TerminalFontFallback.ranges(primary: primary, symbols: symbols), [
             0xE000...0xE001, 0xE003...0xE004,
         ])
+    }
+
+    private func characterSet(_ scalars: UInt32...) -> CFCharacterSet {
+        let set = CFCharacterSetCreateMutable(nil)!
+        for scalar in scalars {
+            CFCharacterSetAddCharactersInRange(set, CFRange(location: Int(scalar), length: 1))
+        }
+        return set
     }
 }
