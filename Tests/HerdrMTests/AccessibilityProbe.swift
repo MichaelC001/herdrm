@@ -15,6 +15,8 @@ enum AccessibilityProbe {
         let value: String?
         /// Whether the control accepts input; nil when the element does not say.
         let isEnabled: Bool?
+        /// Standard selected trait, independent of the control's title/value.
+        let isSelected: Bool?
         /// Screen frame, top-left origin, as the accessibility API reports it.
         let frame: CGRect?
         fileprivate let ref: AXUIElement
@@ -62,6 +64,7 @@ enum AccessibilityProbe {
             identifier: attribute(element, kAXIdentifierAttribute) as? String,
             value: attribute(element, kAXValueAttribute) as? String,
             isEnabled: attribute(element, kAXEnabledAttribute) as? Bool,
+            isSelected: attribute(element, kAXSelectedAttribute) as? Bool,
             frame: frame(of: element),
             ref: element
         ))

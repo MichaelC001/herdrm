@@ -190,6 +190,11 @@ final class AppModel: ObservableObject {
     private var conversationLastVisible = false
     private var conversationResumeNeedsLatest = false
     @Published var selectedSpace: SpaceRef?
+    /// An explicit activation should reveal its space even when the same pane
+    /// already owns the keyboard. Status refreshes never increment this.
+    @Published private(set) var sidebarRevealGeneration = 0
+    /// Selecting a sidebar row must leave that row under the pointer.
+    @Published private(set) var sidebarSelectionGeneration = 0
     @Published var selectedPane: PaneRef? {
         didSet {
             // Leaving a finished agent marks it viewed. Staying on it while
@@ -867,6 +872,19 @@ final class AppModel: ObservableObject {
         return nil
     }
 
+    /// The right-hand terminal's location, separate from the sidebar's filter.
+    /// Standalone shells and covering panels do not display an attached pane.
+    var displayedPaneSpace: SpaceRef? {
+        guard !isDetailCovered, selectedShellID == nil,
+              let entry = selectedAttachedEntry else { return nil }
+        return SpaceRef(deviceID: entry.device.id, workspaceID: entry.workspaceID)
+    }
+
+    private func revealDisplayedSpaceInSidebar() {
+        guard displayedPaneSpace != nil else { return }
+        sidebarRevealGeneration += 1
+    }
+
     var isClaudeHistorySelected: Bool {
         guard !isDetailCovered, selectedShellID == nil,
               let entry = selectedEntry else { return false }
@@ -1225,9 +1243,12 @@ final class AppModel: ObservableObject {
     /// The keyboard landed in another pane of the shown tab: make it the selection,
     /// so the sidebar, unread marks and viewport snap follow. Selection stays a
     /// herdrm-side notion; herdr's own focus is left alone, as it is for sidebar clicks.
-    func focusVisiblePane(_ ref: PaneRef) {
-        guard ref != selectedPane, visiblePaneRefs.contains(ref) else { return }
-        selectedPane = ref
+    func focusVisiblePane(_ ref: PaneRef, revealSpace: Bool = false) {
+        guard visiblePaneRefs.contains(ref) else { return }
+        if ref != selectedPane { selectedPane = ref }
+        // A selection also assigns first responder programmatically. Only an
+        // explicit terminal activation should repeat a sidebar reveal.
+        if revealSpace { revealDisplayedSpaceInSidebar() }
     }
 
     private var firstVisiblePaneRef: PaneRef? {
@@ -1274,7 +1295,11 @@ final class AppModel: ObservableObject {
         return newItemSpace ?? selectedSpace
     }
 
-    func selectSpace(_ ref: SpaceRef?) {
+    func selectSpace(_ ref: SpaceRef?, revealInSidebar: Bool = true) {
+        if !revealInSidebar { sidebarSelectionGeneration += 1 }
+        defer {
+            if revealInSidebar { revealDisplayedSpaceInSidebar() }
+        }
         isFileManagerActive = false
         selectedSpace = ref
         selectedShellID = nil
@@ -1316,6 +1341,7 @@ final class AppModel: ObservableObject {
         selectedSpace = nil
         selectedPane = ref
         selectedShellID = nil
+        revealDisplayedSpaceInSidebar()
         // Only the search sheet needs the deferred request: its dismissal restores the
         // parent window's previous responder after the view tree has asked for focus.
         // `showSearch` is still true here — SearchView calls this before dismissing.
@@ -1355,10 +1381,12 @@ final class AppModel: ObservableObject {
         detailMode = .terminal
     }
 
-    func selectAgent(_ ref: PaneRef) {
+    func selectAgent(_ ref: PaneRef, revealInSidebar: Bool = true) {
+        if !revealInSidebar { sidebarSelectionGeneration += 1 }
         isFileManagerActive = false
         selectedPane = ref
         selectedShellID = nil
+        if revealInSidebar { revealDisplayedSpaceInSidebar() }
     }
 
     var selectedShell: ShellSession? {

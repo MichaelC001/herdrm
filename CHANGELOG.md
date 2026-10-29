@@ -5,6 +5,15 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
+## [Unreleased]
+
+### Fixed
+- **Sidebar rows stay under the pointer.** Clicking spaces, agents or terminals
+  updates selection and the displayed space highlight without recentering the
+  list. Explicit terminal activation, search, notification navigation and restored
+  panes still reveal their owning space without changing the All Spaces filter.
+  Agent-kind labels stay on one line so narrow sidebars keep stable row heights.
+
 ## [0.6.21] - 2026-10-21
 
 ### Fixed

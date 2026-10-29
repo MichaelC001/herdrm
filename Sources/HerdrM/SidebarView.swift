@@ -95,95 +95,115 @@ struct SidebarView: View {
 
             // Section headers pin at the top and hand off with a scroll-linked
             // fade (StickySectionHeaders). Each section = header + rows + gap.
-            ScrollView {
-                VStack(spacing: 1) {
-                    StickySection(background: { VisualEffectView(material: .sidebar) }) {
-                        // Title + chevron used to be a decorative HStack with no
-                        // tap target, so the chevron promised a disclosure that
-                        // never fired. Trailing New Space stays a sibling Button
-                        // so it does not toggle the section.
-                        groupHeader("Spaces", expanded: $spacesExpanded) {
-                            SidebarHeaderButton(systemName: "folder.badge.plus", title: "New Space") {
-                                model.showNewSpace = true
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 1) {
+                        StickySection(background: { VisualEffectView(material: .sidebar) }) {
+                            // Title + chevron used to be a decorative HStack with no
+                            // tap target, so the chevron promised a disclosure that
+                            // never fired. Trailing New Space stays a sibling Button
+                            // so it does not toggle the section.
+                            groupHeader("Spaces", expanded: $spacesExpanded) {
+                                SidebarHeaderButton(systemName: "folder.badge.plus", title: "New Space") {
+                                    model.showNewSpace = true
+                                }
+                            }
+                            .accessibilityIdentifier("sidebar.section.spaces")
+                        } content: {
+                            if spacesExpanded {
+                                allSpacesRow
+                                ForEach(model.visibleSpaces) { entry in
+                                    SpaceRowView(
+                                        entry: entry,
+                                        model: model,
+                                        grouped: groupBySpace,
+                                        draggingSpaceID: $draggingSpaceID,
+                                        spaceDrop: $spaceDrop
+                                    )
+                                    .id(entry.ref)
+                                    if groupBySpace, model.isSpaceExpanded(entry) {
+                                        ForEach(model.spaceTreeRows(entry)) { row in
+                                            treeRow(row)
+                                        }
+                                    }
+                                }
+                            }
+                            Spacer().frame(height: 10)
+                        }
+
+                        StickySection(background: { VisualEffectView(material: .sidebar) }) {
+                            groupHeader("Agents", expanded: $agentsExpanded) {
+                                SidebarHeaderButton(systemName: "square.and.pencil", title: "New Agent") {
+                                    model.showNewAgent = true
+                                }
+                            }
+                            .accessibilityIdentifier("sidebar.section.agents")
+                        } content: {
+                            if agentsExpanded {
+                                if model.visibleAgents.isEmpty {
+                                    Text(emptyAgentsHint)
+                                        .font(.system(size: 11.5))
+                                        .foregroundStyle(Theme.textGhost)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(8)
+                                }
+                                // Either kind: a shell split off an agent lists here, under it.
+                                ForEach(model.agentSectionRows) { row in
+                                    sectionRow(row)
+                                }
+                            }
+                            if terminalsSectionVisible {
+                                Spacer().frame(height: 10)
                             }
                         }
-                        .accessibilityIdentifier("sidebar.section.spaces")
-                    } content: {
-                        if spacesExpanded {
-                            allSpacesRow
-                            ForEach(model.visibleSpaces) { entry in
-                                SpaceRowView(
-                                    entry: entry,
-                                    model: model,
-                                    grouped: groupBySpace,
-                                    draggingSpaceID: $draggingSpaceID,
-                                    spaceDrop: $spaceDrop
-                                )
-                                if groupBySpace, model.isSpaceExpanded(entry) {
-                                    ForEach(model.spaceTreeRows(entry)) { row in
-                                        treeRow(row)
+
+                        if terminalsSectionVisible {
+                            StickySection(background: { VisualEffectView(material: .sidebar) }) {
+                                groupHeader("Terminals", expanded: $terminalsExpanded) {
+                                    SidebarHeaderButton(systemName: "terminal", title: "New Terminal") {
+                                        model.showNewTerminal = true
+                                    }
+                                }
+                                .accessibilityIdentifier("sidebar.section.terminals")
+                            } content: {
+                                if terminalsExpanded {
+                                    ForEach(model.terminalSectionRows) { row in
+                                        sectionRow(row)
+                                    }
+                                    ForEach(model.shellSessions) { session in
+                                        shellRow(session)
+                                            .contextMenu {
+                                                Button("Close Terminal", role: .destructive) {
+                                                    model.closeShellSession(session.id)
+                                                }
+                                            }
                                     }
                                 }
                             }
                         }
-                        Spacer().frame(height: 10)
                     }
-
-                    StickySection(background: { VisualEffectView(material: .sidebar) }) {
-                        groupHeader("Agents", expanded: $agentsExpanded) {
-                            SidebarHeaderButton(systemName: "square.and.pencil", title: "New Agent") {
-                                model.showNewAgent = true
-                            }
-                        }
-                        .accessibilityIdentifier("sidebar.section.agents")
-                    } content: {
-                        if agentsExpanded {
-                            if model.visibleAgents.isEmpty {
-                                Text(emptyAgentsHint)
-                                    .font(.system(size: 11.5))
-                                    .foregroundStyle(Theme.textGhost)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(8)
-                            }
-                            // Either kind: a shell split off an agent lists here, under it.
-                            ForEach(model.agentSectionRows) { row in
-                                sectionRow(row)
-                            }
-                        }
-                        if terminalsSectionVisible {
-                            Spacer().frame(height: 10)
-                        }
-                    }
-
-                    if terminalsSectionVisible {
-                        StickySection(background: { VisualEffectView(material: .sidebar) }) {
-                            groupHeader("Terminals", expanded: $terminalsExpanded) {
-                                SidebarHeaderButton(systemName: "terminal", title: "New Terminal") {
-                                    model.showNewTerminal = true
-                                }
-                            }
-                            .accessibilityIdentifier("sidebar.section.terminals")
-                        } content: {
-                            if terminalsExpanded {
-                                ForEach(model.terminalSectionRows) { row in
-                                    sectionRow(row)
-                                }
-                                ForEach(model.shellSessions) { session in
-                                    shellRow(session)
-                                        .contextMenu {
-                                            Button("Close Terminal", role: .destructive) {
-                                                model.closeShellSession(session.id)
-                                            }
-                                        }
-                                }
-                            }
-                        }
+                    .padding(.horizontal, 10)
+                    .stickySectionHeaders()
+                }
+                .clipped()
+                .onChange(of: spaceRevealTarget, initial: true) { previous, target in
+                    // Sidebar-row clicks update selection/highlight in place.
+                    // A later explicit activation can still reveal that pane.
+                    guard previous.selectionGeneration == target.selectionGeneration
+                            || previous.generation != target.generation,
+                          let space = target.space else { return }
+                    if spacesExpanded {
+                        proxy.scrollTo(space, anchor: .center)
+                    } else {
+                        spacesExpanded = true
                     }
                 }
-                .padding(.horizontal, 10)
-                .stickySectionHeaders()
+                .onChange(of: spacesExpanded) { _, expanded in
+                    if expanded, let space = spaceRevealTarget.space {
+                        proxy.scrollTo(space, anchor: .center)
+                    }
+                }
             }
-            .clipped()
 
             Spacer(minLength: 0)
             if showsMachineStats, let device = model.statsDevice {
@@ -206,6 +226,24 @@ struct SidebarView: View {
         }
         .frame(width: width)
         .background(VisualEffectView(material: .sidebar).ignoresSafeArea())
+    }
+
+    private struct SpaceRevealTarget: Equatable {
+        let space: SpaceRef?
+        let pane: PaneRef?
+        let generation: Int
+        let selectionGeneration: Int
+    }
+
+    /// Only navigation changes this value. Agent output/status updates may
+    /// redraw the sidebar, but must not undo a user's own scrolling.
+    private var spaceRevealTarget: SpaceRevealTarget {
+        let space = model.displayedPaneSpace.flatMap { space in
+            model.visibleSpaces.contains(where: { $0.ref == space }) ? space : nil
+        }
+        return SpaceRevealTarget(space: space, pane: model.selectedPane,
+                                 generation: model.sidebarRevealGeneration,
+                                 selectionGeneration: model.sidebarSelectionGeneration)
     }
 
     private var terminalsSectionVisible: Bool {
@@ -340,9 +378,10 @@ struct SidebarView: View {
     }
 
     private var allSpacesRow: some View {
-        let selected = model.selectedSpace == nil
+        let selected = model.selectedSpace == nil && model.displayedPaneSpace == nil
+            && model.selectedShellID == nil
         return Button {
-            model.selectSpace(nil)
+            model.selectSpace(nil, revealInSidebar: false)
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "square.grid.2x2")
@@ -429,7 +468,7 @@ struct SidebarView: View {
                 TerminalRowDragHost(
                     entryID: entry.id,
                     allowsDrag: draggable,
-                    onClick: { model.selectAgent(entry.ref) },
+                    onClick: { model.selectAgent(entry.ref, revealInSidebar: false) },
                     onRename: { model.terminalToRename = entry },
                     onOpenProject: { model.openProject(for: .terminal(entry)) },
                     onClose: { model.requestClosePane(entry.ref, name: entry.title) },
@@ -458,7 +497,7 @@ struct SidebarView: View {
                 )
             }
             .accessibilityAddTraits(.isButton)
-            .accessibilityAction { model.selectAgent(entry.ref) }
+            .accessibilityAction { model.selectAgent(entry.ref, revealInSidebar: false) }
             .accessibilityLabel(entry.title)
         }
     }
@@ -536,6 +575,7 @@ struct SidebarView: View {
             }
             HStack(spacing: 5) {
                 AgentKindBadge(kind: agent.agent)
+                    .lineLimit(1)
                 if showsSpace {
                     Text("·")
                         .font(.system(size: 11.5))
@@ -601,7 +641,7 @@ struct SidebarView: View {
                 pluginActions: model.session(entry.device.id).pluginActions,
                 grazrReport: model.session(entry.device.id).grazrReport,
                 allowsDrag: draggable,
-                onClick: { model.selectAgent(entry.ref) },
+                onClick: { model.selectAgent(entry.ref, revealInSidebar: false) },
                 onRename: { model.agentToRename = entry },
                 onOpenProject: { model.openProject(for: .agent(entry)) },
                 onPluginAction: { model.runPluginAction($0, for: entry) },
@@ -642,7 +682,7 @@ struct SidebarView: View {
             )
         }
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction { model.selectAgent(entry.ref) }
+        .accessibilityAction { model.selectAgent(entry.ref, revealInSidebar: false) }
         .accessibilityLabel(accessibilityLabel(unread: unread))
         // The drag host covers the row. Place this control above it so a
         // footer click opens this agent's history instead of selecting alone.
@@ -1057,7 +1097,8 @@ private struct SpaceRowView: View {
     @State private var hovered = false
 
     var body: some View {
-        let selected = model.selectedSpace == entry.ref
+        let selected = model.selectedShellID == nil
+            && (model.displayedPaneSpace ?? model.selectedSpace) == entry.ref
         let expanded = model.isSpaceExpanded(entry)
         HStack(spacing: 0) {
             if grouped {
@@ -1103,7 +1144,7 @@ private struct SpaceRowView: View {
                 SpaceRowDragHost(
                     entryID: entry.id,
                     label: entry.workspace.label,
-                    onClick: { model.selectSpace(entry.ref) },
+                    onClick: { model.selectSpace(entry.ref, revealInSidebar: false) },
                     onNewAgent: { model.showNewAgent(in: entry.ref) },
                     onNewTerminal: { model.showNewTerminal(in: entry.ref) },
                     onOpenProject: { model.openProject(entry.ref) },
@@ -1133,8 +1174,9 @@ private struct SpaceRowView: View {
             }
             // On the content only, so the chevron keeps its own name for VoiceOver.
             .accessibilityAddTraits(.isButton)
-            .accessibilityAction { model.selectSpace(entry.ref) }
+            .accessibilityAction { model.selectSpace(entry.ref, revealInSidebar: false) }
             .accessibilityLabel(accessibilityLabel)
+            .accessibilityAddTraits(selected ? .isSelected : [])
         }
         .frame(height: 30)
         .background(
