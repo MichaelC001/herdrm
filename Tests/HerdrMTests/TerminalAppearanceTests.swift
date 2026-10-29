@@ -37,7 +37,13 @@ final class TerminalAppearanceTests: XCTestCase {
         window.contentView = view
         view.setSurfaceVisible(true)
         view.layoutSubtreeIfNeeded()
-        try await waitUntil { view.attachedSurface != nil }
+        try await waitUntil {
+            guard view.attachedSurface != nil, let grid = view.gridMetrics, let viewport = host.viewport
+            else { return false }
+            return grid.columns == viewport.columns && grid.rows == viewport.rows
+                && grid.widthPixels == UInt32(view.bounds.width * window.backingScaleFactor)
+                && grid.heightPixels == UInt32(view.bounds.height * window.backingScaleFactor)
+        }
         XCTAssertNotNil(view.attachedSurface)
 
         // A small, test-owned PTY models herdr attach's full repaint on WINCH.
@@ -155,7 +161,8 @@ final class TerminalAppearanceTests: XCTestCase {
 }
 
 @MainActor
-private final class AppearanceDelegate: TerminalSurfaceLifecycleDelegate, TerminalSurfaceTitleDelegate {
+private final class AppearanceDelegate: TerminalSurfaceLifecycleDelegate, TerminalSurfaceTitleDelegate,
+    TerminalSurfaceGridResizeDelegate {
     private weak var view: LineBreakTerminalView?
     private(set) var redrawCount = 0
 
@@ -163,6 +170,7 @@ private final class AppearanceDelegate: TerminalSurfaceLifecycleDelegate, Termin
 
     func terminalDidAttachSurface(_ surface: TerminalSurface) { view?.attachedSurface = surface }
     func terminalDidDetachSurface() { view?.attachedSurface = nil }
+    func terminalDidResize(_ size: TerminalGridMetrics) { view?.gridMetrics = size }
     func terminalDidChangeTitle(_ title: String) {
         redrawCount = Int(title.split(separator: "-").last ?? "") ?? 0
     }
