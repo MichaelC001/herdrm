@@ -1342,7 +1342,6 @@ final class LineBreakTerminalView: AppTerminalView {
     override func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
         var rect = super.firstRect(forCharacterRange: range, actualRange: actualRange)
         if range.length == 0 {
-            if range.location != NSNotFound { rect.origin.x += rect.width * Double(range.location) }
             rect.size.width = 0
         }
         actualRange?.pointee = range
