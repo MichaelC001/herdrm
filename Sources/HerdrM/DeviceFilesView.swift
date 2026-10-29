@@ -16,6 +16,15 @@ final class DeviceFileBrowserModel: ObservableObject {
 
     private var service = DeviceFileService(device: .local)
     private var generation = 0
+    private let listDirectory: @MainActor (DeviceFileService, String, Bool) async throws -> DeviceDirectoryListing
+
+    init(
+        listDirectory: @escaping @MainActor (DeviceFileService, String, Bool) async throws -> DeviceDirectoryListing = {
+            try await $0.listDirectory(at: $1, includingHidden: $2)
+        }
+    ) {
+        self.listDirectory = listDirectory
+    }
 
     var selectedEntries: [DeviceFileEntry] {
         entries.filter { $0.kind == .regularFile && selectedPaths.contains($0.path) }
@@ -35,7 +44,9 @@ final class DeviceFileBrowserModel: ObservableObject {
     }
 
     func refresh() async {
-        await load(pathText)
+        // Automatic refreshes after transfers must not submit a path draft.
+        let displayedPath = (currentPath as NSString).abbreviatingWithTildeInPath
+        await load(currentPath, updatePathText: pathText == displayedPath)
     }
 
     func navigate(to path: String) async {
@@ -62,7 +73,7 @@ final class DeviceFileBrowserModel: ObservableObject {
 
     func toggleHidden() async {
         includesHidden.toggle()
-        await load(currentPath)
+        await refresh()
     }
 
     func sortBy(_ column: DeviceFileSort.Column) {
@@ -70,23 +81,24 @@ final class DeviceFileBrowserModel: ObservableObject {
         entries = sort.sorted(entries)
     }
 
-    private func load(_ requestedPath: String) async {
+    private func load(_ requestedPath: String, updatePathText: Bool = true) async {
         generation += 1
         let requestGeneration = generation
+        let pathTextAtRequest = pathText
         isLoading = true
         error = nil
         defer {
             if requestGeneration == generation { isLoading = false }
         }
         do {
-            let listing = try await service.listDirectory(
-                at: requestedPath,
-                includingHidden: includesHidden
-            )
+            let listing = try await listDirectory(service, requestedPath, includesHidden)
             guard requestGeneration == generation, !Task.isCancelled else { return }
             if currentPath != listing.path { selectedPaths = [] }
             currentPath = listing.path
-            pathText = (listing.path as NSString).abbreviatingWithTildeInPath
+            // A slow directory reply must not replace a path being edited.
+            if updatePathText && pathText == pathTextAtRequest {
+                pathText = (listing.path as NSString).abbreviatingWithTildeInPath
+            }
             entries = sort.sorted(listing.entries)
             selectedPaths.formIntersection(entries.filter { $0.kind == .regularFile }.map(\.path))
         } catch is CancellationError {

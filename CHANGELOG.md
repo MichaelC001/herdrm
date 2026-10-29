@@ -25,6 +25,9 @@ the Sparkle update description — a release without a section here fails CI.
   on the device, so ⇧⌘H and the prompt rail show the conversation instead of
   nothing. On SSH devices whose login shell is zsh, history no longer reports
   a disconnect when the conversation isn't in the first directory it checks.
+- **Files keeps an edited path when a directory reply arrives.** Refreshing or
+  completing a transfer reloads the current directory without submitting an
+  unfinished path. Explicit navigation still shows the resolved directory.
 
 ## [0.6.21] - 2026-10-21
 
