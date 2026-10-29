@@ -5,6 +5,13 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
+## [Unreleased]
+
+### Fixed
+- **Files keeps an edited path when a directory reply arrives.** Refreshing or
+  completing a transfer reloads the current directory without submitting an
+  unfinished path. Explicit navigation still shows the resolved directory.
+
 ## [0.6.21] - 2026-10-21
 
 ### Fixed
