@@ -41,8 +41,6 @@ the Sparkle update description — a release without a section here fails CI.
   setting off now thickens glyphs again; it had no effect before.
 - **Third-party voice input inserts into the terminal.** Input methods such
   as Doubao get a valid insertion point when no composition is active.
-- **File sorting ties follow the selected direction.** Files with the same
-  size or modification date are ordered by name in the chosen direction.
 - **Cancelling a file operation never signals a reused PID.** The delayed
   force-kill is bound to the original process.
 - **Unread completion dots clear when opened.** Selecting an agent or its
