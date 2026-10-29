@@ -436,6 +436,10 @@ private enum ClipboardFileError: LocalizedError {
 final class LineBreakTerminalView: AppTerminalView {
     /// Report clicks even when this view was already the first responder.
     var onActivate: (() -> Void)?
+
+    /// Kept-alive attaches behind another pane or panel must not receive a
+    /// deferred focus request while SwiftUI is changing the selection.
+    var allowsAttachFocus = true
     /// When false, mouse button events always stay local even if the TUI
     /// requested mouse reporting (Shift bypasses it either way).
     var mouseReportingEnabled = true
@@ -2177,6 +2181,7 @@ struct AttachTerminalView: NSViewRepresentable {
         view.configuration = TerminalSurfaceOptions(backend: .inMemory(host.session))
         configureAppearance(view)
         view.setSurfaceVisible(isVisible)
+        view.allowsAttachFocus = isVisible
 
         let service = HerdrService(device: device)
         view.attachmentService = service
@@ -2189,15 +2194,8 @@ struct AttachTerminalView: NSViewRepresentable {
         if let sessionID {
             AttachViewRegistry.register(view, for: sessionID)
         }
-        // SwiftUI throws this view away and builds a new one whenever the selected
-        // agent changes (the `.id("attach-…")` in ContentView), and a fresh NSView is
-        // never first responder — so keystrokes went nowhere until the user clicked.
-        // The hop to the next runloop pass is required: while `makeNSView` runs the
-        // view has no `window` yet.
-        DispatchQueue.main.async { [weak view] in
-            guard let view, let window = view.window else { return }
-            window.makeFirstResponder(view)
-        }
+        // Registration completes a pending selection's focus request after the
+        // view joins its window. Other newly mounted panes never self-focus.
         onViewReady?(view)
         return view
     }
@@ -2210,6 +2208,7 @@ struct AttachTerminalView: NSViewRepresentable {
         configureAppearance(nsView)
         nsView.pathContext = TerminalPathContext(workingDirectory: workingDirectory, isLocal: device.isLocal)
         nsView.setSurfaceVisible(isVisible)
+        nsView.allowsAttachFocus = isVisible
     }
 
     /// Re-applied on update because capabilities can arrive after the terminal
@@ -2338,11 +2337,14 @@ enum AttachViewRegistry {
     private struct WeakView { weak var view: LineBreakTerminalView? }
     private static let lock = NSLock()
     private static var views: [String: WeakView] = [:]
+    @MainActor private static var selectedID: String?
 
+    @MainActor
     static func register(_ view: LineBreakTerminalView, for id: String) {
         lock.lock()
         views[id] = WeakView(view: view)
         lock.unlock()
+        if selectedID == id { scheduleFocus(id) }
     }
 
     static func unregister(_ id: String) {
@@ -2373,9 +2375,27 @@ enum AttachViewRegistry {
         return views.values.compactMap { $0.view }
     }
 
-    static func focus(_ id: String) {
+    /// Called before SwiftUI mounts a first-time attach. A nil responder is
+    /// preferable to sending keys into the previous agent during that interval.
+    @MainActor
+    static func select(_ id: String?) {
+        selectedID = id
+        for old in liveViews where self.id(for: old) != id {
+            if let window = old.window, window.firstResponder === old {
+                window.makeFirstResponder(nil)
+            }
+        }
+        if let id { scheduleFocus(id) }
+    }
+
+    @MainActor
+    static func focus(_ id: String) { select(id) }
+
+    @MainActor
+    private static func scheduleFocus(_ id: String) {
         DispatchQueue.main.async {
-            guard let view = view(for: id), let window = view.window else { return }
+            guard selectedID == id, let view = view(for: id),
+                  view.allowsAttachFocus, let window = view.window else { return }
             window.makeFirstResponder(view)
         }
     }

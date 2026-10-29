@@ -49,6 +49,12 @@ final class SidebarHarness {
 
     // MARK: - Actions
 
+    func showReconnectOverlay(_ view: TerminalReconnectOverlay) {
+        root.rootView = AnyView(view)
+        root.layoutSubtreeIfNeeded()
+        settle()
+    }
+
     /// Click a named action at the top of the sidebar through real hit-testing.
     func clickAction(named name: String) throws {
         let button = try XCTUnwrap(AccessibilityProbe.elements(in: window).first {
@@ -133,6 +139,37 @@ final class SidebarHarness {
         settle()
     }
 
+    func mountTerminal(_ view: LineBreakTerminalView, focus: Bool = false) {
+        root.addSubview(view)
+        if focus { window.makeFirstResponder(view) }
+    }
+
+    var terminalFirstResponder: NSResponder? { window.firstResponder }
+
+    func activateWindow() {
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        // The command-line test host has no NSApplication.run() loop. Drain
+        // its AppKit events so the requested activation actually takes effect.
+        let deadline = Date().addingTimeInterval(1)
+        while Date() < deadline && !(NSApp.isActive && window.isKeyWindow) {
+            if let event = NSApp.nextEvent(matching: .any, until: Date().addingTimeInterval(0.05),
+                                          inMode: .default, dequeue: true) {
+                NSApp.sendEvent(event)
+            }
+        }
+        settle()
+    }
+
+    func settleTerminalFocus() async {
+        // Let deferred AppKit focus run even when the test itself is executing
+        // on the main dispatch queue, where a nested RunLoop cannot drain it.
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        settle()
+    }
+
     /// Click, with the mouse, the disclosure chevron on a space's row (grouped mode).
     func clickSpaceDisclosure(_ space: String) throws {
         try click(atScreen: XCTUnwrap(spaceDisclosure(space).frame))
@@ -198,6 +235,35 @@ final class SidebarHarness {
         let all = AccessibilityProbe.elements(in: window)
         guard let start = all.firstIndex(where: { $0.role == "AXSheet" }) else { return [] }
         return all[start...].filter { $0.role == "AXButton" }.compactMap(\.name)
+    }
+
+    /// Hit-test the actual sheet, so a clipped or covered agent choice cannot
+    /// pass just because its accessibility action exists.
+    func clickSheetButton(named name: String) throws {
+        let sheet = try XCTUnwrap(window.sheets.first)
+        let all = AccessibilityProbe.elements(in: window)
+        let start = try XCTUnwrap(all.firstIndex { $0.role == "AXSheet" })
+        let button = try XCTUnwrap(all[start...].first { $0.role == "AXButton" && $0.name == name })
+        let frame = try XCTUnwrap(button.frame)
+        XCTAssertGreaterThan(frame.height, 0)
+        let screenTop = try XCTUnwrap(NSScreen.screens.first).frame.maxY
+        let point = sheet.convertPoint(fromScreen: NSPoint(x: frame.midX, y: screenTop - frame.midY))
+        let content = try XCTUnwrap(sheet.contentView)
+        let target = try XCTUnwrap(content.hitTest(content.superview?.convert(point, from: nil) ?? point))
+        let down = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: sheet.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+        let up = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseUp, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime + 0.05,
+            windowNumber: sheet.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0))
+        if target.acceptsFirstMouse(for: down) {
+            sheet.sendEvent(down)
+            sheet.sendEvent(up)
+        } else {
+            target.mouseDown(with: down)
+            target.mouseUp(with: up)
+        }
+        settle()
     }
 
     /// What VoiceOver reads for the disclosure chevron on a space's row.

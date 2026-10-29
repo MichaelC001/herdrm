@@ -197,10 +197,14 @@ final class AppModel: ObservableObject {
     @Published private(set) var sidebarSelectionGeneration = 0
     @Published var selectedPane: PaneRef? {
         didSet {
-            // Leaving a finished agent marks it viewed. Staying on it while
-            // the turn ends must not swallow the unread flag.
-            if let old = oldValue, old != selectedPane {
-                unreadAgents.remove(AgentUnreadKey(deviceID: old.deviceID, paneID: old.paneID))
+            // Refreshes can change selection in a background or covered window.
+            // Only a visible result or an explicit navigation action is read.
+            markVisibleAgentRead()
+            if selectedPane != oldValue {
+                // Release the previous terminal during the selection event. The
+                // first attach can take time to mount; it must not leave input
+                // going to the agent we just left.
+                AttachViewRegistry.select(selectedAttachedEntry?.id)
             }
             noteVisibleAttachSessions()
             if let pane = selectedPane, pane != oldValue {
@@ -307,6 +311,7 @@ final class AppModel: ObservableObject {
         didSet {
             if detailMode != .project { projectSpaceOverride = nil }
             synchronizeConversationHistory()
+            if detailMode == .terminal { markVisibleAgentRead() }
         }
     }
     /// The Space "Project…" was opened on. Kept apart from `selectedSpace`, the
@@ -672,6 +677,27 @@ final class AppModel: ObservableObject {
 
     func isUnread(_ entry: AgentEntry) -> Bool {
         unreadAgents.contains(AgentUnreadKey(deviceID: entry.device.id, paneID: entry.agent.paneID))
+    }
+
+    private func markSelectedAgentRead() {
+        guard let pane = selectedPane else { return }
+        unreadAgents.remove(AgentUnreadKey(deviceID: pane.deviceID, paneID: pane.paneID))
+    }
+
+    /// A result already visible in the active terminal needs no unread badge.
+    /// Background windows and covering detail views keep their unread state.
+    func markVisibleAgentRead() {
+        guard NSApplication.shared.isActive, !isDetailCovered, selectedShellID == nil,
+              let entry = selectedAttachedEntry,
+              AttachViewRegistry.view(for: entry.id)?.window?.isKeyWindow == true
+        else { return }
+        markSelectedAgentRead()
+    }
+
+    func updateUnreadAgents(previous: [String: AgentStatus], agents: [AgentInfo], deviceID: UUID) {
+        unreadAgents = AgentUnread.applying(previous: previous, agents: agents,
+                                           unread: unreadAgents, deviceID: deviceID)
+        markVisibleAgentRead()
     }
 
     // MARK: - Sidebar tree
@@ -1220,6 +1246,7 @@ final class AppModel: ObservableObject {
               let next = TabLayoutGeometry.neighbor(of: selected.paneID, in: layout.root, direction: direction)
         else { return }
         selectedPane = PaneRef(deviceID: selected.deviceID, paneID: next)
+        markSelectedAgentRead()
     }
 
     /// Keyboard focus to the next (+1) or previous (-1) pane in the tab's reading
@@ -1230,6 +1257,7 @@ final class AppModel: ObservableObject {
         guard let index = order.firstIndex(of: selected.paneID), order.count > 1 else { return }
         let next = order[((index + offset) % order.count + order.count) % order.count]
         selectedPane = PaneRef(deviceID: selected.deviceID, paneID: next)
+        markSelectedAgentRead()
     }
 
     /// The sidebar's confirmed close, for the selected pane. In a tab layout the
@@ -1257,6 +1285,7 @@ final class AppModel: ObservableObject {
     func focusVisiblePane(_ ref: PaneRef, revealSpace: Bool = false) {
         guard visiblePaneRefs.contains(ref) else { return }
         if ref != selectedPane { selectedPane = ref }
+        markSelectedAgentRead()
         // A selection also assigns first responder programmatically. Only an
         // explicit terminal activation should repeat a sidebar reveal.
         if revealSpace { revealDisplayedSpaceInSidebar() }
@@ -1303,7 +1332,9 @@ final class AppModel: ObservableObject {
     /// The space a New Agent / New Terminal sheet should open on.
     func takeNewItemSpace() -> SpaceRef? {
         defer { newItemSpace = nil }
-        return newItemSpace ?? selectedSpace
+        return newItemSpace ?? selectedSpace ?? selectedAttachedEntry.map {
+            SpaceRef(deviceID: $0.device.id, workspaceID: $0.workspaceID)
+        }
     }
 
     func selectSpace(_ ref: SpaceRef?, revealInSidebar: Bool = true) {
@@ -1311,14 +1342,18 @@ final class AppModel: ObservableObject {
         defer {
             if revealInSidebar { revealDisplayedSpaceInSidebar() }
         }
-        isFileManagerActive = false
         selectedSpace = ref
         selectedShellID = nil
         if let entry = selectedAttachedEntry {
-            if ref == nil { return }
-            if entry.device.id == ref!.deviceID && entry.workspaceID == ref!.workspaceID { return }
+            if ref == nil || (entry.device.id == ref!.deviceID && entry.workspaceID == ref!.workspaceID) {
+                isFileManagerActive = false
+                markSelectedAgentRead()
+                return
+            }
         }
         selectedPane = preferredVisibleAgent()?.ref ?? firstVisiblePaneRef
+        isFileManagerActive = false
+        markSelectedAgentRead()
     }
 
     func setDeviceFilter(_ id: UUID?) {
@@ -1345,13 +1380,14 @@ final class AppModel: ObservableObject {
 
     /// Jump target used by the search sheet and by notification clicks.
     func reveal(_ ref: PaneRef) {
-        isFileManagerActive = false
         if let filter = deviceFilter, filter != ref.deviceID {
             deviceFilter = nil
         }
         selectedSpace = nil
         selectedPane = ref
         selectedShellID = nil
+        isFileManagerActive = false
+        markSelectedAgentRead()
         revealDisplayedSpaceInSidebar()
         // Only the search sheet needs the deferred request: its dismissal restores the
         // parent window's previous responder after the view tree has asked for focus.
@@ -1480,9 +1516,10 @@ final class AppModel: ObservableObject {
 
     func selectAgent(_ ref: PaneRef, revealInSidebar: Bool = true) {
         if !revealInSidebar { sidebarSelectionGeneration += 1 }
-        isFileManagerActive = false
         selectedPane = ref
         selectedShellID = nil
+        isFileManagerActive = false
+        markSelectedAgentRead()
         if revealInSidebar { revealDisplayedSpaceInSidebar() }
     }
 
@@ -1510,8 +1547,8 @@ final class AppModel: ObservableObject {
     }
 
     func selectShell(_ id: UUID) {
-        isFileManagerActive = false
         selectedShellID = id
+        isFileManagerActive = false
         ShellViewRegistry.focus(id)
     }
 
@@ -2259,10 +2296,9 @@ final class AppModel: ObservableObject {
                 refreshRequested.insert(deviceID)
                 return true
             }
-            unreadAgents = AgentUnread.applying(
+            updateUnreadAgents(
                 previous: previousStatuses[deviceID] ?? [:],
                 agents: snapshot.agents,
-                unread: unreadAgents,
                 deviceID: device.id
             )
             notifyTransitions(
@@ -2381,10 +2417,9 @@ final class AppModel: ObservableObject {
         guard state.agents[index].status != status else { return true }
         let previous = previousStatuses[deviceID] ?? [:]
         state.agents[index] = state.agents[index].updatingStatus(status)
-        unreadAgents = AgentUnread.applying(
+        updateUnreadAgents(
             previous: previous,
             agents: state.agents,
-            unread: unreadAgents,
             deviceID: deviceID
         )
         notifyTransitions(
