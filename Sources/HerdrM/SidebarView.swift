@@ -193,12 +193,12 @@ struct SidebarView: View {
                             || previous.generation != target.generation,
                           let space = target.space else { return }
                     // A collapsed Spaces section stays collapsed: the user chose that.
-                    // No anchor, so a row that is already visible doesn't move.
-                    if spacesExpanded { proxy.scrollTo(space) }
+                    // Centred, so the row clears the pinned section header.
+                    if spacesExpanded { proxy.scrollTo(space, anchor: .center) }
                 }
                 .onChange(of: spacesExpanded) { _, expanded in
                     if expanded, let space = spaceRevealTarget.space {
-                        proxy.scrollTo(space)
+                        proxy.scrollTo(space, anchor: .center)
                     }
                 }
             }
