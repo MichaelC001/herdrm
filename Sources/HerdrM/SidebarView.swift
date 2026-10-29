@@ -192,15 +192,13 @@ struct SidebarView: View {
                     guard previous.selectionGeneration == target.selectionGeneration
                             || previous.generation != target.generation,
                           let space = target.space else { return }
-                    if spacesExpanded {
-                        proxy.scrollTo(space, anchor: .center)
-                    } else {
-                        spacesExpanded = true
-                    }
+                    // A collapsed Spaces section stays collapsed: the user chose that.
+                    // No anchor, so a row that is already visible doesn't move.
+                    if spacesExpanded { proxy.scrollTo(space) }
                 }
                 .onChange(of: spacesExpanded) { _, expanded in
                     if expanded, let space = spaceRevealTarget.space {
-                        proxy.scrollTo(space, anchor: .center)
+                        proxy.scrollTo(space)
                     }
                 }
             }

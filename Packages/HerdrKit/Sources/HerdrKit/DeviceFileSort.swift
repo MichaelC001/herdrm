@@ -45,7 +45,9 @@ public struct DeviceFileSort: Equatable, Sendable {
             }
 
             let byName = lhs.name.localizedStandardCompare(rhs.name)
-            return ascending ? byName == .orderedAscending : byName == .orderedDescending
+            return column == .name && !ascending
+                ? byName == .orderedDescending
+                : byName == .orderedAscending
         }
     }
 }
