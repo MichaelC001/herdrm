@@ -75,7 +75,9 @@ final class TerminalAppearanceTests: XCTestCase {
         let pid = host.process.shellPid
         XCTAssertGreaterThan(pid, 0)
         try await waitUntil {
-            delegate.redrawCount > 0 && session.readViewportText()?.contains("MESSAGE test2") == true
+            delegate.redrawCount > 0
+                && session.readViewportText()?.contains("INPUT test1") == true
+                && session.readViewportText()?.contains("MESSAGE test2") == true
         }
         let originalText = try XCTUnwrap(session.readViewportText())
         XCTAssertTrue(originalText.contains("INPUT test1"))
@@ -137,10 +139,16 @@ final class TerminalAppearanceTests: XCTestCase {
     }
 
     private func waitUntil(_ condition: () -> Bool) async throws {
-        for _ in 0..<100 {
+        // A fresh CI host may need longer to start Python and the first surface.
+        // Never compare later repaint frames against an unready blank baseline.
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
             if condition() { return }
             try await Task.sleep(nanoseconds: 20_000_000)
         }
+        throw NSError(domain: "TerminalAppearanceTests", code: 1, userInfo: [
+            NSLocalizedDescriptionKey: "Timed out waiting for the terminal fixture to become ready",
+        ])
     }
 
 
