@@ -423,6 +423,8 @@ private enum ClipboardFileError: LocalizedError {
 /// text in the grid; the only hook needed here is keeping ⌘/⌃ chords off the
 /// PTY while `hasMarkedText()`.
 final class LineBreakTerminalView: AppTerminalView {
+    /// Report clicks even when this view was already the first responder.
+    var onActivate: (() -> Void)?
     /// When false, mouse button events always stay local even if the TUI
     /// requested mouse reporting (Shift bypasses it either way).
     var mouseReportingEnabled = true
@@ -596,6 +598,7 @@ final class LineBreakTerminalView: AppTerminalView {
         }
         // Ghostty focuses on the press; a held-back press must still do that.
         window?.makeFirstResponder(self)
+        onActivate?()
         heldPress = event
         let actions = gestureRouter.press(
             at: event.locationInWindow,
@@ -2120,6 +2123,7 @@ struct AttachTerminalView: NSViewRepresentable {
     /// Delivers the created view so a focus tracker can observe its window's
     /// first responder without retaining the terminal itself.
     var onViewReady: ((LineBreakTerminalView) -> Void)? = nil
+    var onActivate: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -2127,6 +2131,7 @@ struct AttachTerminalView: NSViewRepresentable {
         let host = TerminalProcessHost()
         let view = LineBreakTerminalView(frame: .zero)
         view.processHost = host
+        view.onActivate = onActivate
         host.onOutput = { [weak view] in view?.thumbnailOutputArrived() }
         configurePasteHandling(view)
         context.coordinator.view = view
@@ -2168,6 +2173,7 @@ struct AttachTerminalView: NSViewRepresentable {
 
     func updateNSView(_ nsView: LineBreakTerminalView, context: Context) {
         nsView.historyService = historyService
+        nsView.onActivate = onActivate
         configurePasteHandling(nsView)
         context.coordinator.onExit = onExit
         configureAppearance(nsView)

@@ -859,7 +859,8 @@ struct DetailView: View {
                 historyService: model.service(for: session.device),
                 onAttachmentError: { model.actionError = $0 },
                 onAttachmentUploadingChanged: { uploadingAttachment = $0 },
-                onExit: { code in endedAttach[session.id] = code }
+                onExit: { code in endedAttach[session.id] = code },
+                onActivate: { model.focusVisiblePane(session.ref, revealSpace: true) }
             )
                 // Keyed on the retry generation only — NOT colorScheme. A theme toggle
                 // must re-theme live via updateNSView (as the split shell already does);
