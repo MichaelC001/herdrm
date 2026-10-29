@@ -5,6 +5,14 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
+## [Unreleased]
+
+### Fixed
+- **Wrapped terminal links open their complete destination.** Command-click
+  joins URLs split across terminal rows or a narrower parenthesized text
+  column, including while an agent captures the mouse. Explicit OSC 8
+  hyperlinks retain their own destination even when their label is a URL.
+
 ## [0.6.21] - 2026-10-21
 
 ### Fixed

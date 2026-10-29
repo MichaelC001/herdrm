@@ -584,14 +584,20 @@ final class LineBreakTerminalView: AppTerminalView {
     override func mouseDown(with event: NSEvent) {
         hideLinkPopup()
         pendingLinkClick = nil
-        if isMouseCaptured, mouseReportingEnabled,
-           event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-               .subtracting([.capsLock, .function]) == .command,
-           let url = hoveredLink ?? linkURL(at: event) {
-            // A captured ⌘-click would reach the TUI, and fullscreen Claude
-            // Code opens links itself — with `open` on its own host, which for
-            // a remote device is the remote Mac. The whole gesture stays here.
-            pendingLinkClick = url
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            .subtracting([.capsLock, .function]) == .command {
+            // Let Ghostty distinguish OSC 8 targets from text matches. Shift
+            // keeps the gesture local when a remote TUI captures the mouse.
+            pendingLinkClick = LinkClick(
+                point: event.locationInWindow,
+                printedURL: linkHit(atWindowPoint: event.locationInWindow)?.link.url
+            )
+            let localEvent = self.event(event, for: .local)
+            // The embedded core ignores same-position mouse updates, even
+            // when Shift changed. Re-enter with the local modifiers so its
+            // native link hover is refreshed before the press and release.
+            sendMousePos(x: -1, y: -1, modifiers: TerminalInputModifiers(from: localEvent.modifierFlags))
+            super.mouseDown(with: localEvent)
             return
         }
         // Ghostty focuses on the press; a held-back press must still do that.
@@ -608,14 +614,25 @@ final class LineBreakTerminalView: AppTerminalView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard pendingLinkClick == nil else { return }
+        if let click = pendingLinkClick {
+            if hypot(event.locationInWindow.x - click.point.x, event.locationInWindow.y - click.point.y)
+                >= MouseGestureRouter.dragThreshold {
+                pendingLinkClick?.dragged = true
+            }
+            super.mouseDragged(with: self.event(event, for: .local))
+            return
+        }
         perform(gestureRouter.drag(to: event.locationInWindow), with: event)
     }
 
     override func mouseUp(with event: NSEvent) {
-        if let url = pendingLinkClick {
-            pendingLinkClick = nil
-            Self.openClickedLink(url, isLocal: pathContext?.isLocal ?? false)
+        if pendingLinkClick != nil {
+            defer { pendingLinkClick = nil }
+            super.mouseUp(with: self.event(event, for: .local))
+            if let click = pendingLinkClick, !click.opened, !click.dragged,
+               let url = click.printedURL {
+                openLink(url, kind: .unknown)
+            }
             return
         }
         defer { heldPress = nil }
@@ -624,21 +641,37 @@ final class LineBreakTerminalView: AppTerminalView {
 
     // MARK: Links under mouse capture
 
-    /// The link Ghostty reports under a ⌘-hovering pointer (URL match or
-    /// OSC 8 target). Ghostty may not report it while a TUI captures the
-    /// mouse, so `linkURL(at:)` backs it up from the screen text.
+    /// The link Ghostty reports under a ⌘-hovering pointer. This string alone
+    /// cannot distinguish an OSC 8 target from a per-row text match.
     var hoveredLink: String?
+    /// The opener is replaceable so click tests never launch an application.
+    var linkOpener: (String, Bool) -> Void = { url, isLocal in
+        LineBreakTerminalView.openClickedLink(url, isLocal: isLocal)
+    }
+
+    func openLink(_ url: String, kind: TerminalOpenURLKind) {
+        let target: String
+        // Native open-url callbacks hold the terminal lock. Read screen text
+        // before the gesture enters Ghostty, never re-enter its reader here.
+        if case .unknown = kind, let printed = pendingLinkClick?.printedURL {
+            target = printed
+        } else {
+            target = url
+        }
+        pendingLinkClick?.opened = true
+        linkOpener(target, pathContext?.isLocal ?? false)
+    }
     /// A ⌘-click taken locally: its drag and release must not reach the TUI.
-    private var pendingLinkClick: String?
+    private struct LinkClick {
+        let point: NSPoint
+        let printedURL: String?
+        var opened = false
+        var dragged = false
+    }
+    private var pendingLinkClick: LinkClick?
 
     /// Ghostty's default window padding, in points.
     private static let gridPadding: CGFloat = 2
-
-    /// The URL printed under the click, reading the clicked row plus the rows
-    /// it soft-wraps into (a long URL fills its row edge to edge).
-    private func linkURL(at event: NSEvent) -> String? {
-        linkHit(atWindowPoint: event.locationInWindow)?.link.url
-    }
 
     /// The cell grid under a window point, and the link printed there.
     private func linkHit(atWindowPoint windowPoint: NSPoint) -> (link: TerminalLink, rowRect: NSRect)? {
@@ -708,7 +741,8 @@ final class LineBreakTerminalView: AppTerminalView {
     /// The link printed at a cell: `text` exactly as shown (rows rejoined, no
     /// line breaks) for copying, `url` normalized for opening.
     static func link(in lines: [String], row: Int, column: Int, columns: Int) -> TerminalLink? {
-        guard let (joined, clickOffset) = joinedRow(in: lines, row: row, column: column, columns: columns),
+        guard let (joined, clickOffset) = parenthesizedLinkRows(in: lines, row: row, column: column)
+            ?? joinedRow(in: lines, row: row, column: column, columns: columns),
               let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
         else { return nil }
         let range = NSRange(joined.startIndex..., in: joined)
@@ -720,6 +754,55 @@ final class LineBreakTerminalView: AppTerminalView {
                   let url = match.url
             else { return nil }
             return TerminalLink(text: matched, url: url.absoluteString)
+        }
+        return nil
+    }
+
+    /// Codex prints a labeled URL in parentheses and may wrap it inside its
+    /// content column. Only that explicit wrapper permits joining short rows;
+    /// a bare URL followed by another line still ends at the first row.
+    private static func parenthesizedLinkRows(
+        in lines: [String], row: Int, column: Int
+    ) -> (text: String, offset: Int)? {
+        guard lines.indices.contains(row), column >= 0 else { return nil }
+        for first in stride(from: row, through: 0, by: -1) {
+            guard let opening = lines[first].range(of: #"\((?:https?://|mailto:)"#, options: .regularExpression)
+            else { continue }
+            var joined = ""
+            var clickOffset: Int?
+            var parentheses = 1
+            for index in first..<lines.count {
+                let line = lines[index]
+                let start = index == first ? line.index(after: opening.lowerBound)
+                    : line.firstIndex(where: { !$0.isWhitespace }) ?? line.endIndex
+                let closing = line[start...].firstIndex { character in
+                    if character == "(" { parentheses += 1 }
+                    if character == ")" { parentheses -= 1 }
+                    return parentheses == 0
+                }
+                let end = closing ?? line.endIndex
+                let fragment = String(line[start..<end]).trimmingCharacters(in: .whitespaces)
+                guard !fragment.isEmpty, !fragment.contains(where: \.isWhitespace) else { break }
+                if index == row {
+                    var width = 0
+                    var offset = joined.utf16.count - line[..<start].utf16.count
+                    for character in line[..<end] {
+                        let next = width + cellWidth(character)
+                        if column < next {
+                            if offset >= joined.utf16.count,
+                               offset < joined.utf16.count + fragment.utf16.count { clickOffset = offset }
+                            break
+                        }
+                        width = next
+                        offset += character.utf16.count
+                    }
+                }
+                joined += fragment
+                if closing != nil {
+                    if index >= row, let clickOffset { return (joined, clickOffset) }
+                    break
+                }
+            }
         }
         return nil
     }
@@ -1481,9 +1564,8 @@ final class LineBreakTerminalView: AppTerminalView {
     /// ⌘-click on a link Ghostty matched (URL regex or OSC 8). Ghostty reports
     /// the click unhandled unless the host takes it — its own fallback opener
     /// refuses OSC 8 targets on macOS — so this is the only path that opens
-    /// anything. The URL is producer-controlled terminal output and the
-    /// wrapper does not distinguish OSC 8 from regex matches, so only web and
-    /// mail schemes are opened.
+    /// anything. Only web and mail schemes are opened, along with file URLs
+    /// belonging to local panes.
     static func openClickedLink(_ string: String, isLocal: Bool) {
         guard let url = URL(string: string),
               let scheme = url.scheme?.lowercased()
@@ -2211,7 +2293,8 @@ struct AttachTerminalView: NSViewRepresentable {
     final class Coordinator: NSObject, TerminalSurfaceLifecycleDelegate, TerminalSurfaceOpenURLDelegate,
         TerminalSurfaceHoverLinkDelegate, TerminalSurfaceGridResizeDelegate {
         func terminalDidRequestOpenURL(_ url: String, kind: TerminalOpenURLKind) {
-            LineBreakTerminalView.openClickedLink(url, isLocal: view?.pathContext?.isLocal ?? false)
+            if let view { view.openLink(url, kind: kind) }
+            else { LineBreakTerminalView.openClickedLink(url, isLocal: false) }
         }
 
         /// Cell size for mapping a pointer to a cell (links under mouse capture).
@@ -2475,7 +2558,8 @@ struct ShellTerminalView: NSViewRepresentable {
     final class Coordinator: NSObject, TerminalSurfaceLifecycleDelegate, TerminalSurfaceOpenURLDelegate,
         TerminalSurfaceHoverLinkDelegate, TerminalSurfaceGridResizeDelegate {
         func terminalDidRequestOpenURL(_ url: String, kind: TerminalOpenURLKind) {
-            LineBreakTerminalView.openClickedLink(url, isLocal: view?.pathContext?.isLocal ?? false)
+            if let view { view.openLink(url, kind: kind) }
+            else { LineBreakTerminalView.openClickedLink(url, isLocal: false) }
         }
 
         /// Cell size for mapping a pointer to a cell (links under mouse capture).
