@@ -60,6 +60,15 @@ enum TerminalDefaults {
         CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
     }
 
+    static func systemMonospacedFamily(fontSize: Double, fontWeight: Double) -> String {
+        let font = NSFont.monospacedSystemFont(
+            ofSize: CGFloat(fontSize), weight: NSFont.Weight(rawValue: CGFloat(fontWeight))
+        )
+        // The system family may be private; "SF Mono" is not always discoverable.
+        // Menlo is macOS's bundled monospace fallback if AppKit omits a family.
+        return font.familyName ?? "Menlo"
+    }
+
     static func font(name: String, size: Double, weight: Double = defaultFontWeight) -> NSFont {
         let base: NSFont
         if !name.isEmpty, let custom = NSFont(name: name, size: size) {
@@ -134,7 +143,7 @@ enum GhosttyRuntime {
         )
     }
 
-    private static func fontConfiguration(
+    static func fontConfiguration(
         fontName: String,
         fontSize: Double,
         fontWeight: Double,
@@ -169,7 +178,9 @@ enum GhosttyRuntime {
             if !fontName.isEmpty {
                 builder.withFontFamily(fontName)
             } else {
-                builder.withFontFamily("SF Mono")
+                builder.withFontFamily(TerminalDefaults.systemMonospacedFamily(
+                    fontSize: fontSize, fontWeight: fontWeight
+                ))
                 if let face = fontFaceName(forWeight: fontWeight) {
                     // Weight selection only exists for the system font; named
                     // families ship fixed faces and ignore the picker.

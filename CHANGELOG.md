@@ -5,6 +5,14 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
+## [Unreleased]
+
+### Fixed
+- **System Mono resolves to the actual system font family.** Terminal rendering
+  uses AppKit's discoverable monospaced family instead of a literal `SF Mono`
+  name that can silently fall back. Size, weight, spacing and named fonts stay
+  unchanged.
+
 ## [0.6.21] - 2026-10-21
 
 ### Fixed
