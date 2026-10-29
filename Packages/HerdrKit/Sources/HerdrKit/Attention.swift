@@ -35,9 +35,79 @@ public struct AgentUnreadKey: Hashable, Sendable {
     }
 }
 
+/// Tracks completed results from snapshots for one device. Retain this value
+/// across a connection gap so turns completed while disconnected are counted.
+public struct AgentCompletionTracker: Sendable {
+    private struct Observation: Sendable {
+        let terminalID: String?
+        let completionSeq: UInt64?
+        let status: AgentStatus
+    }
+
+    private var observations: [String: Observation] = [:]
+
+    public init() {}
+
+    /// Events can expose a short-lived active state between snapshots on
+    /// older servers. Only a later snapshot may confirm its completion.
+    public mutating func observeActivity(paneID: String, status: AgentStatus) {
+        guard status == .working || status == .blocked,
+              let previous = observations[paneID] else { return }
+        observations[paneID] = Observation(
+            terminalID: previous.terminalID, completionSeq: previous.completionSeq,
+            status: status
+        )
+    }
+
+    public mutating func update(agents: [AgentInfo]) -> Set<String> {
+        let liveIDs = Set(agents.map(\.paneID))
+        observations = observations.filter { liveIDs.contains($0.key) }
+        var completed: Set<String> = []
+
+        for agent in agents {
+            guard let previous = observations[agent.paneID],
+                  previous.terminalID == agent.terminalID else {
+                // First sight of a pane (or its replacement terminal) seeds a
+                // baseline; already-finished results are not new notifications.
+                observations[agent.paneID] = Observation(
+                    terminalID: agent.terminalID, completionSeq: agent.completionSeq,
+                    status: agent.status
+                )
+                continue
+            }
+
+            if let sequence = agent.completionSeq {
+                let isNew = previous.completionSeq.map { sequence > $0 } ?? true
+                if isNew, agent.status == .done { completed.insert(agent.paneID) }
+                // A smaller sequence means the backend restarted its counter.
+                // A sequence on idle is already read by the server; consume it
+                // without notifying so a later done status cannot revive it.
+            } else if previous.completionSeq == nil,
+                      isLegacyCompletion(from: previous.status, to: agent.status) {
+                completed.insert(agent.paneID)
+            }
+
+            observations[agent.paneID] = Observation(
+                terminalID: agent.terminalID,
+                completionSeq: agent.completionSeq ?? previous.completionSeq,
+                // Unknown is a temporary classification gap, not the end of
+                // observed work. Preserve that evidence for legacy servers;
+                // idle, done and terminal replacement still reset it.
+                status: agent.status == .unknown ? previous.status : agent.status
+            )
+        }
+        return completed
+    }
+}
+
+private func isLegacyCompletion(from previous: AgentStatus?, to status: AgentStatus) -> Bool {
+    status == .done && (previous == .working || previous == .blocked)
+}
+
 public enum AgentUnread: Sendable {
-    /// Apply a live status transition. Initial snapshots pass an empty
-    /// `previous` map and must not create unread flags.
+    /// Apply completion decisions from the snapshot tracker. Without an
+    /// explicit set, older callers use observed working/blocked-to-done
+    /// transitions; an empty initial status baseline never creates flags.
     ///
     /// Completion first marks the pane unread. The GUI acknowledges it when
     /// opened, or immediately when its terminal is visible in the active window.
@@ -45,7 +115,8 @@ public enum AgentUnread: Sendable {
         previous: [String: AgentStatus],
         agents: [AgentInfo],
         unread: Set<AgentUnreadKey>,
-        deviceID: UUID
+        deviceID: UUID,
+        completedPaneIDs: Set<String>? = nil
     ) -> Set<AgentUnreadKey> {
         var next = unread
         let liveIDs = Set(agents.map(\.paneID))
@@ -53,16 +124,19 @@ public enum AgentUnread: Sendable {
             key.deviceID != deviceID || liveIDs.contains(key.paneID)
         }
 
-        guard !previous.isEmpty else { return next }
+        guard completedPaneIDs != nil || !previous.isEmpty else { return next }
 
         for agent in agents {
             let key = AgentUnreadKey(deviceID: deviceID, paneID: agent.paneID)
             if agent.status != .done {
-                next.remove(key)
+                // Unknown is a temporary loss of classification, not an
+                // acknowledgement. Retain unread until the known state returns.
+                if agent.status != .unknown { next.remove(key) }
                 continue
             }
-            let old = previous[agent.paneID]
-            guard old != nil, old != agent.status else { continue }
+            let completed = completedPaneIDs?.contains(agent.paneID)
+                ?? isLegacyCompletion(from: previous[agent.paneID], to: agent.status)
+            guard completed else { continue }
             next.insert(key)
         }
         return next

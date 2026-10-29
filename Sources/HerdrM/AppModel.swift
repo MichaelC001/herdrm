@@ -392,6 +392,9 @@ final class AppModel: ObservableObject {
     private var refreshRequested: Set<UUID> = []
     private var statusGenerations: [UUID: UInt64] = [:]
     private var previousStatuses: [UUID: [String: AgentStatus]] = [:]
+    // Transport reconnects keep this history: restoring an old done state is
+    // not a new completion. New completion sequences still arrive while offline.
+    private var completionTrackers: [UUID: AgentCompletionTracker] = [:]
     /// Claude panes already checked for the usage-credits dialog during their
     /// current blocked spell, per device. A pane leaves when it stops being
     /// blocked, so a later spell is checked again.
@@ -678,10 +681,23 @@ final class AppModel: ObservableObject {
         markSelectedAgentRead()
     }
 
-    func updateUnreadAgents(previous: [String: AgentStatus], agents: [AgentInfo], deviceID: UUID) {
+    func updateUnreadAgents(previous: [String: AgentStatus], agents: [AgentInfo], deviceID: UUID,
+                            completedPaneIDs: Set<String>? = nil) {
         unreadAgents = AgentUnread.applying(previous: previous, agents: agents,
-                                           unread: unreadAgents, deviceID: deviceID)
+                                           unread: unreadAgents, deviceID: deviceID,
+                                           completedPaneIDs: completedPaneIDs)
         markVisibleAgentRead()
+    }
+
+    /// Snapshots carry completion_seq; status events do not. Both the badge and
+    /// the notification consume this one result, including after a reconnect.
+    @discardableResult
+    func updateSnapshotAttention(agents: [AgentInfo], deviceID: UUID) -> Set<String> {
+        let completed = completionTrackers[deviceID, default: AgentCompletionTracker()]
+            .update(agents: agents)
+        updateUnreadAgents(previous: previousStatuses[deviceID] ?? [:], agents: agents,
+                           deviceID: deviceID, completedPaneIDs: completed)
+        return completed
     }
 
     // MARK: - Sidebar tree
@@ -1492,6 +1508,7 @@ final class AppModel: ObservableObject {
         // Remove named-session devices whose session is gone.
         for device in devices where device.isNamedSession && !discoveredIDs.contains(device.id) {
             stopSession(device.id)
+            completionTrackers[device.id] = nil
             attachSessions.removeAll { $0.device.id == device.id }
             devices.removeAll { $0.id == device.id }
             if deviceFilter == device.id { deviceFilter = nil }
@@ -1931,6 +1948,10 @@ final class AppModel: ObservableObject {
     /// Tears down every live tunnel. Awaited from the app's terminate hook — `stopSession`
     /// fires its disconnect in a detached `Task`, which never runs when the process is exiting.
     func shutdownAllSessions() async {
+        refreshDebounces.values.forEach { $0.cancel() }
+        refreshDebounces.removeAll()
+        refreshDebounceTokens.removeAll()
+        refreshDebouncePending.removeAll()
         conversationViewportMutations.discardPending()
         conversationHistory.stop()
         await claudeTranscripts.stopAll()
@@ -2078,6 +2099,7 @@ final class AppModel: ObservableObject {
         let targetChanged = devices[index].sshTarget != sshTarget
         devices[index].name = name
         if targetChanged {
+            completionTrackers[id] = nil
             removeSSHPassword(for: id)
             devices[index].kind = .ssh(target: sshTarget)
             devices[index].osID = nil
@@ -2120,6 +2142,7 @@ final class AppModel: ObservableObject {
         TailcatCredentialStore.removeToken(for: device.id)
         if sshAuthenticationRequest?.deviceID == device.id { sshAuthenticationRequest = nil }
         stopSession(device.id)
+        completionTrackers[device.id] = nil
         attachSessions.removeAll { $0.device.id == device.id }
         devices.removeAll { $0.id == device.id }
         store.save(devices)
@@ -2173,8 +2196,7 @@ final class AppModel: ObservableObject {
                 refreshRequested.insert(deviceID)
                 return true
             }
-            updateUnreadAgents(
-                previous: previousStatuses[deviceID] ?? [:],
+            let completed = updateSnapshotAttention(
                 agents: snapshot.agents,
                 deviceID: device.id
             )
@@ -2183,7 +2205,8 @@ final class AppModel: ObservableObject {
                 from: previousStatuses[deviceID] ?? [:],
                 to: snapshot.agents,
                 workspaces: snapshot.workspaces,
-                tabs: snapshot.tabs ?? []
+                tabs: snapshot.tabs ?? [],
+                completedPaneIDs: completed
             )
             autoSwitchModels(device: device, agents: snapshot.agents)
             previousStatuses[deviceID] = Dictionary(
@@ -2245,7 +2268,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func scheduleRefresh(_ deviceID: UUID) {
+    func scheduleRefresh(_ deviceID: UUID, delayNanoseconds: UInt64 = 200_000_000) {
         // Coalesce from the leading edge instead of resetting the timer for
         // every event. A busy pane can emit continuously; a trailing debounce
         // would never fire until output stopped, hiding the working state.
@@ -2256,16 +2279,28 @@ final class AppModel: ObservableObject {
         let token = UUID()
         refreshDebounceTokens[deviceID] = token
         refreshDebounces[deviceID] = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 200_000_000)
+            try? await Task.sleep(nanoseconds: delayNanoseconds)
             guard let self, !Task.isCancelled,
                   self.refreshDebounceTokens[deviceID] == token
             else { return }
-            await self.refresh(deviceID)
+            let succeeded: Bool
+            if case .connected = self.session(deviceID).connection,
+               self.services[deviceID] != nil {
+                succeeded = await self.refresh(deviceID)
+            } else {
+                succeeded = false
+            }
             if self.refreshDebounceTokens[deviceID] == token {
                 let needsTrailing = self.refreshDebouncePending.remove(deviceID) != nil
                 self.refreshDebounceTokens[deviceID] = nil
                 self.refreshDebounces[deviceID] = nil
-                if needsTrailing {
+                guard case .connected = self.session(deviceID).connection,
+                      self.services[deviceID] != nil else { return }
+                if !succeeded {
+                    // The completion event may be the last event. Retry its
+                    // confirmation snapshot without polling at the event rate.
+                    self.scheduleRefresh(deviceID, delayNanoseconds: 2_000_000_000)
+                } else if needsTrailing {
                     self.scheduleRefresh(deviceID)
                 }
             }
@@ -2281,7 +2316,7 @@ final class AppModel: ObservableObject {
     }
 
     @discardableResult
-    private func applyAgentStatusEvent(_ event: HerdrEvent, deviceID: UUID) -> Bool {
+    func applyAgentStatusEvent(_ event: HerdrEvent, deviceID: UUID) -> Bool {
         guard let paneID = event.payload["data"]?["pane_id"]?.stringValue,
               let statusRaw = event.payload["data"]?["agent_status"]?.stringValue,
               let device = device(deviceID),
@@ -2293,17 +2328,23 @@ final class AppModel: ObservableObject {
         guard state.agents[index].status != status else { return true }
         let previous = previousStatuses[deviceID] ?? [:]
         state.agents[index] = state.agents[index].updatingStatus(status)
+        // Older servers have no completion sequence. Retain active-state
+        // evidence even when the event arrives between two snapshots; done
+        // still waits for the snapshot and cannot consume a completion here.
+        completionTrackers[deviceID]?.observeActivity(paneID: paneID, status: status)
         updateUnreadAgents(
             previous: previous,
             agents: state.agents,
-            deviceID: deviceID
+            deviceID: deviceID,
+            completedPaneIDs: []
         )
         notifyTransitions(
             device: device,
             from: previous,
             to: state.agents,
             workspaces: state.workspaces,
-            tabs: state.tabs
+            tabs: state.tabs,
+            completedPaneIDs: []
         )
         autoSwitchModels(device: device, agents: state.agents)
         var nextStatuses = previous
@@ -2328,19 +2369,20 @@ final class AppModel: ObservableObject {
         "pane.agent_detected",
     ]
 
-    /// Notifies when an agent newly becomes blocked (needs input) or done (finished
-    /// while unwatched). Initial snapshots don't notify — only real transitions do.
+    /// Blocked events can notify immediately. Completion notifications wait for
+    /// a snapshot with a new completion sequence, rather than a replayed status.
     private func notifyTransitions(
         device: Device,
         from previous: [String: AgentStatus],
         to agents: [AgentInfo],
         workspaces: [WorkspaceInfo],
-        tabs: [TabInfo]
+        tabs: [TabInfo],
+        completedPaneIDs: Set<String>
     ) {
-        guard !previous.isEmpty else { return }
         for agent in agents {
-            guard let old = previous[agent.paneID], old != agent.status else { continue }
-            guard agent.status == .blocked || agent.status == .done else { continue }
+            let newlyBlocked = agent.status == .blocked
+                && previous[agent.paneID] != nil && previous[agent.paneID] != .blocked
+            guard newlyBlocked || completedPaneIDs.contains(agent.paneID) else { continue }
             let tabLabel = tabs.first { $0.tabID == agent.tabID }?.customLabel
             NotificationManager.shared.post(
                 agent: agent,

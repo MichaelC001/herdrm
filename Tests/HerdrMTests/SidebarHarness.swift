@@ -107,7 +107,11 @@ final class SidebarHarness {
     /// mount a terminal for an agent that has never been opened.
     func clickAgentTitleWithoutSettling(_ title: String) throws {
         let element = try XCTUnwrap(AccessibilityProbe.elements(in: window)
-            .filter { $0.role == "AXButton" && ($0.name ?? "").hasPrefix(title) && $0.frame != nil }
+            .filter {
+                let name = $0.name ?? ""
+                return $0.role == "AXButton" && (name == title || name.hasPrefix(title + ", "))
+                    && $0.frame != nil
+            }
             .max { $0.frame!.width < $1.frame!.width },
             "no agent row \(title)\n\(accessibilityDump)")
         try click(atScreen: XCTUnwrap(element.frame))

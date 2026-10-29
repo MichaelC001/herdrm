@@ -8,6 +8,11 @@ the Sparkle update description — a release without a section here fails CI.
 ## [Unreleased]
 
 ### Fixed
+- **Restored completion states no longer create duplicate unread results.**
+  Completion sequences, when provided, identify new results across reconnects;
+  legacy servers preserve observed working or blocked activity through temporary
+  unknown states. Badges and completion notifications share snapshot confirmation,
+  and failed event-triggered snapshots retry while the device remains connected.
 - **Unread completion dots clear when opened.** Selecting an agent or its
   current space acknowledges the result immediately. Results visible in the
   active terminal do not gain unread dots; background results stay unread.
