@@ -5,6 +5,21 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
+## [Unreleased]
+
+### Fixed
+- **Patched terminal fonts keep their own icons.** The bundled Nerd Font
+  symbols now fill in only the icons the chosen font is missing, so a patched
+  font's Powerline separators and icons keep their native proportions.
+- **Thin strokes controls the terminal's font thickening.** Turning the
+  setting off now thickens glyphs again; it had no effect before.
+- **Third-party voice input inserts into the terminal.** Input methods such
+  as Doubao get a valid insertion point when no composition is active.
+- **File sorting ties follow the selected direction.** Files with the same
+  size or modification date are ordered by name in the chosen direction.
+- **Cancelling a file operation never signals a reused PID.** The delayed
+  force-kill is bound to the original process.
+
 ## [0.6.21] - 2026-10-21
 
 ### Fixed
