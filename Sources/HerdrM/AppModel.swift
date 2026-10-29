@@ -893,7 +893,7 @@ final class AppModel: ObservableObject {
 
     /// A sidebar action belongs to its live pane, even when another agent is
     /// currently selected. Bind that pane before presenting any saved messages.
-    func toggleConversationHistory(for ref: PaneRef) {
+    func toggleConversationHistory(for ref: PaneRef, revealInSidebar: Bool = true) {
         guard device(ref.deviceID) != nil,
               let agent = session(ref.deviceID).agents.first(where: { $0.paneID == ref.paneID }),
               ["claude", "claude-code"].contains(agent.agent.lowercased()) else { return }
@@ -901,7 +901,7 @@ final class AppModel: ObservableObject {
             conversationHistory.close()
             return
         }
-        selectAgent(ref)
+        selectAgent(ref, revealInSidebar: revealInSidebar)
         synchronizeConversationHistory()
         conversationHistory.open()
     }

@@ -688,7 +688,7 @@ struct SidebarView: View {
         // footer click opens this agent's history instead of selecting alone.
         .overlay(alignment: .bottomTrailing) {
             if supportsHistory {
-                Button { model.toggleConversationHistory(for: entry.ref) } label: {
+                Button { model.toggleConversationHistory(for: entry.ref, revealInSidebar: false) } label: {
                     Image(systemName: "text.bubble")
                         .font(.system(size: 11.5))
                         .frame(width: 20, height: 14)
