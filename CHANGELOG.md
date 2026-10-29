@@ -13,6 +13,61 @@ the Sparkle update description — a release without a section here fails CI.
   cancellation drops the result instead of parsing it or changing project state
   to failed.
 
+## [0.6.22] - 2026-10-29
+
+### Added
+- **⌃Tab switches to recent agents and terminals, like ⌘Tab (#156).** One
+  tap goes back to the agent or terminal you were just in, and tapping again
+  flips back. Hold ⌃ and keep pressing Tab to show the list, most recently
+  used first: each Tab steps one further back, ⇧Tab steps forward, releasing ⌃
+  opens the highlighted pane, and Esc cancels. The list stays in the same order
+  while you choose and covers every device, whatever the device filter is set
+  to (as ⌘K does). Each entry shows its name, status, space and device, and
+  can be clicked. Panes on a disconnected device stay in the list, dimmed. The
+  order is remembered across launches.
+
+### Fixed
+- **Claude history finds conversations kept outside `~/.claude` (#173).** When
+  `CLAUDE_CONFIG_DIR` is set only on the agent, by an alias, a wrapper or an
+  account switcher, HerdrM now finds the directory from the running processes
+  on the device, so ⇧⌘H and the prompt rail show the conversation instead of
+  nothing. On SSH devices whose login shell is zsh, history no longer reports
+  a disconnect when the conversation isn't in the first directory it checks.
+- **Files keeps an edited path when a directory reply arrives.** Refreshing or
+  completing a transfer reloads the current directory without submitting an
+  unfinished path. Explicit navigation still shows the resolved directory.
+- **Sidebar rows stay under the pointer.** Clicking spaces, agents or terminals
+  updates selection and the displayed space highlight without recentering the
+  list, including the history button inside an Agent card. Explicit terminal
+  activation, search, notification navigation and restored
+  panes still reveal their owning space without changing the All Spaces filter.
+  Agent-kind labels stay on one line so narrow sidebars keep stable row heights.
+- **Patched terminal fonts keep their own icons.** The bundled Nerd Font
+  symbols now fill in only the icons the chosen font is missing, so a patched
+  font's Powerline separators and icons keep their native proportions.
+- **Thin strokes controls the terminal's font thickening.** Turning the
+  setting off now thickens glyphs again; it had no effect before.
+- **Third-party voice input inserts into the terminal.** Input methods such
+  as Doubao get a valid insertion point when no composition is active.
+- **Cancelling a file operation never signals a reused PID.** The delayed
+  force-kill is bound to the original process.
+- **Unread completion dots clear when opened.** Selecting an agent or its
+  current space acknowledges the result immediately. Results visible in the
+  active terminal do not gain unread dots; background results stay unread.
+  Automatic selection while Files covers the terminal, and opening another
+  agent or shell from Files, leave the unseen result unread.
+- **New Agent keeps the viewed space in All Spaces.** The global creation
+  action inherits the viewed remote pane's device and space when no space
+  filter is selected, matching New Terminal.
+- **Reconnect a device's dropped SSH terminals together.** One click restores
+  the disconnected attaches on that device, preserving healthy terminals and
+  panes closed normally or taken over by another client.
+- **New Agent choices stay visible and clickable.** The agent picker keeps
+  room for its rows instead of collapsing when the Recent list is full.
+- **First-open terminal focus follows the selected agent.** Clicking another
+  agent releases the previous terminal immediately and focuses the new view
+  when it mounts. Other newly created panes no longer take the keyboard.
+
 ## [0.6.21] - 2026-10-21
 
 ### Fixed

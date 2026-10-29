@@ -25,8 +25,9 @@ final class SidebarHarness {
     /// - Parameter sheets: attach the app's New Agent / New Terminal / New Space
     ///   sheets, so a button press can be followed to the sheet it opens.
     /// - Parameter pinnedHeaders: learn the header titles for `pinnedHeader`; needs a list long enough to scroll.
-    init(spaces: Int, agents: Int, terminals: Int = 0, agentTokens: [String: String]? = nil, agentKinds: [String] = [], device: Device = .local, sheets: Bool = false, appearance: NSAppearance.Name = .darkAqua, pinnedHeaders: Bool = true, width: CGFloat = 260, height: CGFloat = 600) throws {
+    init(spaces: Int, agents: Int, terminals: Int = 0, agentTokens: [String: String]? = nil, agentKinds: [String] = [], device: Device = .local, sheets: Bool = false, appearance: NSAppearance.Name = .darkAqua, pinnedHeaders: Bool = true, width: CGFloat = 260, height: CGFloat = 600, configureModel: ((AppModel) throws -> Void)? = nil) throws {
         model = try Self.fakeModel(spaces: spaces, agents: agents, terminals: terminals, agentTokens: agentTokens, agentKinds: agentKinds, device: device)
+        try configureModel?(model)
         let sidebar = SidebarView(model: model, collapsed: .constant(false), width: width).frame(width: width, height: height)
         root = NSHostingView(rootView: sheets ? AnyView(sidebar.newItemSheets(model: model)) : AnyView(sidebar))
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.titled], backing: .buffered, defer: false)
@@ -47,6 +48,12 @@ final class SidebarHarness {
     }
 
     // MARK: - Actions
+
+    func showReconnectOverlay(_ view: TerminalReconnectOverlay) {
+        root.rootView = AnyView(view)
+        root.layoutSubtreeIfNeeded()
+        settle()
+    }
 
     /// Click a named action at the top of the sidebar through real hit-testing.
     func clickAction(named name: String) throws {
@@ -94,6 +101,72 @@ final class SidebarHarness {
     func selectFirstAgent() {
         guard let device = model.devices.first, let agent = model.sessions[device.id]?.agents.first else { return }
         model.selectedPane = PaneRef(deviceID: device.id, paneID: agent.paneID)
+        settle()
+    }
+
+    /// Inspect focus immediately after the row click, before SwiftUI has time to
+    /// mount a terminal for an agent that has never been opened.
+    func clickAgentTitleWithoutSettling(_ title: String) throws {
+        try click(atScreen: paneRowFrame(title))
+    }
+
+    func clickTerminalTitleWithoutSettling(_ title: String) throws {
+        try click(atScreen: paneRowFrame(title))
+    }
+
+    func pressPaneTitle(_ title: String) throws {
+        AccessibilityProbe.press(try paneTitle(title))
+        settle()
+    }
+
+    func paneRowFrame(_ title: String) throws -> CGRect {
+        try XCTUnwrap(paneTitle(title).frame)
+    }
+
+    private func paneTitle(_ title: String) throws -> AccessibilityProbe.Element {
+        try XCTUnwrap(AccessibilityProbe.elements(in: window)
+            .filter {
+                let name = $0.name ?? ""
+                return $0.role == "AXButton" && (name == title || name.hasPrefix(title + ", "))
+                    && $0.frame != nil
+            }
+            .max { $0.frame!.width < $1.frame!.width },
+            "no pane row \(title)\n\(accessibilityDump)")
+    }
+
+    /// Let synchronous sidebar tests finish layout and scroll animations.
+    func settleSidebar() {
+        settle()
+    }
+
+    func mountTerminal(_ view: LineBreakTerminalView, focus: Bool = false) {
+        root.addSubview(view)
+        if focus { window.makeFirstResponder(view) }
+    }
+
+    var terminalFirstResponder: NSResponder? { window.firstResponder }
+
+    func activateWindow() {
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        // The command-line test host has no NSApplication.run() loop. Drain
+        // its AppKit events so the requested activation actually takes effect.
+        let deadline = Date().addingTimeInterval(1)
+        while Date() < deadline && !(NSApp.isActive && window.isKeyWindow) {
+            if let event = NSApp.nextEvent(matching: .any, until: Date().addingTimeInterval(0.05),
+                                          inMode: .default, dequeue: true) {
+                NSApp.sendEvent(event)
+            }
+        }
+        settle()
+    }
+
+    func settleTerminalFocus() async {
+        // Let deferred AppKit focus run even when the test itself is executing
+        // on the main dispatch queue, where a nested RunLoop cannot drain it.
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
         settle()
     }
 
@@ -164,6 +237,35 @@ final class SidebarHarness {
         return all[start...].filter { $0.role == "AXButton" }.compactMap(\.name)
     }
 
+    /// Hit-test the actual sheet, so a clipped or covered agent choice cannot
+    /// pass just because its accessibility action exists.
+    func clickSheetButton(named name: String) throws {
+        let sheet = try XCTUnwrap(window.sheets.first)
+        let all = AccessibilityProbe.elements(in: window)
+        let start = try XCTUnwrap(all.firstIndex { $0.role == "AXSheet" })
+        let button = try XCTUnwrap(all[start...].first { $0.role == "AXButton" && $0.name == name })
+        let frame = try XCTUnwrap(button.frame)
+        XCTAssertGreaterThan(frame.height, 0)
+        let screenTop = try XCTUnwrap(NSScreen.screens.first).frame.maxY
+        let point = sheet.convertPoint(fromScreen: NSPoint(x: frame.midX, y: screenTop - frame.midY))
+        let content = try XCTUnwrap(sheet.contentView)
+        let target = try XCTUnwrap(content.hitTest(content.superview?.convert(point, from: nil) ?? point))
+        let down = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: sheet.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+        let up = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseUp, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime + 0.05,
+            windowNumber: sheet.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0))
+        if target.acceptsFirstMouse(for: down) {
+            sheet.sendEvent(down)
+            sheet.sendEvent(up)
+        } else {
+            target.mouseDown(with: down)
+            target.mouseUp(with: up)
+        }
+        settle()
+    }
+
     /// What VoiceOver reads for the disclosure chevron on a space's row.
     func spaceDisclosureName(_ space: String) throws -> String? {
         settle()
@@ -187,7 +289,7 @@ final class SidebarHarness {
     private func spaceTitle(_ space: String) throws -> AccessibilityProbe.Element {
         try XCTUnwrap(
             AccessibilityProbe.elements(in: window)
-                .filter { ($0.name ?? "").hasPrefix(space) && $0.frame != nil }
+                .filter { ($0.name == space || $0.name?.hasPrefix(space + ",") == true) && $0.frame != nil }
                 .max { $0.frame!.width < $1.frame!.width },
             "no row \(space)\n\(accessibilityDump)"
         )
@@ -224,6 +326,29 @@ final class SidebarHarness {
     }
 
     // MARK: - Observations
+
+    /// A space is revealed only when its row clears the pinned section header
+    /// and fits inside the real scroll viewport; an off-screen AX node is not enough.
+    func visibleSpaceRow(_ name: String) -> Bool {
+        let row = AccessibilityProbe.elements(in: window)
+            .filter { ($0.name == name || $0.name?.hasPrefix(name + ",") == true) && $0.frame != nil }
+            .max { $0.frame!.width < $1.frame!.width }
+        guard let frame = row?.frame, frame.height > 0 else { return false }
+        let inWindow = scroll.contentView.convert(scroll.contentView.bounds, to: nil)
+        let onScreen = window.convertToScreen(inWindow)
+        let screenTop = NSScreen.screens.first?.frame.maxY ?? 0
+        let visible = CGRect(x: onScreen.minX, y: screenTop - onScreen.maxY + 28,
+                             width: onScreen.width, height: max(0, onScreen.height - 28))
+        return visible.contains(frame)
+    }
+
+    func spaceRowIsSelected(_ name: String) throws -> Bool {
+        try spaceTitle(name).isSelected == true
+    }
+
+    func spaceRowFrame(_ name: String) throws -> CGRect {
+        try XCTUnwrap(spaceTitle(name).frame)
+    }
 
     /// Whether the CPU / RAM / DISK meters are in the sidebar footer.
     var showsMachineStats: Bool {

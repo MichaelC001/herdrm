@@ -73,6 +73,7 @@ struct RootView: View {
                 )
             }
         }
+        .paneSwitcher(model: model)
         .animation(.spring(response: 0.25, dampingFraction: 0.85), value: model.showDevicePanel)
         .animation(.spring(response: 0.25, dampingFraction: 0.85), value: model.showMachineStats)
         .background(
@@ -107,6 +108,10 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             model.refreshConversationHistoryVisibility()
+            model.markVisibleAgentRead()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            model.markVisibleAgentRead()
         }
         .sheet(isPresented: $model.showAddDevice) { AddDeviceSheet(model: model) }
         .newItemSheets(model: model)
@@ -576,8 +581,9 @@ struct DetailView: View {
     /// Per-entry attach state, keyed by `AttachedEntry.id`. `endedAttach` holds the exit
     /// code of a dead attach (nil code = no status, e.g. killed by a signal); a present
     /// key drives that entry's reconnect overlay. `attachRetry` is a generation the
-    /// Reconnect button bumps to rebuild just that one terminal. Per-entry so one dead
-    /// terminal's overlay never covers another and Reconnect rebuilds only its own.
+    /// Reconnect button bumps to rebuild failed terminals. Per-entry so one dead
+    /// terminal's overlay never covers another; SSH recovery retries that device's
+    /// disconnected attaches together while preserving healthy attaches.
     @State private var endedAttach: [String: Int32?] = [:]
     @State private var attachRetry: [String: Int] = [:]
     @State private var uploadingAttachment = false
@@ -858,7 +864,8 @@ struct DetailView: View {
                 historyService: model.service(for: session.device),
                 onAttachmentError: { model.actionError = $0 },
                 onAttachmentUploadingChanged: { uploadingAttachment = $0 },
-                onExit: { code in endedAttach[session.id] = code }
+                onExit: { code in endedAttach[session.id] = code },
+                onActivate: { model.focusVisiblePane(session.ref, revealSpace: true) }
             )
                 // Keyed on the retry generation only — NOT colorScheme. A theme toggle
                 // must re-theme live via updateNSView (as the split shell already does);
@@ -893,28 +900,8 @@ struct DetailView: View {
     /// ssh exits 255 for transport failures; everything else is the far end closing
     /// (takeover by another client, the pane going away, herdr stopping).
     private func attachEndedOverlay(_ entry: AppModel.AttachedEntry) -> some View {
-        let dropped = (endedAttach[entry.id] ?? nil) == 255
-        return VStack(spacing: 10) {
-            Image(systemName: dropped ? "bolt.horizontal.circle" : "rectangle.slash")
-                .font(.system(size: 28, weight: .light))
-                .foregroundStyle(Theme.textGhost)
-            Text(dropped ? String(localized: "Connection to \(entry.device.name) dropped") : String(localized: "Terminal session ended"))
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Theme.text)
-            Text(dropped
-                ? String(localized: "The SSH connection behind this terminal went away.")
-                : String(localized: "Another client took this pane over, or the attach closed."))
-                .font(.system(size: 11.5))
-                .foregroundStyle(Theme.textTertiary)
-            Button("Reconnect") {
-                endedAttach[entry.id] = nil
-                attachRetry[entry.id, default: 0] += 1
-            }
-            .controlSize(.small)
-            .keyboardShortcut(.defaultAction)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.terminalBackground.opacity(0.94))
+        TerminalReconnectOverlay(entry: entry, sessions: model.attachSessions,
+                                 endedAttach: $endedAttach, attachRetry: $attachRetry)
     }
 
     private var uploadIndicator: some View {
@@ -950,6 +937,45 @@ struct DetailView: View {
         }
     }
 
+}
+
+/// Recovery controls shared by every attached terminal. A network drop is
+/// different from a normal exit or a pane taken over by another client.
+struct TerminalReconnectOverlay: View {
+    let entry: AppModel.AttachedEntry
+    let sessions: [AppModel.AttachedEntry]
+    @Binding var endedAttach: [String: Int32?]
+    @Binding var attachRetry: [String: Int]
+
+    var body: some View {
+        let dropped = entry.device.sshTarget != nil && (endedAttach[entry.id] ?? nil) == 255
+        return VStack(spacing: 10) {
+            Image(systemName: dropped ? "bolt.horizontal.circle" : "rectangle.slash")
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(Theme.textGhost)
+            Text(dropped ? String(localized: "Connection to \(entry.device.name) dropped") : String(localized: "Terminal session ended"))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.text)
+            Text(dropped
+                ? String(localized: "The SSH connection behind this terminal went away.")
+                : String(localized: "Another client took this pane over, or the attach closed."))
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.textTertiary)
+            Button(dropped ? String(localized: "Reconnect device terminals") : String(localized: "Reconnect")) {
+                let targets = dropped ? sessions.filter {
+                    $0.device.id == entry.device.id && (endedAttach[$0.id] ?? nil) == 255
+                }.map(\.id) : [entry.id]
+                for id in targets {
+                    endedAttach[id] = nil
+                    attachRetry[id, default: 0] += 1
+                }
+            }
+            .controlSize(.small)
+            .keyboardShortcut(.defaultAction)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.terminalBackground.opacity(0.94))
+    }
 }
 
 /// The gap between two panes of a tab layout: a hairline that highlights on hover and
@@ -1816,7 +1842,9 @@ struct NewAgentSheet: View {
                             }
                             .padding(1)
                         }
-                        .frame(maxHeight: 236)
+                        // Four 58-point cards per row, 8-point gaps and 1-point
+                        // padding. A max-height-only lazy grid can collapse.
+                        .frame(height: min(236, CGFloat((loadedKinds.count + 3) / 4) * 66 - 6))
                     }
                 }
 

@@ -1361,18 +1361,18 @@
         }
       }
     },
-    "Turns off macOS font smoothing, which thickens glyph stems and makes agent output — Claude Code's bold text especially — look heavy and smudged.": {
+    "Turns off extra font thickening in the terminal, which can make agent output — especially Claude Code's bold text — look heavy and smudged.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Turns off macOS font smoothing, which thickens glyph stems and makes agent output — Claude Code's bold text especially — look heavy and smudged."
+            "value": "Turns off extra font thickening in the terminal, which can make agent output — especially Claude Code's bold text — look heavy and smudged."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "关闭 macOS 字体平滑。字干被加粗后，Agent 输出——尤其是 Claude Code 的粗体——会显得又重又糊。"
+            "value": "关闭终端字体的额外加粗效果，避免 Agent 输出——尤其是 Claude Code 的粗体文字——显得过重、模糊。"
           }
         }
       }
@@ -1837,6 +1837,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "重新连接"
+          }
+        }
+      }
+    },
+    "Reconnect device terminals": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reconnect device terminals"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重连此设备的终端"
           }
         }
       }
@@ -8191,6 +8207,86 @@
           "stringUnit": {
             "state": "translated",
             "value": "仍然启动"
+          }
+        }
+      }
+    },
+    "older": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "older"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更早"
+          }
+        }
+      }
+    },
+    "newer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "newer"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更近"
+          }
+        }
+      }
+    },
+    "release to open": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "release to open"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "松开以打开"
+          }
+        }
+      }
+    },
+    "Recent agents and terminals": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent agents and terminals"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最近的 Agent 和终端"
+          }
+        }
+      }
+    },
+    "Disconnected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disconnected"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已断开"
           }
         }
       }

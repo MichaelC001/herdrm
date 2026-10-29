@@ -190,15 +190,25 @@ final class AppModel: ObservableObject {
     private var conversationLastVisible = false
     private var conversationResumeNeedsLatest = false
     @Published var selectedSpace: SpaceRef?
+    /// An explicit activation should reveal its space even when the same pane
+    /// already owns the keyboard. Status refreshes never increment this.
+    @Published private(set) var sidebarRevealGeneration = 0
+    /// Selecting a sidebar row must leave that row under the pointer.
+    @Published private(set) var sidebarSelectionGeneration = 0
     @Published var selectedPane: PaneRef? {
         didSet {
-            // Leaving a finished agent marks it viewed. Staying on it while
-            // the turn ends must not swallow the unread flag.
-            if let old = oldValue, old != selectedPane {
-                unreadAgents.remove(AgentUnreadKey(deviceID: old.deviceID, paneID: old.paneID))
+            // Refreshes can change selection in a background or covered window.
+            // Only a visible result or an explicit navigation action is read.
+            markVisibleAgentRead()
+            if selectedPane != oldValue {
+                // Release the previous terminal during the selection event. The
+                // first attach can take time to mount; it must not leave input
+                // going to the agent we just left.
+                AttachViewRegistry.select(selectedAttachedEntry?.id)
             }
             noteVisibleAttachSessions()
             if let pane = selectedPane, pane != oldValue {
+                recordRecentPane(pane)
                 snapPaneViewportToBottom(pane)
                 refreshSelectedTabLayout()
             }
@@ -277,6 +287,14 @@ final class AppModel: ObservableObject {
     @Published private(set) var unreadAgents: Set<AgentUnreadKey> = []
     /// New Agent's Recent list: the last launches, newest first.
     @Published private(set) var recentLaunches: [RecentAgentLaunch] = RecentAgentLaunches.load()
+    /// Panes in the order they were last selected, newest first, for ⌃Tab.
+    /// Kept across launches; a device's closed panes drop out when it reports.
+    @Published private(set) var recentPanes: [RecentPane]
+    private let recentPanesDefaults: UserDefaults
+    /// The open ⌃Tab session; nil when no switch is in progress.
+    @Published private(set) var paneSwitcher: RecentSwitcher<PaneRef>?
+    /// The switcher panel is on screen. A quick tap switches without showing it.
+    @Published var paneSwitcherShown = false
 
     @Published var showAddDevice = false
     @Published var showNewAgent = false
@@ -293,6 +311,7 @@ final class AppModel: ObservableObject {
         didSet {
             if detailMode != .project { projectSpaceOverride = nil }
             synchronizeConversationHistory()
+            if detailMode == .terminal { markVisibleAgentRead() }
         }
     }
     /// The Space "Project…" was opened on. Kept apart from `selectedSpace`, the
@@ -392,7 +411,9 @@ final class AppModel: ObservableObject {
     /// blocked, so a later spell is checked again.
     private var modelSwitchChecked: [UUID: Set<String>] = [:]
 
-    init() {
+    init(recentPanesDefaults: UserDefaults = .standard) {
+        self.recentPanesDefaults = recentPanesDefaults
+        recentPanes = RecentPanes.load(from: recentPanesDefaults)
         let loaded = DeviceStore().load()
         devices = loaded
         // Restore the device filter only if that device still exists;
@@ -658,6 +679,27 @@ final class AppModel: ObservableObject {
         unreadAgents.contains(AgentUnreadKey(deviceID: entry.device.id, paneID: entry.agent.paneID))
     }
 
+    private func markSelectedAgentRead() {
+        guard let pane = selectedPane else { return }
+        unreadAgents.remove(AgentUnreadKey(deviceID: pane.deviceID, paneID: pane.paneID))
+    }
+
+    /// A result already visible in the active terminal needs no unread badge.
+    /// Background windows and covering detail views keep their unread state.
+    func markVisibleAgentRead() {
+        guard NSApplication.shared.isActive, !isDetailCovered, selectedShellID == nil,
+              let entry = selectedAttachedEntry,
+              AttachViewRegistry.view(for: entry.id)?.window?.isKeyWindow == true
+        else { return }
+        markSelectedAgentRead()
+    }
+
+    func updateUnreadAgents(previous: [String: AgentStatus], agents: [AgentInfo], deviceID: UUID) {
+        unreadAgents = AgentUnread.applying(previous: previous, agents: agents,
+                                           unread: unreadAgents, deviceID: deviceID)
+        markVisibleAgentRead()
+    }
+
     // MARK: - Sidebar tree
 
     /// One sidebar row: an agent or terminal entry at a depth in the pane tree.
@@ -867,6 +909,19 @@ final class AppModel: ObservableObject {
         return nil
     }
 
+    /// The right-hand terminal's location, separate from the sidebar's filter.
+    /// Standalone shells and covering panels do not display an attached pane.
+    var displayedPaneSpace: SpaceRef? {
+        guard !isDetailCovered, selectedShellID == nil,
+              let entry = selectedAttachedEntry else { return nil }
+        return SpaceRef(deviceID: entry.device.id, workspaceID: entry.workspaceID)
+    }
+
+    private func revealDisplayedSpaceInSidebar() {
+        guard displayedPaneSpace != nil else { return }
+        sidebarRevealGeneration += 1
+    }
+
     var isClaudeHistorySelected: Bool {
         guard !isDetailCovered, selectedShellID == nil,
               let entry = selectedEntry else { return false }
@@ -875,7 +930,7 @@ final class AppModel: ObservableObject {
 
     /// A sidebar action belongs to its live pane, even when another agent is
     /// currently selected. Bind that pane before presenting any saved messages.
-    func toggleConversationHistory(for ref: PaneRef) {
+    func toggleConversationHistory(for ref: PaneRef, revealInSidebar: Bool = true) {
         guard device(ref.deviceID) != nil,
               let agent = session(ref.deviceID).agents.first(where: { $0.paneID == ref.paneID }),
               ["claude", "claude-code"].contains(agent.agent.lowercased()) else { return }
@@ -883,7 +938,7 @@ final class AppModel: ObservableObject {
             conversationHistory.close()
             return
         }
-        selectAgent(ref)
+        selectAgent(ref, revealInSidebar: revealInSidebar)
         synchronizeConversationHistory()
         conversationHistory.open()
     }
@@ -1191,6 +1246,7 @@ final class AppModel: ObservableObject {
               let next = TabLayoutGeometry.neighbor(of: selected.paneID, in: layout.root, direction: direction)
         else { return }
         selectedPane = PaneRef(deviceID: selected.deviceID, paneID: next)
+        markSelectedAgentRead()
     }
 
     /// Keyboard focus to the next (+1) or previous (-1) pane in the tab's reading
@@ -1201,6 +1257,7 @@ final class AppModel: ObservableObject {
         guard let index = order.firstIndex(of: selected.paneID), order.count > 1 else { return }
         let next = order[((index + offset) % order.count + order.count) % order.count]
         selectedPane = PaneRef(deviceID: selected.deviceID, paneID: next)
+        markSelectedAgentRead()
     }
 
     /// The sidebar's confirmed close, for the selected pane. In a tab layout the
@@ -1225,9 +1282,13 @@ final class AppModel: ObservableObject {
     /// The keyboard landed in another pane of the shown tab: make it the selection,
     /// so the sidebar, unread marks and viewport snap follow. Selection stays a
     /// herdrm-side notion; herdr's own focus is left alone, as it is for sidebar clicks.
-    func focusVisiblePane(_ ref: PaneRef) {
-        guard ref != selectedPane, visiblePaneRefs.contains(ref) else { return }
-        selectedPane = ref
+    func focusVisiblePane(_ ref: PaneRef, revealSpace: Bool = false) {
+        guard visiblePaneRefs.contains(ref) else { return }
+        if ref != selectedPane { selectedPane = ref }
+        markSelectedAgentRead()
+        // A selection also assigns first responder programmatically. Only an
+        // explicit terminal activation should repeat a sidebar reveal.
+        if revealSpace { revealDisplayedSpaceInSidebar() }
     }
 
     private var firstVisiblePaneRef: PaneRef? {
@@ -1271,18 +1332,28 @@ final class AppModel: ObservableObject {
     /// The space a New Agent / New Terminal sheet should open on.
     func takeNewItemSpace() -> SpaceRef? {
         defer { newItemSpace = nil }
-        return newItemSpace ?? selectedSpace
+        return newItemSpace ?? selectedSpace ?? selectedAttachedEntry.map {
+            SpaceRef(deviceID: $0.device.id, workspaceID: $0.workspaceID)
+        }
     }
 
-    func selectSpace(_ ref: SpaceRef?) {
-        isFileManagerActive = false
+    func selectSpace(_ ref: SpaceRef?, revealInSidebar: Bool = true) {
+        if !revealInSidebar { sidebarSelectionGeneration += 1 }
+        defer {
+            if revealInSidebar { revealDisplayedSpaceInSidebar() }
+        }
         selectedSpace = ref
         selectedShellID = nil
         if let entry = selectedAttachedEntry {
-            if ref == nil { return }
-            if entry.device.id == ref!.deviceID && entry.workspaceID == ref!.workspaceID { return }
+            if ref == nil || (entry.device.id == ref!.deviceID && entry.workspaceID == ref!.workspaceID) {
+                isFileManagerActive = false
+                markSelectedAgentRead()
+                return
+            }
         }
         selectedPane = preferredVisibleAgent()?.ref ?? firstVisiblePaneRef
+        isFileManagerActive = false
+        markSelectedAgentRead()
     }
 
     func setDeviceFilter(_ id: UUID?) {
@@ -1309,13 +1380,15 @@ final class AppModel: ObservableObject {
 
     /// Jump target used by the search sheet and by notification clicks.
     func reveal(_ ref: PaneRef) {
-        isFileManagerActive = false
         if let filter = deviceFilter, filter != ref.deviceID {
             deviceFilter = nil
         }
         selectedSpace = nil
         selectedPane = ref
         selectedShellID = nil
+        isFileManagerActive = false
+        markSelectedAgentRead()
+        revealDisplayedSpaceInSidebar()
         // Only the search sheet needs the deferred request: its dismissal restores the
         // parent window's previous responder after the view tree has asked for focus.
         // `showSearch` is still true here — SearchView calls this before dismissing.
@@ -1326,6 +1399,92 @@ final class AppModel: ObservableObject {
         // the shell. Those clicks get focus from the recreated attach and from the
         // entry-change request instead.
         if shellSplitAxis != nil, showSearch { pendingSplitAgentFocus = true }
+    }
+
+    // MARK: - Recent switcher (⌃Tab)
+
+    private func recordRecentPane(_ pane: PaneRef) {
+        recentPanes = RecentPanes.recording(RecentPane(deviceID: pane.deviceID, paneID: pane.paneID), into: recentPanes)
+        RecentPanes.save(recentPanes, to: recentPanesDefaults)
+    }
+
+    private func pruneRecentPanes(deviceID: UUID, keeping paneIDs: Set<String>) {
+        let pruned = RecentPanes.pruning(recentPanes, deviceID: deviceID, keeping: paneIDs)
+        guard pruned != recentPanes else { return }
+        recentPanes = pruned
+        RecentPanes.save(recentPanes, to: recentPanesDefaults)
+    }
+
+    private func forgetRecentPanes(on deviceID: UUID) {
+        recentPanes = RecentPanes.removingDevice(deviceID, from: recentPanes)
+        RecentPanes.save(recentPanes, to: recentPanesDefaults)
+    }
+
+    /// Every agent and herdr terminal on every device, whatever the device
+    /// filter says (like ⌘K): the most recently selected first, then the rest
+    /// in device and tab order. A disconnected device keeps its last snapshot,
+    /// so its panes stay listed.
+    var switcherEntries: [AttachedEntry] {
+        let all: [AttachedEntry] = devices.flatMap { device in
+            let agents = session(device.id).agents
+                .map { agentEntry(device: device, agent: $0) }
+                .sorted {
+                    let w0 = workspaceRank(deviceID: device.id, workspaceID: $0.agent.workspaceID)
+                    let w1 = workspaceRank(deviceID: device.id, workspaceID: $1.agent.workspaceID)
+                    if w0 != w1 { return w0 < w1 }
+                    return tabRank(deviceID: device.id, tabID: $0.agent.tabID)
+                        < tabRank(deviceID: device.id, tabID: $1.agent.tabID)
+                }
+            return agents.map(AttachedEntry.agent) + terminalEntries(for: device).map(AttachedEntry.terminal)
+        }
+        let byRef = Dictionary(all.map { ($0.ref, $0) }, uniquingKeysWith: { first, _ in first })
+        let recent = recentPanes.map { PaneRef(deviceID: $0.deviceID, paneID: $0.paneID) }
+        return RecentPanes.ordered(all.map(\.ref), recent: recent).compactMap { byRef[$0] }
+    }
+
+    /// The pane the detail area is showing, if any: not while a standalone
+    /// shell or the file manager covers it.
+    private var paneOnScreen: PaneRef? {
+        selectedShellID == nil && !isFileManagerActive ? selectedPane : nil
+    }
+
+    /// ⌃Tab (`backward` for ⌃⇧Tab). The first press opens a session on the
+    /// previous pane; each further press steps through the list and shows it.
+    func paneSwitcherTab(backward: Bool) {
+        if paneSwitcher != nil {
+            paneSwitcher?.step(backward: backward)
+            paneSwitcherShown = true
+            return
+        }
+        paneSwitcher = RecentSwitcher(items: switcherEntries.map(\.ref), current: paneOnScreen, backward: backward)
+    }
+
+    /// ↑/↓ in the open panel.
+    func paneSwitcherStep(backward: Bool) {
+        paneSwitcher?.step(backward: backward)
+    }
+
+    /// Releasing ⌃ (or Return, or a click): go to the highlighted pane.
+    func commitPaneSwitch() {
+        guard let ref = paneSwitcher?.selection else { return }
+        endPaneSwitch()
+        // The list was fixed when it opened; the pane may have closed since.
+        guard attachedEntry(for: ref) != nil else { return }
+        reveal(ref)
+    }
+
+    func choosePaneSwitch(_ ref: PaneRef) {
+        paneSwitcher?.highlight(ref)
+        commitPaneSwitch()
+    }
+
+    func cancelPaneSwitch() {
+        endPaneSwitch()
+    }
+
+    private func endPaneSwitch() {
+        paneSwitcher = nil
+        paneSwitcherShown = false
     }
 
     // MARK: - Shell terminals
@@ -1355,10 +1514,13 @@ final class AppModel: ObservableObject {
         detailMode = .terminal
     }
 
-    func selectAgent(_ ref: PaneRef) {
-        isFileManagerActive = false
+    func selectAgent(_ ref: PaneRef, revealInSidebar: Bool = true) {
+        if !revealInSidebar { sidebarSelectionGeneration += 1 }
         selectedPane = ref
         selectedShellID = nil
+        isFileManagerActive = false
+        markSelectedAgentRead()
+        if revealInSidebar { revealDisplayedSpaceInSidebar() }
     }
 
     var selectedShell: ShellSession? {
@@ -1385,8 +1547,8 @@ final class AppModel: ObservableObject {
     }
 
     func selectShell(_ id: UUID) {
-        isFileManagerActive = false
         selectedShellID = id
+        isFileManagerActive = false
         ShellViewRegistry.focus(id)
     }
 
@@ -1452,6 +1614,7 @@ final class AppModel: ObservableObject {
         for device in devices where device.isNamedSession && !discoveredIDs.contains(device.id) {
             stopSession(device.id)
             attachSessions.removeAll { $0.device.id == device.id }
+            forgetRecentPanes(on: device.id)
             devices.removeAll { $0.id == device.id }
             if deviceFilter == device.id { deviceFilter = nil }
             if selectedSpace?.deviceID == device.id { selectedSpace = nil }
@@ -2080,6 +2243,7 @@ final class AppModel: ObservableObject {
         if sshAuthenticationRequest?.deviceID == device.id { sshAuthenticationRequest = nil }
         stopSession(device.id)
         attachSessions.removeAll { $0.device.id == device.id }
+        forgetRecentPanes(on: device.id)
         devices.removeAll { $0.id == device.id }
         store.save(devices)
         if deviceFilter == device.id { deviceFilter = nil }
@@ -2132,10 +2296,9 @@ final class AppModel: ObservableObject {
                 refreshRequested.insert(deviceID)
                 return true
             }
-            unreadAgents = AgentUnread.applying(
+            updateUnreadAgents(
                 previous: previousStatuses[deviceID] ?? [:],
                 agents: snapshot.agents,
-                unread: unreadAgents,
                 deviceID: device.id
             )
             notifyTransitions(
@@ -2168,6 +2331,7 @@ final class AppModel: ObservableObject {
                 $0.device.id == deviceID
                     && (!paneIDs.contains($0.ref.paneID) || attachedEntry(for: $0.ref)?.id != $0.id)
             }
+            pruneRecentPanes(deviceID: deviceID, keeping: paneIDs)
             if let tabs = snapshot.tabs {
                 let tabIDs = Set(tabs.map(\.tabID))
                 tabLayouts = tabLayouts.filter { $0.key.deviceID != deviceID || tabIDs.contains($0.key.tabID) }
@@ -2253,10 +2417,9 @@ final class AppModel: ObservableObject {
         guard state.agents[index].status != status else { return true }
         let previous = previousStatuses[deviceID] ?? [:]
         state.agents[index] = state.agents[index].updatingStatus(status)
-        unreadAgents = AgentUnread.applying(
+        updateUnreadAgents(
             previous: previous,
             agents: state.agents,
-            unread: unreadAgents,
             deviceID: deviceID
         )
         notifyTransitions(
