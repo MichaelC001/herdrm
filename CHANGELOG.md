@@ -5,6 +5,13 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
+## [Unreleased]
+
+### Fixed
+- **Attached terminals repaint when switching light and dark themes.** Existing
+  agent input boxes and message backgrounds follow the new appearance without
+  replacing the connection, changing the terminal grid, or ending the agent.
+
 ## [0.6.21] - 2026-10-21
 
 ### Fixed

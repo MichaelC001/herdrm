@@ -125,6 +125,44 @@ final class TerminalProcess: @unchecked Sendable {
         ioctl(fd, TIOCSWINSZ, &size)
     }
 
+    /// Herdr attach repaints every cell on WINCH, even when its grid is unchanged.
+    /// A signal alone would stop at a local SSH client: the remote PTY needs a
+    /// changed winsize too. Nudge one pixel without changing rows, columns, or
+    /// Herdr's integer cell dimensions. The next real resize restores the exact
+    /// pixel size; immediately restoring it here could coalesce away the WINCH.
+    func requestRedraw() {
+        stateLock.lock()
+        let fd = masterFD
+        stateLock.unlock()
+        guard fd >= 0 else { return }
+        var current = winsize()
+        guard ioctl(fd, TIOCGWINSZ, &current) == 0,
+              var size = Self.redrawSize(current) else { return }
+        _ = ioctl(fd, TIOCSWINSZ, &size)
+    }
+
+    static func redrawSize(_ current: winsize) -> winsize? {
+        func neighbor(_ pixels: UInt16, cells: UInt16) -> UInt16? {
+            guard cells > 1 else { return nil }
+            if pixels < UInt16.max, (pixels + 1) / cells == pixels / cells {
+                return pixels + 1
+            }
+            if pixels > 0, (pixels - 1) / cells == pixels / cells {
+                return pixels - 1
+            }
+            return nil
+        }
+        var size = current
+        if let width = neighbor(current.ws_xpixel, cells: current.ws_col) {
+            size.ws_xpixel = width
+        } else if let height = neighbor(current.ws_ypixel, cells: current.ws_row) {
+            size.ws_ypixel = height
+        } else {
+            return nil
+        }
+        return size
+    }
+
     /// Tears the process down without reporting an exit: a view being destroyed
     /// must not surface its own teardown as a session end. Interactive shells
     /// ignore SIGTERM, so this sends SIGHUP — the "terminal went away" signal
