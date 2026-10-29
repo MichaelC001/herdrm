@@ -54,9 +54,8 @@ the Sparkle update description — a release without a section here fails CI.
 - **Reconnect a device's dropped SSH terminals together.** One click restores
   the disconnected attaches on that device, preserving healthy terminals and
   panes closed normally or taken over by another client.
-- **New Agent choices stay visible and clickable.** The picker reserves room
-  for its rows instead of collapsing. The Recent section has been removed
-  from the creation sheet so device, agent and space choices are shown directly.
+- **New Agent choices stay visible and clickable.** The agent picker keeps
+  room for its rows instead of collapsing when the Recent list is full.
 - **First-open terminal focus follows the selected agent.** Clicking another
   agent releases the previous terminal immediately and focuses the new view
   when it mounts. Other newly created panes no longer take the keyboard.

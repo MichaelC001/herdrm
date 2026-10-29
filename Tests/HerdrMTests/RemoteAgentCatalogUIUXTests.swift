@@ -27,7 +27,8 @@ final class RemoteAgentCatalogUIUXTests: XCTestCase {
 
         try sidebar.chooseFromSpaceMenu("Space 1", String(localized: "New Agent…"))
 
-        XCTAssertFalse(sidebar.sheetButtonNames.contains { $0.contains("Recent project") })
+        XCTAssertTrue(sidebar.sheetButtonNames.contains { $0.contains("Recent project") },
+                      "known-yes: the full Recent list is shown: \(sidebar.sheetButtonNames)")
         XCTAssertTrue(sidebar.sheetButtonNames.contains("claude"), "\(sidebar.sheetButtonNames)")
         XCTAssertTrue(sidebar.sheetButtonNames.contains("codex"), "\(sidebar.sheetButtonNames)")
         try sidebar.clickSheetButton(named: "codex")
