@@ -22,6 +22,31 @@ private struct NewItemSheets: ViewModifier {
     }
 }
 
+/// Window-sized dismissal layer, with the panel anchored above the sidebar meters.
+struct MachineStatsOverlay: View {
+    @ObservedObject var model: AppModel
+    let device: Device
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .bottomLeading) {
+                Color.black.opacity(0.001)
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.showMachineStats = false }
+                MachineStatsPanel(
+                    model: model,
+                    stats: model.machineStats,
+                    device: device,
+                    isPresented: $model.showMachineStats
+                )
+                .frame(maxHeight: max(0, geometry.size.height - SidebarFooterMetrics.deviceSwitcherHeight - SidebarFooterMetrics.statsHeight - 6 - TitlebarMetrics.height - 10), alignment: .bottom)
+                .padding(.leading, 10)
+                .padding(.bottom, SidebarFooterMetrics.deviceSwitcherHeight + SidebarFooterMetrics.statsHeight + 6)
+            }
+        }
+    }
+}
+
 struct RootView: View {
     // Owned by AppDelegate so it outlives the window — see AppDelegate in HerdrMApp.swift.
     @ObservedObject var model: AppModel
@@ -54,27 +79,13 @@ struct RootView: View {
 
             // Machine stats panel, opening upward from the sidebar footer meters.
             if model.showMachineStats, let device = model.statsDevice {
-                Color.black.opacity(0.001)
-                    .ignoresSafeArea()
-                    .onTapGesture { model.showMachineStats = false }
-                GeometryReader { geometry in
-                    MachineStatsPanel(
-                        model: model,
-                        stats: model.machineStats,
-                        device: device,
-                        isPresented: $model.showMachineStats
+                MachineStatsOverlay(model: model, device: device)
+                    .transition(.scale(scale: 0.96, anchor: .bottomLeading).combined(with: .opacity))
+                    .background(
+                        Button("") { model.showMachineStats = false }
+                            .keyboardShortcut(.cancelAction)
+                            .hidden()
                     )
-                    .frame(maxHeight: max(0, geometry.size.height - SidebarFooterMetrics.deviceSwitcherHeight - SidebarFooterMetrics.statsHeight - 6 - TitlebarMetrics.height - 10), alignment: .bottom)
-                    .padding(.leading, 10)
-                    .padding(.bottom, SidebarFooterMetrics.deviceSwitcherHeight + SidebarFooterMetrics.statsHeight + 6)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                }
-                .transition(.scale(scale: 0.96, anchor: .bottomLeading).combined(with: .opacity))
-                .background(
-                    Button("") { model.showMachineStats = false }
-                        .keyboardShortcut(.cancelAction)
-                        .hidden()
-                )
             }
         }
         .paneSwitcher(model: model)
