@@ -25,6 +25,11 @@ the Sparkle update description — a release without a section here fails CI.
 - **Attached terminals repaint when switching light and dark themes.** Existing
   agent input boxes and message backgrounds follow the new appearance without
   replacing the connection, changing the terminal grid, or ending the agent.
+- **⌘-click opens the whole wrapped URL (#179).** A long link that wraps
+  across rows, including a labeled `Document (https://…)` link an agent wraps
+  inside its own column, opens in full instead of the clicked row's piece. An
+  OSC 8 link still opens its own target, and ⌘-clicking a link in another
+  split pane selects that pane too.
 
 ## [0.6.22] - 2026-10-29
 
