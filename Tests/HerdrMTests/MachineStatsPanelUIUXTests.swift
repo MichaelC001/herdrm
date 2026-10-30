@@ -79,6 +79,28 @@ final class MachineStatsPanelUIUXTests: XCTestCase {
         XCTAssertFalse(model.showMachineStats, "clicking outside dismisses the panel")
     }
 
+    func testShortPanelKeepsItsOwnHeight() throws {
+        let device = Device(name: "test1", kind: .local, socketPath: "/tmp/herdrm-test-no-socket")
+        let model = AppModel()
+        model.devices = [device]
+        var sample = MachineSample()
+        sample.os = "Linux"
+        sample.host = "test1"
+        sample.memTotalBytes = 16_000_000_000
+        sample.memUsedBytes = 8_000_000_000
+        sample.processes[101] = MachineProcess(pid: 101, ppid: 1, cpuTime: 1, rssBytes: 1_000_000, name: "test1")
+        model.machineStats._setSnapshotForTesting(MachineStatsComputer.snapshot(previous: nil, current: sample), device: device)
+        model.showMachineStats = true
+        let root = NSHostingView(rootView: MachineStatsOverlay(model: model, device: device))
+        let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 980, height: 800), styleMask: [.titled, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        window.makeKeyAndOrderFront(nil)
+        defer { window.close() }
+        settle(root)
+        XCTAssertNil(findScroll(in: root), "a panel that fits must not stretch into a window-tall scroll view")
+    }
+
     private func findScroll(in view: NSView) -> NSScrollView? {
         if let scroll = view as? NSScrollView { return scroll }
         for child in view.subviews { if let scroll = findScroll(in: child) { return scroll } }

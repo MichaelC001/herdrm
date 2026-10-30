@@ -193,24 +193,11 @@ struct MachineStatsPanel: View {
     private let instanceLimit = 8
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                Rectangle().fill(Theme.hairline).frame(height: 1).padding(.vertical, 6)
-                if let snapshot {
-                    resources(snapshot)
-                    Rectangle().fill(Theme.hairline).frame(height: 1).padding(.vertical, 6)
-                    processes(snapshot)
-                    Text("CPU counts one full core as 100, as in top. RAM is resident memory.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.textGhost)
-                        .padding(.horizontal, 9)
-                        .padding(.top, 6)
-                        .padding(.bottom, 2)
-                } else {
-                    placeholder
-                }
-            }
+        // A ScrollView takes all the height it is offered; only scroll when
+        // the content doesn't fit, so a short panel keeps its own height.
+        ViewThatFits(in: .vertical) {
+            content
+            ScrollView { content }
         }
         .padding(5)
         .frame(width: 340)
@@ -223,6 +210,26 @@ struct MachineStatsPanel: View {
                 deviceID: device.id,
                 paneIDs: agents.map(\.paneID)
             )
+        }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Rectangle().fill(Theme.hairline).frame(height: 1).padding(.vertical, 6)
+            if let snapshot {
+                resources(snapshot)
+                Rectangle().fill(Theme.hairline).frame(height: 1).padding(.vertical, 6)
+                processes(snapshot)
+                Text("CPU counts one full core as 100, as in top. RAM is resident memory.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.textGhost)
+                    .padding(.horizontal, 9)
+                    .padding(.top, 6)
+                    .padding(.bottom, 2)
+            } else {
+                placeholder
+            }
         }
     }
 
