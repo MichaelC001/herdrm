@@ -127,9 +127,13 @@ enum TerminalDefaults {
 enum GhosttyRuntime {
     private static var symbolMappingCache: [String: [String]] = [:]
 
+    /// An empty `family` means System Mono. Its family name is private and
+    /// CTFontCreateWithName would substitute Helvetica, so take the font itself.
     private static func symbolMappings(for family: String) -> [String] {
         if let cached = symbolMappingCache[family] { return cached }
-        let primary = CTFontCreateWithName(family as CFString, 12, nil)
+        let primary = family.isEmpty
+            ? NSFont.monospacedSystemFont(ofSize: 12, weight: .regular) as CTFont
+            : CTFontCreateWithName(family as CFString, 12, nil)
         let symbols = CTFontCreateWithName(TerminalDefaults.symbolFallbackFamily as CFString, 12, nil)
         let mappings = TerminalFontFallback.ranges(
             primary: CTFontCopyCharacterSet(primary), symbols: CTFontCopyCharacterSet(symbols)
@@ -203,7 +207,7 @@ enum GhosttyRuntime {
             }
             // Keep the primary face's icon proportions. Map only missing symbols
             // without letting a fallback family change the terminal cell metrics.
-            for mapping in symbolMappings(for: fontName.isEmpty ? "SF Mono" : fontName) {
+            for mapping in symbolMappings(for: fontName) {
                 builder.withCustom("font-codepoint-map", mapping)
             }
             if lineSpacing != TerminalDefaults.defaultLineSpacing {

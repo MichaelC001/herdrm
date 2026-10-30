@@ -34,7 +34,7 @@ struct TerminalFontResolutionTests {
         for family in ["", "Menlo"] {
             let configuration = GhosttyRuntime.fontConfiguration(
                 fontName: family, fontSize: 14, fontWeight: weight,
-                lineSpacing: 1.2, copyOnSelect: false
+                thinStrokes: false, lineSpacing: 1.2, copyOnSelect: false
             )
             let lines = configuration.rendered.split(separator: "\n")
 
