@@ -160,6 +160,12 @@ final class ProjectInspectorModel: ObservableObject {
             fail(space: space, key: failKey, message: error.localizedDescription)
             return .failed
         }
+        // The optional VM probe can swallow CancellationError after the main
+        // probe has completed. Do not parse or apply that cancelled request.
+        guard !Task.isCancelled else {
+            update(key: failKey) { if $0.state == .probing { $0.state = .idle } }
+            return .dropped
+        }
         // A frame cut short (timeout, dropped ssh) parses as `partial` and is still shown.
         let parsed = await Task.detached {
             (ProjectProbeParser.parse(mainText), vmText.map(ProjectProbeParser.parse))

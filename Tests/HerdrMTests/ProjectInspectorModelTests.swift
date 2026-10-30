@@ -52,12 +52,16 @@ final class ProjectInspectorModelTests: XCTestCase {
         private var frames: [UUID: String] = [:]
         private var failing = false
         private var holdFirst = 0
+        private var heldDeviceID: UUID?
+        private var completedDevices: Set<UUID> = []
         private var started = 0
 
         func setFrame(_ frame: String, for id: UUID) { lock.lock(); frames[id] = frame; lock.unlock() }
         func setFailing(_ value: Bool) { lock.lock(); failing = value; lock.unlock() }
         /// How many leading calls wait for `releaseHeld()`.
         func setHoldFirst(_ count: Int) { lock.lock(); holdFirst = count; lock.unlock() }
+        func hold(deviceID: UUID) { lock.lock(); heldDeviceID = deviceID; lock.unlock() }
+        func completed(deviceID: UUID) -> Bool { lock.lock(); defer { lock.unlock() }; return completedDevices.contains(deviceID) }
 
         var calls: [Call] { lock.lock(); defer { lock.unlock() }; return _calls }
 
@@ -66,7 +70,7 @@ final class ProjectInspectorModelTests: XCTestCase {
                 lock.lock(); defer { lock.unlock() }
                 _calls.append(Call(device: device, sections: sections, cwds: cwds))
                 started += 1
-                return (started <= holdFirst, self.failing, frames[device.id] ?? ProjectInspectorModelTests.emptyFrame)
+                return (started <= holdFirst || heldDeviceID == device.id, self.failing, frames[device.id] ?? ProjectInspectorModelTests.emptyFrame)
             }()
             if hold {
                 await withCheckedContinuation { continuation in
@@ -75,7 +79,13 @@ final class ProjectInspectorModelTests: XCTestCase {
             }
             if Task.isCancelled { throw CancellationError() }
             if failing { throw FakeError() }
+            markCompleted(device.id)
             return frame
+        }
+
+        private func markCompleted(_ deviceID: UUID) {
+            lock.lock(); defer { lock.unlock() }
+            completedDevices.insert(deviceID)
         }
 
         func releaseHeld() {
@@ -270,6 +280,24 @@ final class ProjectInspectorModelTests: XCTestCase {
         _ = await task.value
 
         if case .failed = model.entry(for: space())?.state { XCTFail("cancellation must not fail the entry") }
+    }
+
+    func testCancellingOnlyTheLocalVMProbeDropsTheCompletedMainResult() async {
+        let runner = FakeRunner()
+        runner.hold(deviceID: Device.local.id)
+        let model = makeModel(runner)
+        let task = Task { await model.probe(space: space(), context: context()) }
+        await waitUntil { runner.heldCount == 1 && runner.completed(deviceID: devbox.id) }
+        XCTAssertEqual(runner.heldCount, 1)
+        XCTAssertTrue(runner.completed(deviceID: devbox.id), "The main probe must finish before cancellation")
+
+        task.cancel()
+        runner.releaseHeld()
+        let outcome = await task.value
+
+        XCTAssertEqual(outcome, .dropped, "The optional VM probe swallowing cancellation must not apply the main result")
+        XCTAssertEqual(model.entry(for: space())?.state, .idle)
+        XCTAssertNil(model.entry(for: space())?.snapshot)
     }
 
     func testEmptyCwdListNeverCallsTheRunner() async {

@@ -5,6 +5,14 @@ on [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 Release automation extracts the matching section for GitHub release notes and
 the Sparkle update description — a release without a section here fails CI.
 
+## [Unreleased]
+
+### Fixed
+- **Cancelled project inspections do not report false failures.** If the main
+  remote probe has completed while the optional local-VM probe is still pending,
+  cancellation drops the result instead of parsing it or changing project state
+  to failed.
+
 ## [0.6.22] - 2026-10-29
 
 ### Added
