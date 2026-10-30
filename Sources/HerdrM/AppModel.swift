@@ -401,6 +401,8 @@ final class AppModel: ObservableObject {
     private var refreshDebounces: [UUID: Task<Void, Never>] = [:]
     private var refreshDebounceTokens: [UUID: UUID] = [:]
     private var refreshDebouncePending: Set<UUID> = []
+    /// Consecutive failed snapshots per device, for the retry backoff.
+    private var refreshFailures: [UUID: Int] = [:]
     private var snapshotRefreshTasks: [UUID: Task<Bool, Never>] = [:]
     private var snapshotRefreshTokens: [UUID: UUID] = [:]
     private var refreshRequested: Set<UUID> = []
@@ -2074,6 +2076,7 @@ final class AppModel: ObservableObject {
         refreshDebounces.removeAll()
         refreshDebounceTokens.removeAll()
         refreshDebouncePending.removeAll()
+        refreshFailures.removeAll()
         conversationViewportMutations.discardPending()
         conversationHistory.stop()
         await claudeTranscripts.stopAll()
@@ -2101,6 +2104,7 @@ final class AppModel: ObservableObject {
         refreshDebounces[id] = nil
         refreshDebounceTokens[id] = nil
         refreshDebouncePending.remove(id)
+        refreshFailures[id] = nil
         snapshotRefreshTasks[id]?.cancel()
         snapshotRefreshTasks[id] = nil
         snapshotRefreshTokens[id] = nil
@@ -2422,9 +2426,16 @@ final class AppModel: ObservableObject {
                       self.services[deviceID] != nil else { return }
                 if !succeeded {
                     // The completion event may be the last event. Retry its
-                    // confirmation snapshot without polling at the event rate.
-                    self.scheduleRefresh(deviceID, delayNanoseconds: 2_000_000_000)
-                } else if needsTrailing {
+                    // confirmation snapshot without polling at the event rate,
+                    // backing off (2 s, 4 s, … 60 s) while it keeps failing.
+                    let failures = (self.refreshFailures[deviceID] ?? 0) + 1
+                    self.refreshFailures[deviceID] = failures
+                    let seconds = min(60, 2 << min(failures - 1, 5))
+                    self.scheduleRefresh(deviceID, delayNanoseconds: UInt64(seconds) * 1_000_000_000)
+                    return
+                }
+                self.refreshFailures[deviceID] = nil
+                if needsTrailing {
                     self.scheduleRefresh(deviceID)
                 }
             }
