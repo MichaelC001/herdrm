@@ -98,6 +98,38 @@ final class TerminalLinkTests: XCTestCase {
                                                  columns: 100)?.text, nested)
     }
 
+    func testAWordAfterTheLinkIsNotJoinedIntoIt() {
+        let prose = ["See the guide (https://example.com/guide", "here)."]
+        XCTAssertEqual(LineBreakTerminalView.link(in: prose, row: 0, column: 20, columns: 100)?.url,
+                       "https://example.com/guide")
+        let two = ["(https://a.com/x", "https://b.com/y)"]
+        XCTAssertEqual(LineBreakTerminalView.link(in: two, row: 0, column: 5, columns: 100)?.url,
+                       "https://a.com/x")
+    }
+
+    func testEveryParenthesizedLinkOnARowCanBeClicked() {
+        let lines = ["A (https://a.com/x) B (https://b.com/long", "/tail)"]
+        XCTAssertEqual(LineBreakTerminalView.link(in: lines, row: 0, column: 8, columns: 100)?.url,
+                       "https://a.com/x")
+        XCTAssertEqual(LineBreakTerminalView.link(in: lines, row: 0, column: 30, columns: 100)?.url,
+                       "https://b.com/long/tail")
+        XCTAssertEqual(LineBreakTerminalView.link(in: lines, row: 1, column: 1, columns: 100)?.url,
+                       "https://b.com/long/tail")
+    }
+
+    func testOnlyGhosttysOwnRowMatchIsReplacedByThePrintedURL() {
+        let printed = "https://example.com/files/report.pdf"
+        let row = "Document (https://example.com/files/"
+        XCTAssertTrue(LineBreakTerminalView.isRowMatch("https://example.com/files/", of: printed, clickedRow: row))
+        XCTAssertTrue(LineBreakTerminalView.isRowMatch(printed, of: printed, clickedRow: nil))
+        XCTAssertTrue(LineBreakTerminalView.isRowMatch("https://example.com/report", of: "https://example.com/report.pdf",
+                                                       clickedRow: "(https://example.com/report."),
+                      "Ghostty drops a trailing dot from its row match")
+        XCTAssertFalse(LineBreakTerminalView.isRowMatch("https://example.com/", of: printed, clickedRow: row),
+                       "a target that stops inside the printed URL is an OSC 8 target")
+        XCTAssertFalse(LineBreakTerminalView.isRowMatch("https://example.org/download", of: printed, clickedRow: row))
+    }
+
     func testCommandClickOpensTheWholeWrappedURLThroughBothTerminalCoordinators() throws {
         for shell in [false, true] {
             for reporting in [false, true] {
@@ -137,10 +169,12 @@ final class TerminalLinkTests: XCTestCase {
                 let columns = Int(try XCTUnwrap(host.viewport).columns)
                 let printed = "https://example.com/display-name.pdf"
                 let wrapped = "https://example.com/" + String(repeating: "segment/", count: columns / 4)
+                // A target exactly equal to one printed row can't be told from
+                // Ghostty's own row match without an OSC 8 kind, so it isn't a case.
                 let cases = [
                     (printed, "https://example.org/actual-download"),
                     (printed, "https://example.com/"),
-                    (wrapped, String(wrapped.prefix(columns))),
+                    (wrapped, "https://example.com/segment/"),
                 ]
                 for (display, target) in cases {
                     show(rows(display, columns: columns).map {

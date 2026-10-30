@@ -628,12 +628,16 @@ final class LineBreakTerminalView: AppTerminalView {
         pendingLinkClick = nil
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             .subtracting([.capsLock, .function]) == .command {
-            // Let Ghostty distinguish OSC 8 targets from text matches. Shift
-            // keeps the gesture local when a remote TUI captures the mouse.
+            // Shift keeps the gesture local when a remote TUI captures the mouse.
+            let hit = linkHit(atWindowPoint: event.locationInWindow)
             pendingLinkClick = LinkClick(
                 point: event.locationInWindow,
-                printedURL: linkHit(atWindowPoint: event.locationInWindow)?.link.url
+                printedURL: hit?.link.url,
+                clickedRow: hit?.line
             )
+            // A ⌘-click still selects this pane, as any other click does.
+            window?.makeFirstResponder(self)
+            onActivate?()
             let localEvent = self.event(event, for: .local)
             // The embedded core ignores same-position mouse updates, even
             // when Shift changed. Re-enter with the local modifiers so its
@@ -696,7 +700,8 @@ final class LineBreakTerminalView: AppTerminalView {
         let target: String
         // Native open-url callbacks hold the terminal lock. Read screen text
         // before the gesture enters Ghostty, never re-enter its reader here.
-        if case .unknown = kind, let printed = pendingLinkClick?.printedURL {
+        if case .unknown = kind, let click = pendingLinkClick, let printed = click.printedURL,
+           Self.isRowMatch(url, of: printed, clickedRow: click.clickedRow) {
             target = printed
         } else {
             target = url
@@ -704,10 +709,33 @@ final class LineBreakTerminalView: AppTerminalView {
         pendingLinkClick?.opened = true
         linkOpener(target, pathContext?.isLocal ?? false)
     }
+    /// Whether `url` is Ghostty's own match of the printed URL on the clicked
+    /// row: a piece of it that runs to the end of the URL text on that row
+    /// (see `scheme_url_chars` and `no_trailing_punctuation` in Ghostty's url.zig).
+    /// The official package reports OSC 8 targets with the same `.unknown`
+    /// kind, and a target is kept as given unless it is exactly such a piece.
+    static func isRowMatch(_ url: String, of printed: String, clickedRow: String?) -> Bool {
+        if url == printed { return true }
+        guard printed.contains(url), let row = clickedRow else { return false }
+        var search = row.startIndex..<row.endIndex
+        while let found = row.range(of: url, range: search) {
+            // Ghostty's pattern leaves a trailing `.`, `,` or `:` out of its match.
+            let rest = row[found.upperBound...].prefix(while: isURLCharacter)
+            if rest.allSatisfy({ ".,:".contains($0) }) { return true }
+            search = found.upperBound..<row.endIndex
+        }
+        return false
+    }
+
+    private static func isURLCharacter(_ character: Character) -> Bool {
+        character.isLetter || character.isNumber || "-._~:/?#[]@!$&'*+,;=%".contains(character)
+    }
+
     /// A ⌘-click taken locally: its drag and release must not reach the TUI.
     private struct LinkClick {
         let point: NSPoint
         let printedURL: String?
+        let clickedRow: String?
         var opened = false
         var dragged = false
     }
@@ -717,7 +745,7 @@ final class LineBreakTerminalView: AppTerminalView {
     private static let gridPadding: CGFloat = 2
 
     /// The cell grid under a window point, and the link printed there.
-    private func linkHit(atWindowPoint windowPoint: NSPoint) -> (link: TerminalLink, rowRect: NSRect)? {
+    private func linkHit(atWindowPoint windowPoint: NSPoint) -> (link: TerminalLink, rowRect: NSRect, line: String?)? {
         guard let viewport = processHost?.viewport, viewport.columns > 0, viewport.rows > 0,
               let cell = cellSizePixels(viewport),
               let text = processHost?.session.readViewportText()
@@ -740,7 +768,7 @@ final class LineBreakTerminalView: AppTerminalView {
             width: bounds.width,
             height: cellHeight
         )
-        return (link, rowRect)
+        return (link, rowRect, lines.indices.contains(row) ? lines[row] : nil)
     }
 
     /// Cell size in backing pixels. Ghostty's resize delegate reports it with
@@ -809,45 +837,65 @@ final class LineBreakTerminalView: AppTerminalView {
     ) -> (text: String, offset: Int)? {
         guard lines.indices.contains(row), column >= 0 else { return nil }
         for first in stride(from: row, through: 0, by: -1) {
-            guard let opening = lines[first].range(of: #"\((?:https?://|mailto:)"#, options: .regularExpression)
-            else { continue }
-            var joined = ""
-            var clickOffset: Int?
-            var parentheses = 1
-            for index in first..<lines.count {
-                let line = lines[index]
-                let start = index == first ? line.index(after: opening.lowerBound)
-                    : line.firstIndex(where: { !$0.isWhitespace }) ?? line.endIndex
-                let closing = line[start...].firstIndex { character in
-                    if character == "(" { parentheses += 1 }
-                    if character == ")" { parentheses -= 1 }
-                    return parentheses == 0
-                }
-                let end = closing ?? line.endIndex
-                let fragment = String(line[start..<end]).trimmingCharacters(in: .whitespaces)
-                guard !fragment.isEmpty, !fragment.contains(where: \.isWhitespace) else { break }
-                if index == row {
-                    var width = 0
-                    var offset = joined.utf16.count - line[..<start].utf16.count
-                    for character in line[..<end] {
-                        let next = width + cellWidth(character)
-                        if column < next {
-                            if offset >= joined.utf16.count,
-                               offset < joined.utf16.count + fragment.utf16.count { clickOffset = offset }
-                            break
-                        }
-                        width = next
-                        offset += character.utf16.count
+            for opening in openings(in: lines[first]) {
+                var joined = ""
+                var clickOffset: Int?
+                var parentheses = 1
+                for index in first..<lines.count {
+                    let line = lines[index]
+                    let start = index == first ? line.index(after: opening.lowerBound)
+                        : line.firstIndex(where: { !$0.isWhitespace }) ?? line.endIndex
+                    let closing = line[start...].firstIndex { character in
+                        if character == "(" { parentheses += 1 }
+                        if character == ")" { parentheses -= 1 }
+                        return parentheses == 0
                     }
-                }
-                joined += fragment
-                if closing != nil {
-                    if index >= row, let clickOffset { return (joined, clickOffset) }
-                    break
+                    let end = closing ?? line.endIndex
+                    let fragment = String(line[start..<end]).trimmingCharacters(in: .whitespaces)
+                    guard !fragment.isEmpty, !fragment.contains(where: \.isWhitespace),
+                          index == first || isURLContinuation(fragment) else { break }
+                    if index == row {
+                        var width = 0
+                        var offset = joined.utf16.count - line[..<start].utf16.count
+                        for character in line[..<end] {
+                            let next = width + cellWidth(character)
+                            if column < next {
+                                if offset >= joined.utf16.count,
+                                   offset < joined.utf16.count + fragment.utf16.count { clickOffset = offset }
+                                break
+                            }
+                            width = next
+                            offset += character.utf16.count
+                        }
+                    }
+                    joined += fragment
+                    if closing != nil {
+                        if index >= row, let clickOffset { return (joined, clickOffset) }
+                        break
+                    }
                 }
             }
         }
         return nil
+    }
+
+    /// Every `(https://`, `(http://` or `(mailto:` on a row, left to right.
+    private static func openings(in line: String) -> [Range<String.Index>] {
+        var found: [Range<String.Index>] = []
+        var search = line.startIndex..<line.endIndex
+        while let range = line.range(of: #"\((?:https?://|mailto:)"#, options: .regularExpression, range: search) {
+            found.append(range)
+            search = range.upperBound..<line.endIndex
+        }
+        return found
+    }
+
+    /// A short next row continues the URL only if it reads as URL text: no
+    /// second scheme, and some URL punctuation (a plain word like `here` is
+    /// prose that follows the link, not the rest of it).
+    private static func isURLContinuation(_ fragment: String) -> Bool {
+        guard !fragment.contains("://"), !fragment.lowercased().contains("mailto:") else { return false }
+        return fragment.contains { "/%?=&#._-~".contains($0) }
     }
 
     /// The clicked row with the rows it soft-wraps into rejoined, and the UTF-16
