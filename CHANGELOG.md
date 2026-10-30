@@ -8,6 +8,8 @@ the Sparkle update description — a release without a section here fails CI.
 ## [Unreleased]
 
 ### Fixed
+- **Machine stats stays below the title bar.** Long resource and process lists
+  scroll within the available window height instead of covering window controls.
 - **Cancelled project inspections do not report false failures.** If the main
   remote probe has completed while the optional local-VM probe is still pending,
   cancellation drops the result instead of parsing it or changing project state

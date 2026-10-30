@@ -57,14 +57,18 @@ struct RootView: View {
                 Color.black.opacity(0.001)
                     .ignoresSafeArea()
                     .onTapGesture { model.showMachineStats = false }
-                MachineStatsPanel(
-                    model: model,
-                    stats: model.machineStats,
-                    device: device,
-                    isPresented: $model.showMachineStats
-                )
-                .padding(.leading, 10)
-                .padding(.bottom, SidebarFooterMetrics.deviceSwitcherHeight + SidebarFooterMetrics.statsHeight + 6)
+                GeometryReader { geometry in
+                    MachineStatsPanel(
+                        model: model,
+                        stats: model.machineStats,
+                        device: device,
+                        isPresented: $model.showMachineStats
+                    )
+                    .frame(maxHeight: max(0, geometry.size.height - SidebarFooterMetrics.deviceSwitcherHeight - SidebarFooterMetrics.statsHeight - 6 - TitlebarMetrics.height - 10), alignment: .bottom)
+                    .padding(.leading, 10)
+                    .padding(.bottom, SidebarFooterMetrics.deviceSwitcherHeight + SidebarFooterMetrics.statsHeight + 6)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                }
                 .transition(.scale(scale: 0.96, anchor: .bottomLeading).combined(with: .opacity))
                 .background(
                     Button("") { model.showMachineStats = false }

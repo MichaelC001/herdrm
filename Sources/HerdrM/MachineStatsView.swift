@@ -193,21 +193,23 @@ struct MachineStatsPanel: View {
     private let instanceLimit = 8
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            Rectangle().fill(Theme.hairline).frame(height: 1).padding(.vertical, 6)
-            if let snapshot {
-                resources(snapshot)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                header
                 Rectangle().fill(Theme.hairline).frame(height: 1).padding(.vertical, 6)
-                processes(snapshot)
-                Text("CPU counts one full core as 100, as in top. RAM is resident memory.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.textGhost)
-                    .padding(.horizontal, 9)
-                    .padding(.top, 6)
-                    .padding(.bottom, 2)
-            } else {
-                placeholder
+                if let snapshot {
+                    resources(snapshot)
+                    Rectangle().fill(Theme.hairline).frame(height: 1).padding(.vertical, 6)
+                    processes(snapshot)
+                    Text("CPU counts one full core as 100, as in top. RAM is resident memory.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.textGhost)
+                        .padding(.horizontal, 9)
+                        .padding(.top, 6)
+                        .padding(.bottom, 2)
+                } else {
+                    placeholder
+                }
             }
         }
         .padding(5)
