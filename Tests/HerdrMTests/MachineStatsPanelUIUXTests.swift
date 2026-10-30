@@ -40,7 +40,6 @@ final class MachineStatsPanelUIUXTests: XCTestCase {
         window.titlebarAppearsTransparent = true
         window.contentView = root
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
         defer { window.close() }
         settle(root)
 
@@ -54,6 +53,10 @@ final class MachineStatsPanelUIUXTests: XCTestCase {
             XCTAssertLessThan(frame.maxY, closeFrame.minY, "panel must not cover traffic lights")
             XCTAssertGreaterThan(try XCTUnwrap(scroll.documentView).bounds.height, scroll.contentView.bounds.height, "long content must scroll")
         }
+        let panelFrame = scroll.convert(scroll.bounds, to: nil)
+        let panelPoint = NSPoint(x: panelFrame.midX, y: panelFrame.midY)
+        let panelTarget = try XCTUnwrap(root.hitTest(root.superview?.convert(panelPoint, from: nil) ?? panelPoint))
+        XCTAssertTrue(panelTarget === scroll || panelTarget.isDescendant(of: scroll), "panel content must receive clicks above the dismissal layer")
         let document = try XCTUnwrap(scroll.documentView)
         scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, document.bounds.height - scroll.contentView.bounds.height)))
         scroll.reflectScrolledClipView(scroll.contentView)

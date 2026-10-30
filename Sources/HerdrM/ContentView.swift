@@ -30,9 +30,7 @@ struct MachineStatsOverlay: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .bottomLeading) {
-                Color.black.opacity(0.001)
-                    .contentShape(Rectangle())
-                    .onTapGesture { model.showMachineStats = false }
+                MachineStatsDismissLayer { model.showMachineStats = false }
                 MachineStatsPanel(
                     model: model,
                     stats: model.machineStats,
@@ -44,6 +42,22 @@ struct MachineStatsOverlay: View {
                 .padding(.bottom, SidebarFooterMetrics.deviceSwitcherHeight + SidebarFooterMetrics.statsHeight + 6)
             }
         }
+    }
+}
+
+private struct MachineStatsDismissLayer: NSViewRepresentable {
+    let dismiss: () -> Void
+
+    func makeNSView(context: Context) -> DismissView { DismissView() }
+
+    func updateNSView(_ view: DismissView, context: Context) {
+        view.dismiss = dismiss
+    }
+
+    final class DismissView: NSView {
+        var dismiss: (() -> Void)?
+
+        override func mouseDown(with event: NSEvent) { dismiss?() }
     }
 }
 
