@@ -12,6 +12,19 @@ the Sparkle update description — a release without a section here fails CI.
   remote probe has completed while the optional local-VM probe is still pending,
   cancellation drops the result instead of parsing it or changing project state
   to failed.
+- **Restored completion states no longer create duplicate unread results.**
+  Completion sequences, when provided, identify new results across reconnects;
+  legacy servers preserve observed working or blocked activity through temporary
+  unknown states. Badges and completion notifications share snapshot confirmation,
+  and failed event-triggered snapshots retry, backing off, while the device
+  remains connected.
+- **System Mono resolves to the actual system font family.** Terminal rendering
+  uses AppKit's discoverable monospaced family instead of a literal `SF Mono`
+  name that can silently fall back. Size, weight, spacing and named fonts stay
+  unchanged.
+- **Attached terminals repaint when switching light and dark themes.** Existing
+  agent input boxes and message backgrounds follow the new appearance without
+  replacing the connection, changing the terminal grid, or ending the agent.
 
 ## [0.6.22] - 2026-10-29
 

@@ -5,6 +5,106 @@ import XCTest
 
 @MainActor
 final class AgentUnreadUIUXTests: XCTestCase {
+    func testReconnectDoesNotReplayOldCompletionsButKeepsAnOfflineCompletion() throws {
+        let sidebar = try SidebarHarness(spaces: 1, agents: 24, pinnedHeaders: false)
+        let model = sidebar.model
+        let deviceID = try XCTUnwrap(model.visibleAgents.first).device.id
+        let completed = model.session(deviceID).agents.enumerated().map { index, original in
+            var agent = original.updatingStatus(.done)
+            agent.completionSeq = UInt64(100 + index)
+            return agent
+        }
+        model.sessions[deviceID]?.agents = completed
+        XCTAssertTrue(model.updateSnapshotAttention(agents: completed, deviceID: deviceID).isEmpty)
+
+        let recovering = completed.enumerated().map { index, original in
+            var agent = original.updatingStatus(index.isMultiple(of: 2) ? .idle : .unknown)
+            agent.completionSeq = nil
+            return agent
+        }
+        model.updateSnapshotAttention(agents: recovering, deviceID: deviceID)
+        XCTAssertTrue(model.updateSnapshotAttention(agents: completed, deviceID: deviceID).isEmpty)
+        XCTAssertTrue(model.visibleAgents.allSatisfy { !model.isUnread($0) })
+
+        // A turn that starts AND finishes while disconnected must still notify,
+        // even when the displayed status is done on both sides of the gap.
+        var offlineResult = completed
+        offlineResult[0].completionSeq = 200
+        model.sessions[deviceID]?.agents = offlineResult
+        XCTAssertEqual(model.updateSnapshotAttention(agents: offlineResult, deviceID: deviceID),
+                       [offlineResult[0].paneID])
+        let entry = try XCTUnwrap(model.visibleAgents.first { $0.agent.paneID == offlineResult[0].paneID })
+        XCTAssertTrue(model.isUnread(entry))
+        try sidebar.clickAgentTitleWithoutSettling(entry.title)
+        XCTAssertEqual(model.selectedPane, entry.ref)
+        XCTAssertFalse(model.isUnread(entry))
+        XCTAssertTrue(model.updateSnapshotAttention(agents: offlineResult, deviceID: deviceID).isEmpty)
+        XCTAssertFalse(model.isUnread(entry), "Replaying the acknowledged completion must not restore the dot")
+    }
+
+    func testStatusEventWaitsForCompletionSnapshotAndDoesNotConsumeIt() throws {
+        let sidebar = try SidebarHarness(spaces: 1, agents: 1, pinnedHeaders: false)
+        let model = sidebar.model
+        let entry = try XCTUnwrap(model.visibleAgents.first)
+        let deviceID = entry.device.id
+        let working = entry.agent.updatingStatus(.working)
+        model.sessions[deviceID]?.agents = [working]
+        model.updateSnapshotAttention(agents: [working], deviceID: deviceID)
+        let event = HerdrEvent(kind: HerdrEvent.agentStatusChangedKind, payload: .object([
+            "data": .object(["pane_id": .string(working.paneID), "agent_status": .string("done")])
+        ]))
+        XCTAssertTrue(model.applyAgentStatusEvent(event, deviceID: deviceID))
+        XCTAssertFalse(model.isUnread(entry), "Status events do not carry a completion sequence")
+        var done = working.updatingStatus(.done)
+        done.completionSeq = 1
+        model.sessions[deviceID]?.agents = [done]
+        XCTAssertEqual(model.updateSnapshotAttention(agents: [done], deviceID: deviceID), [done.paneID])
+        XCTAssertTrue(model.isUnread(entry))
+        XCTAssertTrue(model.updateSnapshotAttention(agents: [done], deviceID: deviceID).isEmpty)
+    }
+
+    func testLegacyActivityEventsStillProduceOneSnapshotCompletion() throws {
+        let sidebar = try SidebarHarness(spaces: 1, agents: 1, pinnedHeaders: false)
+        let model = sidebar.model
+        let entry = try XCTUnwrap(model.visibleAgents.first)
+        let deviceID = entry.device.id
+        let idle = entry.agent.updatingStatus(.idle)
+        model.sessions[deviceID]?.agents = [idle]
+        model.updateSnapshotAttention(agents: [idle], deviceID: deviceID)
+        for status in ["working", "done"] {
+            let event = HerdrEvent(kind: HerdrEvent.agentStatusChangedKind, payload: .object([
+                "data": .object(["pane_id": .string(idle.paneID), "agent_status": .string(status)])
+            ]))
+            XCTAssertTrue(model.applyAgentStatusEvent(event, deviceID: deviceID))
+        }
+        XCTAssertFalse(model.isUnread(entry))
+        let done = idle.updatingStatus(.done)
+        XCTAssertEqual(model.updateSnapshotAttention(agents: [done], deviceID: deviceID), [done.paneID])
+        XCTAssertTrue(model.isUnread(entry))
+        XCTAssertTrue(model.updateSnapshotAttention(agents: [done], deviceID: deviceID).isEmpty)
+    }
+
+    func testLegacyCompletionAfterUnknownShowsDotUntilOpened() throws {
+        let sidebar = try SidebarHarness(spaces: 1, agents: 1, pinnedHeaders: false)
+        let model = sidebar.model
+        let entry = try XCTUnwrap(model.visibleAgents.first)
+        let deviceID = entry.device.id
+        for status in [AgentStatus.working, .unknown, .done] {
+            let agent = entry.agent.updatingStatus(status)
+            model.sessions[deviceID]?.agents = [agent]
+            model.updateSnapshotAttention(agents: [agent], deviceID: deviceID)
+        }
+        XCTAssertTrue(model.isUnread(entry), "Background completion must survive an unknown snapshot")
+        try sidebar.clickAgentTitleWithoutSettling(entry.title)
+        XCTAssertFalse(model.isUnread(entry))
+        for status in [AgentStatus.unknown, .done] {
+            let agent = entry.agent.updatingStatus(status)
+            model.sessions[deviceID]?.agents = [agent]
+            model.updateSnapshotAttention(agents: [agent], deviceID: deviceID)
+        }
+        XCTAssertFalse(model.isUnread(entry), "Reading the result must survive status recovery")
+    }
+
     func testOpeningAnotherAgentFromFilesDoesNotReadTheCoveredAgent() throws {
         let sidebar = try SidebarHarness(spaces: 1, agents: 2, pinnedHeaders: false)
         let entries = sidebar.model.visibleAgents
