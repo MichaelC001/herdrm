@@ -22,6 +22,45 @@ private struct NewItemSheets: ViewModifier {
     }
 }
 
+/// Window-sized dismissal layer, with the panel anchored above the sidebar meters.
+struct MachineStatsOverlay: View {
+    @ObservedObject var model: AppModel
+    let device: Device
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .bottomLeading) {
+                MachineStatsDismissLayer { model.showMachineStats = false }
+                MachineStatsPanel(
+                    model: model,
+                    stats: model.machineStats,
+                    device: device,
+                    isPresented: $model.showMachineStats
+                )
+                .frame(maxHeight: max(0, geometry.size.height - SidebarFooterMetrics.deviceSwitcherHeight - SidebarFooterMetrics.statsHeight - 6 - TitlebarMetrics.height - 10), alignment: .bottom)
+                .padding(.leading, 10)
+                .padding(.bottom, SidebarFooterMetrics.deviceSwitcherHeight + SidebarFooterMetrics.statsHeight + 6)
+            }
+        }
+    }
+}
+
+private struct MachineStatsDismissLayer: NSViewRepresentable {
+    let dismiss: () -> Void
+
+    func makeNSView(context: Context) -> DismissView { DismissView() }
+
+    func updateNSView(_ view: DismissView, context: Context) {
+        view.dismiss = dismiss
+    }
+
+    final class DismissView: NSView {
+        var dismiss: (() -> Void)?
+
+        override func mouseDown(with event: NSEvent) { dismiss?() }
+    }
+}
+
 struct RootView: View {
     // Owned by AppDelegate so it outlives the window — see AppDelegate in HerdrMApp.swift.
     @ObservedObject var model: AppModel
@@ -54,23 +93,13 @@ struct RootView: View {
 
             // Machine stats panel, opening upward from the sidebar footer meters.
             if model.showMachineStats, let device = model.statsDevice {
-                Color.black.opacity(0.001)
-                    .ignoresSafeArea()
-                    .onTapGesture { model.showMachineStats = false }
-                MachineStatsPanel(
-                    model: model,
-                    stats: model.machineStats,
-                    device: device,
-                    isPresented: $model.showMachineStats
-                )
-                .padding(.leading, 10)
-                .padding(.bottom, SidebarFooterMetrics.deviceSwitcherHeight + SidebarFooterMetrics.statsHeight + 6)
-                .transition(.scale(scale: 0.96, anchor: .bottomLeading).combined(with: .opacity))
-                .background(
-                    Button("") { model.showMachineStats = false }
-                        .keyboardShortcut(.cancelAction)
-                        .hidden()
-                )
+                MachineStatsOverlay(model: model, device: device)
+                    .transition(.scale(scale: 0.96, anchor: .bottomLeading).combined(with: .opacity))
+                    .background(
+                        Button("") { model.showMachineStats = false }
+                            .keyboardShortcut(.cancelAction)
+                            .hidden()
+                    )
             }
         }
         .paneSwitcher(model: model)
