@@ -275,10 +275,12 @@ private func terminalEnvironment(_ commandEnvironment: [String: String]) -> [Str
 final class TerminalProcessHost {
     let session: InMemoryTerminalSession
     let process = TerminalProcess()
+    private let isHerdrAttach: Bool
     /// Guards `lightAdapter`: written on the main thread (theme switch), read on
     /// the process's IO queue.
     private let adapterLock = NSLock()
     private var lightAdapter: LightTerminalANSIAdapter?
+    private var lightColorsEnabled: Bool?
     private let viewportBox = ViewportBox()
 
     /// The last grid Ghostty reported, for mapping a click to a cell.
@@ -290,7 +292,8 @@ final class TerminalProcessHost {
     /// session. Set before `start`; the session may not have parsed it yet.
     var onOutput: (() -> Void)?
 
-    init() {
+    init(isHerdrAttach: Bool = false) {
+        self.isHerdrAttach = isHerdrAttach
         let process = self.process
         let viewportBox = self.viewportBox
         session = InMemoryTerminalSession(
@@ -324,13 +327,20 @@ final class TerminalProcessHost {
         process.terminate()
     }
 
-    /// The light theme rewrites program-emitted colors for contrast on white.
-    /// Switching themes installs a fresh adapter so a partial SGR retained at a
-    /// chunk boundary cannot prepend stale bytes to the other theme's output.
+    /// Recolor new output, then ask Herdr attach to repaint existing cells too.
+    /// Updating Ghostty's default colors alone cannot undo explicit ANSI RGB
+    /// values that the light adapter already wrote into a kept-alive surface.
     func setLightColorsEnabled(_ enabled: Bool) {
         adapterLock.lock()
+        guard lightColorsEnabled != enabled else {
+            adapterLock.unlock()
+            return
+        }
+        let needsRedraw = isHerdrAttach && lightColorsEnabled != nil
+        lightColorsEnabled = enabled
         lightAdapter = enabled ? LightTerminalANSIAdapter() : nil
         adapterLock.unlock()
+        if needsRedraw { process.requestRedraw() }
     }
 
     private func receiveOutput(_ data: Data) {
@@ -2174,7 +2184,7 @@ struct AttachTerminalView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> LineBreakTerminalView {
-        let host = TerminalProcessHost()
+        let host = TerminalProcessHost(isHerdrAttach: true)
         let view = LineBreakTerminalView(frame: .zero)
         view.processHost = host
         view.onActivate = onActivate
